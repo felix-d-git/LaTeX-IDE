@@ -1,7 +1,7 @@
 # LaTeX Web IDE — Arbeitsregeln
 
 - Betrieb **nur lokal** (Entscheidung 25.09.2026). Kein Deploy auf den Pi.
-- Git-Remote: GitHub-Konto `felix-d-git` (Nutzervorgabe 25.09.2026), Push nur auf Anweisung. Seit 25.09.2026 global nur noch `felix-d-git` (Credential Manager + `user.email` = GitHub-noreply-Adresse); das alte Konto `altes-konto` wird nicht mehr genutzt.
+- Git-Remote: `origin` = https://github.com/felix-d-git/latex-web-ide (privat), Push/Releases nur auf Anweisung; Releases als Tag `vX.Y.Z` + GitHub-Release. Seit 25.09.2026 global nur noch `felix-d-git` (Credential Manager + `user.email` = GitHub-noreply-Adresse); das alte Konto `altes-konto` wird nicht mehr genutzt.
 - Nie committen/pushen: `projects/` (private Arbeiten), `.env`, `auth-data.json`, `workspace.json` (alle in `.gitignore`).
 - Start: `start.bat` (baut `client/dist` per `node build.js`, dann `node server/index.js`) → http://localhost:3077. Port per `PORT`-Env änderbar.
 - Nach Änderungen in `client/src/` immer `node build.js`, sonst liefert der Server den alten Bundle aus.
