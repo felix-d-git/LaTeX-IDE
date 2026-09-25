@@ -2,7 +2,7 @@
   "name": "latex-web-ide",
   "version": "0.1.0",
   "private": true,
-  "description": "Lokale Overleaf-artige Web-IDE fuer LaTeX-Projekte, nutzt eine lokal installierte TeX-Distribution (latexmk).",
+  "description": "Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit; kompiliert per latexmk (Server oder Desktop-App).",
   "type": "commonjs",
   "scripts": {
     "build:client": "node build.js",
