@@ -12,7 +12,7 @@ import { setupCommentsPanel } from './commentsPanel.js';
 import { createPreviewManager, fileKind } from './previewManager.js';
 import { setupSyncTex } from './syncTex.js';
 import { setupErrorPanel } from './errorPanel.js';
-import { setupHotkeySettings } from './hotkeySettings.js';
+import { setupHotkeySettings, setupShortcutsReference } from './hotkeySettings.js';
 import { setupShareDialog } from './shareDialog.js';
 import { setupHistoryView } from './historyView.js';
 import { setupMenuBar, setupLayoutMenu, setupProjectMenu } from './menuBar.js';
@@ -26,7 +26,8 @@ import { setupRail } from './rail.js';
 import { setupResizers } from './resizers.js';
 import { setupOutline } from './outline.js';
 import { setupEditorToolbar } from './editorToolbar.js';
-import { openDropdown, closeDropdown, isDropdownOpenFor } from './dropdown.js';
+import { openDropdown, openDropdownAt, closeDropdown, isDropdownOpenFor } from './dropdown.js';
+import { setupModals } from './modals.js';
 
 const els = {
   activeProjectLabel: document.querySelector('#active-project-label .project-name'),
@@ -453,7 +454,7 @@ els.compileBtn.addEventListener('click', async () => {
   try {
     const result = await api.compile();
     els.pdfLogView.textContent = result.log;
-    errorPanel.setErrors(result.errors);
+    errorPanel.setLog(result);
     if (result.success) {
       errorPanel.hide();
     } else if (!result.pdfPath) {
@@ -463,7 +464,7 @@ els.compileBtn.addEventListener('click', async () => {
     if (result.pdfPath) pdfViewer.load(result.pdfPath);
   } catch (e) {
     els.pdfLogView.textContent = String(e.message || e);
-    errorPanel.setErrors([{ file: '', line: null, message: e.message }]);
+    errorPanel.setLog({ errors: [{ file: '', line: null, message: e.message }] });
     errorPanel.show();
   } finally {
     els.compileBtn.disabled = false;
@@ -523,17 +524,10 @@ syncTex = setupSyncTex({
 
 const errorPanel = setupErrorPanel({
   onJumpTo: (file, line) => openFile(file, line),
-  getFileLines: async (file) => {
-    try {
-      const { content, binary } = await api.getFile(file);
-      return binary ? null : content.split('\n');
-    } catch (e) {
-      return null;
-    }
-  },
 });
 
 const hotkeySettings = setupHotkeySettings();
+const shortcutsReference = setupShortcutsReference();
 const shareDialog = setupShareDialog();
 const historyView = setupHistoryView();
 const settingsDialog = setupSettingsDialog({
@@ -565,6 +559,7 @@ const menuCtx = {
   onFindInProject: () => searchPanelApi.toggle(),
   onShowHistory: () => historyView.show(),
   onShowHotkeys: () => hotkeySettings.show(),
+  onShowShortcuts: () => shortcutsReference.show(),
   onShowSettings: () => settingsDialog.show(),
   onAddComment: () => commentsPanel.triggerAddComment(),
   getPdfPath: () => pdfViewer.getCurrentPath(),
@@ -590,6 +585,24 @@ const menuCtx = {
 };
 
 setupMenuBar(menuCtx);
+
+// Overleaf-Kontextmenü im Editor statt des Browser-Standardmenüs.
+editorMgr.view.dom.addEventListener('contextmenu', (e) => {
+  if (!editorMgr.getActivePath()) return;
+  e.preventDefault();
+  const v = editorMgr.view;
+  const { from, to, text } = editorMgr.getSelection();
+  const replaceSel = (insert) => v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
+  openDropdownAt(e.clientX, e.clientY, [
+    { label: 'Cut', shortcut: 'Ctrl X', disabled: !text, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
+    { label: 'Copy', shortcut: 'Ctrl C', disabled: !text, onClick: () => navigator.clipboard.writeText(text) },
+    { label: 'Paste', shortcut: 'Ctrl V', onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
+    { type: 'divider' },
+    { label: 'Add comment', icon: 'comment', disabled: !text, onClick: () => commentsPanel.triggerAddComment() },
+    { label: 'Jump to location in PDF', onClick: () => syncTex.syncToPdf() },
+  ], { className: 'context-menu' });
+});
+setupModals();
 setupLayoutMenu(menuCtx);
 setupProjectMenu(menuCtx);
 

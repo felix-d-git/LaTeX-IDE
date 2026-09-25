@@ -13,6 +13,43 @@ function comboLabel(combo) {
     .join(' + ');
 }
 
+// Feste CodeMirror-Kürzel (nicht über die Hotkey-Einstellungen änderbar).
+const EDITOR_DEFAULTS = {
+  Editor: [
+    ['Rückgängig', 'ctrl+z'], ['Wiederholen', 'ctrl+y'], ['Alles auswählen', 'ctrl+a'],
+    ['Zeile kommentieren', 'ctrl+/'],
+    ['Einrücken / Ausrücken', 'tab', 'shift+tab'], ['Gehe zu Zeile', 'ctrl+alt+g'],
+  ],
+  Autovervollständigung: [
+    ['Vorschläge öffnen', 'ctrl+space'], ['Vorschlag übernehmen', 'enter', 'tab'],
+    ['Nächstes Platzhalterfeld', 'tab'], ['Schließen', 'escape'],
+  ],
+};
+
+// Help > Keyboard shortcuts: read-only Übersicht, 3-spaltig mit Kbd-Pills.
+export function setupShortcutsReference() {
+  const modal = document.getElementById('shortcuts-dialog');
+  const grid = document.getElementById('shortcuts-grid');
+  document.getElementById('btn-close-shortcuts').addEventListener('click', () => modal.classList.add('hidden'));
+
+  const kbd = (combo) => combo.split('+').map((k) => `<kbd>${comboLabel(k)}</kbd>`).join('+');
+  const section = (title, rows) =>
+    `<section><h4>${title}</h4>${rows
+      .map(([label, ...combos]) => `<div class="shortcut-row"><span>${label}</span><span>${combos.map(kbd).join(' / ')}</span></div>`)
+      .join('')}</section>`;
+
+  function show() {
+    const bindings = Object.values(getEffectiveBindings()).filter((b) => b.combos.length);
+    grid.innerHTML =
+      section('Allgemein', bindings.filter((b) => b.scope === 'global').map((b) => [b.label, ...b.combos])) +
+      section('Editor', [...bindings.filter((b) => b.scope === 'editor').map((b) => [b.label, ...b.combos]), ...EDITOR_DEFAULTS.Editor]) +
+      section('Autovervollständigung', EDITOR_DEFAULTS.Autovervollständigung);
+    modal.classList.remove('hidden');
+  }
+
+  return { show };
+}
+
 export function setupHotkeySettings() {
   const modal = document.getElementById('hotkey-settings');
   const btnOpen = document.getElementById('btn-hotkeys');

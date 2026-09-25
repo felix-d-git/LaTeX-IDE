@@ -118,6 +118,13 @@ export function tryHandleEditorKey(event, view) {
   return true;
 }
 
+// Für Editor-Tasten, die global gebunden sind und CodeMirrors eigene
+// Default-Bindung verdrängen sollen (Strg+Enter = insertBlankLine).
+export function isGlobalAction(event, actionId) {
+  const combo = comboFromEvent(event);
+  return !!combo && findAction(combo, 'global') === actionId;
+}
+
 let globalListenerAttached = false;
 
 export function initGlobalHotkeys() {

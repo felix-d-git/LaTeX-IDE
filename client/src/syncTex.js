@@ -13,8 +13,8 @@ export function setupSyncTex({ editorMgr, pdfViewer, getActivePath, onJumpToCode
     }
     const line = editorMgr.view.state.doc.lineAt(editorMgr.view.state.selection.main.head).number;
     try {
-      const { page, h, v } = await api.forwardSync(path, line);
-      pdfViewer.jumpToPoint(page, h, v);
+      const { page, h, v, boxes } = await api.forwardSync(path, line);
+      pdfViewer.jumpToPoint(page, h, v, boxes);
     } catch (e) {
       alert('Sprung ins PDF fehlgeschlagen: ' + e.message);
     }

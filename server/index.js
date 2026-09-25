@@ -11,7 +11,7 @@ const archiver = require('archiver');
 
 const { buildTree, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
-const { searchProject, replaceInProject } = require('./lib/search');
+const { searchProject, replaceInProject, collectRefs } = require('./lib/search');
 const { startWatcher } = require('./lib/watcher');
 const projects = require('./lib/projects');
 const treeOps = require('./lib/treeOps');
@@ -555,6 +555,14 @@ app.post('/api/compile', async (req, res) => {
   res.json(result);
 });
 
+// "Clear cached files" im Log: Ausgabeordner (aux, PDF, synctex …) löschen.
+app.post('/api/compile/clear-cache', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true });
+  res.json({ ok: true });
+});
+
 // --- Settings ---
 
 app.get('/api/wordcount', (req, res) => {
@@ -737,6 +745,12 @@ app.get('/api/history/diff', (req, res) => {
 });
 
 // --- Search / Replace ---
+
+app.get('/api/refs', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  res.json(collectRefs(root));
+});
 
 app.get('/api/search', (req, res) => {
   const root = requireRoot(req, res);

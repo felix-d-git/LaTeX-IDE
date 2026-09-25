@@ -48,9 +48,13 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     const create = document.createElement('button');
     create.className = 'primary';
     create.textContent = 'Create';
+    create.disabled = true;
+    input.addEventListener('input', () => {
+      create.disabled = !input.value.trim() || input.value === 'name.tex';
+    });
     const doCreate = async () => {
       const name = input.value.trim();
-      if (!name) return;
+      if (create.disabled) return;
       try {
         const relPath = targetDir ? `${targetDir}/${name}` : name;
         const { path } = await api.createFile(relPath);

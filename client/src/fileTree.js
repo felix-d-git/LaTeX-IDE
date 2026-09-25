@@ -141,11 +141,13 @@ function openNodeMenu(x, y, node, ctx) {
     items.push({ type: 'divider' });
     items.push({ label: 'Delete', icon: 'close', onClick: () => ctx.onDelete(node.path, isDir) });
   }
-  if (isDir && ctx.onCreateFile) {
+  if (ctx.onCreateFile) {
+    // Bei Dateien (wie Overleaf) im Elternordner anlegen.
+    const dir = isDir ? node.path : node.path.split('/').slice(0, -1).join('/');
     items.push({ type: 'divider' });
-    items.push({ label: 'New file', icon: 'note-add', onClick: () => ctx.onCreateFile(node.path) });
-    items.push({ label: 'New folder', icon: 'folder-add', onClick: () => ctx.onCreateFolder(node.path) });
-    if (ctx.onUploadHere) items.push({ label: 'Upload', icon: 'upload', onClick: () => ctx.onUploadHere(node.path) });
+    items.push({ label: 'New file', icon: 'note-add', onClick: () => ctx.onCreateFile(dir) });
+    items.push({ label: 'New folder', icon: 'folder-add', onClick: () => ctx.onCreateFolder(dir) });
+    if (ctx.onUploadHere) items.push({ label: 'Upload', icon: 'upload', onClick: () => ctx.onUploadHere(dir) });
   }
   if (items.length === 0) return;
   openDropdownAt(x, y, items, { className: 'context-menu' });

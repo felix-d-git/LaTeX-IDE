@@ -1,6 +1,8 @@
 # LaTeX Web IDE — Arbeitsregeln
 
-- Betrieb **nur lokal** (Entscheidung 25.09.2026). Kein Deploy auf den Pi, kein Push; Git hat kein Remote.
+- Betrieb **nur lokal** (Entscheidung 25.09.2026). Kein Deploy auf den Pi.
+- Git-Remote: GitHub-Konto `felix-d-git` (Nutzervorgabe 25.09.2026), Push nur auf Anweisung. Der Git Credential Manager hat für github.com das Konto `altes-konto` gespeichert → das private Repo ist damit unsichtbar, für den Push Login als `felix-d-git` nötig.
+- Nie committen/pushen: `projects/` (private Arbeiten), `.env`, `auth-data.json`, `workspace.json` (alle in `.gitignore`).
 - Start: `start.bat` (baut `client/dist` per `node build.js`, dann `node server/index.js`) → http://localhost:3077. Port per `PORT`-Env änderbar.
 - Nach Änderungen in `client/src/` immer `node build.js`, sonst liefert der Server den alten Bundle aus.
 - Braucht TeX Live 2025 (`latexmk`, `synctex`) im PATH.

@@ -196,16 +196,24 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     return currentPath;
   }
 
-  function jumpToPoint(page, h, v) {
+  // Overleaf: Ziel-Absatz gelb hinterlegen (eine Box je SyncTeX-Treffer,
+  // h/v = Grundlinie links, H = Höhe), dann ausblenden.
+  function jumpToPoint(page, h, v, boxes = []) {
     const wrapper = pageWrappers.get(page);
     if (!wrapper) return;
-    wrapper.scrollIntoView({ block: 'center' });
-    const marker = document.createElement('div');
-    marker.className = 'pdf-sync-marker';
-    marker.style.left = Math.max(0, h * scale - 11) + 'px';
-    marker.style.top = Math.max(0, v * scale - 11) + 'px';
-    wrapper.appendChild(marker);
-    setTimeout(() => marker.remove(), 2500);
+    if (!boxes.length) boxes = [{ h, v, W: 20, H: 10 }];
+    const markers = boxes.map((b) => {
+      const marker = document.createElement('div');
+      marker.className = 'pdf-sync-marker';
+      marker.style.left = b.h * scale + 'px';
+      marker.style.top = (b.v - b.H) * scale + 'px';
+      marker.style.width = b.W * scale + 'px';
+      marker.style.height = b.H * scale + 'px';
+      wrapper.appendChild(marker);
+      return marker;
+    });
+    markers[0].scrollIntoView({ block: 'center' });
+    setTimeout(() => markers.forEach((m) => m.remove()), 2500);
   }
 
   return {

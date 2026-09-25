@@ -1,4 +1,5 @@
 import { undo, redo, selectAll, indentMore, indentLess } from '@codemirror/commands';
+import { startCompletion } from '@codemirror/autocomplete';
 import { openDropdown, closeDropdown, isDropdownOpenFor, anyDropdownOpen } from './dropdown.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';
 
@@ -87,9 +88,10 @@ export function setupMenuBar(ctx) {
         },
         { label: 'Figure', icon: 'image', onClick: withView((v) => insertAtCursor(v, SNIPPETS.figure)) },
         { label: 'Table', icon: 'table', onClick: withView((v) => insertAtCursor(v, SNIPPETS.table)) },
-        { label: 'Citation', onClick: () => alertStub('Citation-Einfügung (braucht .bib-Auswertung)') },
+        // Befehl einfügen und direkt die Key-Vorschläge (Labels/Bib-Keys) öffnen.
+        { label: 'Citation', onClick: withView((v) => { insertAtCursor(v, '\\cite{}', { selectInner: 6 }); startCompletion(v); }) },
         { label: 'Link', icon: 'link', onClick: () => insertLink(view()) },
-        { label: 'Cross reference', onClick: () => alertStub('Cross-Reference-Einfügung (braucht Label-Scan)') },
+        { label: 'Cross reference', onClick: withView((v) => { insertAtCursor(v, '\\ref{}', { selectInner: 5 }); startCompletion(v); }) },
         { label: 'Comment', icon: 'comment', onClick: () => ctx.onAddComment() },
         { type: 'divider' },
         { label: 'Abstract', onClick: withView((v) => insertAtCursor(v, SNIPPETS.abstract)) },
@@ -147,10 +149,11 @@ export function setupMenuBar(ctx) {
     {
       label: 'Help',
       items: () => [
-        { label: 'Keyboard shortcuts', onClick: () => ctx.onShowHotkeys() },
-        { label: 'Documentation', onClick: () => alert('Siehe README.md im Projektordner für die vollständige Dokumentation.') },
+        { label: 'Keyboard shortcuts', onClick: () => ctx.onShowShortcuts() },
+        { label: 'Customize shortcuts', onClick: () => ctx.onShowHotkeys() },
         { type: 'divider' },
-        { label: 'Contact us', onClick: () => alert('Lokales Single-User-Tool - kein Support-Kontakt hinterlegt.') },
+        // Wie Overleaf: LaTeX-Doku auf overleaf.com/learn. "Contact us" entfällt (lokales Tool).
+        { label: 'Documentation', onClick: () => window.open('https://www.overleaf.com/learn', '_blank', 'noopener') },
       ],
     },
   ];

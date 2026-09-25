@@ -1,4 +1,5 @@
 import { snippetCompletion } from '@codemirror/autocomplete';
+import { api } from './api.js';
 
 // Data part: one entry per LaTeX command/environment. Kept separate from the
 // source function below so the list can be extended without touching the
@@ -8,20 +9,22 @@ import { snippetCompletion } from '@codemirror/autocomplete';
 // otherwise Tab would insert the backslash a second time.
 
 function cmd(name, detail, snippet, { type = 'function', boost = 0 } = {}) {
-  return snippetCompletion(snippet, { label: `\\${name}`, type, detail, boost });
+  // Overleaf zeigt rechts grau den Typ (cmd/env); die Beschreibung steht im Info-Feld.
+  return snippetCompletion(snippet, { label: `\\${name}`, type, detail: 'cmd', info: detail, boost });
 }
 
 function env(name, detail, body = '\t${0}', { boost = 0 } = {}) {
   return snippetCompletion(`\\begin{\${1:${name}}}\n${body}\n\\end{\${1:${name}}}`, {
     label: `\\begin{${name}}`,
     type: 'class',
-    detail,
+    detail: 'env',
+    info: detail,
     boost,
   });
 }
 
 function symbol(name, detail) {
-  return { label: `\\${name}`, type: 'constant', detail };
+  return { label: `\\${name}`, type: 'constant', detail: 'cmd', info: detail };
 }
 
 const GREEK_LETTERS = [
@@ -31,6 +34,11 @@ const GREEK_LETTERS = [
 ].map((name) => symbol(name, `griechischer Buchstabe (${name})`));
 
 const COMMANDS = [
+  // Overleaf-Reihenfolge: \usepackage{}, \begin{}, \end{} ganz oben.
+  cmd('usepackage', 'Paket laden', '\\usepackage{${1:paket}}', { boost: 10 }),
+  cmd('begin', 'Umgebung beginnen', '\\begin{${1}}', { boost: 9 }),
+  cmd('end', 'Umgebung beenden', '\\end{${1}}', { boost: 8 }),
+
   // Gliederung
   cmd('section', 'Abschnitt', '\\section{${1:Titel}}', { boost: 2 }),
   cmd('subsection', 'Unterabschnitt', '\\subsection{${1:Titel}}'),
@@ -75,7 +83,6 @@ const COMMANDS = [
 
   // Sonstiges
   cmd('newcommand', 'Neuen Befehl definieren', '\\newcommand{\\${1:name}}{${2:Definition}}'),
-  cmd('usepackage', 'Paket laden', '\\usepackage{${1:paket}}'),
   cmd('documentclass', 'Dokumentklasse festlegen', '\\documentclass{${1:article}}'),
   cmd('input', 'Datei einbinden (input)', '\\input{${1:datei}}'),
   cmd('include', 'Datei einbinden (include)', '\\include{${1:datei}}'),
@@ -83,7 +90,78 @@ const COMMANDS = [
   env('center', 'Zentrierter Inhalt', '\t${0}'),
 ];
 
+// Umgebungsnamen für das Popup direkt nach "\begin{" (wie Overleaf).
+const ENV_NAMES = [...new Set([
+  ...COMMANDS.filter((c) => c.label.startsWith('\\begin{')).map((c) => c.label.slice(7, -1)),
+  'abstract', 'tabular', 'minipage', 'verbatim', 'quote', 'array', 'gather', 'multline',
+  'align*', 'equation*', 'theorem', 'proof', 'lstlisting', 'thebibliography', 'titlepage',
+])];
+
+// Labels/Bib-Keys kurz cachen, damit nicht jeder Tastendruck den Server fragt.
+let refsCache = null;
+let refsAt = 0;
+export async function getRefs() {
+  if (!refsCache || Date.now() - refsAt > 5000) {
+    refsCache = await api.refs().catch(() => ({ labels: [], bibKeys: [] }));
+    refsAt = Date.now();
+  }
+  return refsCache;
+}
+
+const REF_RE = /\\(ref|eqref|pageref|autoref|cref|Cref|nameref|vref)\{[^}]*/;
+const CITE_RE = /\\(cite|citep|citet|parencite|textcite|autocite|footcite|nocite)(\[[^\]]*\])*\{[^}]*/;
+
+// Die von closeBrackets eingefügte "}" erst beim Übernehmen mitersetzen, sonst
+// entsteht "}}". Nicht über result.to: CodeMirror filtert nach from..to, mit "}"
+// darin passt keine Option mehr.
+const closeTo = (state, to) => (state.sliceDoc(to, to + 1) === '}' ? to + 1 : to);
+const eatBrace = (c) => {
+  const apply = c.apply;
+  return {
+    ...c,
+    apply: (view, completion, from, to) =>
+      typeof apply === 'function'
+        ? apply(view, completion, from, closeTo(view.state, to))
+        : view.dispatch({
+            changes: { from, to: closeTo(view.state, to), insert: apply },
+            selection: { anchor: from + apply.length },
+            userEvent: 'input.complete',
+          }),
+  };
+};
+
+async function argumentSource(context) {
+  const env = context.matchBefore(/\\(begin|end)\{[a-zA-Z*]*/);
+  if (env) {
+    const isBegin = env.text.startsWith('\\begin');
+    return {
+      from: env.from + env.text.indexOf('{') + 1,
+      to: env.to,
+      options: ENV_NAMES.map((name) =>
+        eatBrace(
+          isBegin
+            ? snippetCompletion(`${name}}\n\t\${0}\n\\end{${name}}`, { label: name, type: 'class', detail: 'env' })
+            : { label: name, apply: `${name}}`, type: 'class', detail: 'env' }
+        )
+      ),
+      validFor: /^[a-zA-Z*]*$/,
+    };
+  }
+  const ref = context.matchBefore(REF_RE);
+  const cite = !ref && context.matchBefore(CITE_RE);
+  const m = ref || cite;
+  if (!m) return null;
+  // Bei \cite{a,b nur den letzten Key ersetzen.
+  const from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
+  const { labels, bibKeys } = await getRefs();
+  const options = ref
+    ? labels.map((l) => ({ label: l, type: 'variable', detail: 'label' }))
+    : bibKeys.map((b) => ({ label: b.key, type: 'variable', detail: 'bib', info: b.title || undefined }));
+  return { from, to: m.to, options, validFor: /^[^},]*$/ };
+}
+
 export function latexCompletionSource(context) {
+  if (context.matchBefore(/\{[^}\\]*/)) return argumentSource(context);
   const match = context.matchBefore(/\\[a-zA-Z]*/);
   if (!match) return null;
   return {

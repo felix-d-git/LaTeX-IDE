@@ -20,16 +20,23 @@ function forward(pdfAbs, texAbs, line, cwd) {
     execFile(
       'synctex',
       ['view', '-i', `${line}:0:${texAbs}`, '-o', pdfAbs],
-      { cwd, shell: true },
+      { cwd },
       (err, stdout) => {
         if (err) return reject(err);
         const parsed = parseBlocks(stdout);
         if (!parsed.Page) return reject(new Error('Keine passende PDF-Position gefunden.'));
-        resolve({
-          page: Number(parsed.Page),
-          h: Number(parsed.h),
-          v: Number(parsed.v),
-        });
+        const page = Number(parsed.Page);
+        // Alle Treffer-Boxen der ersten Seite (je Textlauf eine), damit der
+        // Client wie Overleaf den ganzen Absatz hinterlegen kann.
+        const boxes = stdout
+          .split(/Output:/)
+          .slice(1)
+          .map(parseBlocks)
+          .filter((b) => Number(b.Page) === page)
+          .map((b) => ({ h: Number(b.h), v: Number(b.v), W: Number(b.W), H: Number(b.H) }));
+        // synctex meldet dieselbe Box teils mehrfach (z. B. pro Eingabe-Tag).
+        const unique = [...new Map(boxes.map((b) => [JSON.stringify(b), b])).values()];
+        resolve({ page, h: Number(parsed.h), v: Number(parsed.v), boxes: unique });
       }
     );
   });
@@ -40,7 +47,7 @@ function inverse(pdfAbs, page, x, y, cwd) {
     execFile(
       'synctex',
       ['edit', '-o', `${page}:${x}:${y}:${pdfAbs}`],
-      { cwd, shell: true },
+      { cwd },
       (err, stdout) => {
         if (err) return reject(err);
         const parsed = parseBlocks(stdout);

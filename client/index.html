@@ -257,6 +257,7 @@
               <button id="btn-download-pdf" title="Kompiliertes PDF herunterladen">
                 <svg class="ol-icon"><use href="#i-download"></use></svg>
               </button>
+              <button id="btn-close-errors" class="back-to-pdf hidden">Back to PDF</button>
             </div>
             <div class="toolbar-pdf-right">
               <div id="toolbar-pdf-controls">
@@ -294,27 +295,22 @@
           <!-- R1/R6: Log-/Fehleransicht als volldeckendes Overlay der PDF-Spalte -->
           <div id="log-panel" class="hidden">
             <div id="log-panel-header">
-              <strong>Logs und Fehler</strong>
-              <button id="btn-close-errors" class="panel-close" title="Zurück zur PDF-Vorschau">
-                <svg class="ol-icon"><use href="#i-close"></use></svg>
-              </button>
+              <div id="log-tabs" role="tablist">
+                <button class="log-tab active" role="tab" data-level="all">All logs <span class="log-count"></span></button>
+                <button class="log-tab" role="tab" data-level="error">Errors <span class="log-count"></span></button>
+                <button class="log-tab" role="tab" data-level="warning">Warnings <span class="log-count"></span></button>
+                <button class="log-tab" role="tab" data-level="info">Info <span class="log-count"></span></button>
+              </div>
             </div>
             <div id="log-panel-body">
-              <div id="error-panel-empty">Keine Fehler beim letzten Kompilieren.</div>
+              <div id="error-panel-empty">Keine Meldungen beim letzten Kompilieren.</div>
               <div id="error-blocks"></div>
-              <details id="raw-log-details">
-                <summary>Vollständiges Compile-Log</summary>
-                <pre id="pdf-log-view"></pre>
-              </details>
+              <pre id="pdf-log-view" class="hidden"></pre>
             </div>
-          </div>
-
-          <div id="error-context-view" class="hidden">
-            <div id="error-context-header">
-              <span id="error-context-title"></span>
-              <button id="btn-close-error-context">← Zurück zur PDF-Vorschau</button>
+            <div id="log-panel-footer">
+              <button id="btn-clear-cache">Clear cached files</button>
+              <button id="btn-other-logs" aria-expanded="false">Other logs and files ▴</button>
             </div>
-            <div id="error-context-code"></div>
           </div>
         </section>
       </div>
@@ -414,6 +410,20 @@
           </p>
           <div id="hotkey-list"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Help > Keyboard shortcuts: read-only Referenz wie Overleaf -->
+    <div id="shortcuts-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box modal-lg">
+        <div class="dialog-header">
+          <h3>Hotkeys</h3>
+          <button id="btn-close-shortcuts" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad"><div id="shortcuts-grid"></div></div>
       </div>
     </div>
 

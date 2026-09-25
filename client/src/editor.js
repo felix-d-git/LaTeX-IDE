@@ -3,12 +3,12 @@ import { EditorState, StateField, StateEffect, Annotation, Prec } from '@codemir
 import { Decoration, keymap } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
-import { indentWithTab } from '@codemirror/commands';
+import { indentWithTab, isolateHistory } from '@codemirror/commands';
 import { acceptCompletion, nextSnippetField, hasNextSnippetField } from '@codemirror/autocomplete';
 import { search, openSearchPanel } from '@codemirror/search';
 import { commentField, setCommentsEffect } from './comments.js';
 import { trackChangesField } from './trackChanges.js';
-import { tryHandleEditorKey } from './keybindings.js';
+import { tryHandleEditorKey, isGlobalAction } from './keybindings.js';
 import { latexCompletionSource } from './latexCompletions.js';
 
 const externalUpdate = Annotation.define();
@@ -143,11 +143,30 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
                 event.stopPropagation();
                 return true;
               }
+              // Kompilieren ist global gebunden: CM-Keymaps nicht laufen lassen
+              // (sonst fügt Mod-Enter eine Leerzeile ein), Event bubbelt aber
+              // weiter zum globalen Listener, der kompiliert.
+              if (isGlobalAction(event, 'compile')) {
+                event.preventDefault();
+                return true;
+              }
               return false;
             },
           })
         ),
         EditorView.lineWrapping,
+        // Overleaf: ein getipptes "\" ist ein eigener Undo-Schritt, damit
+        // Undo "\" und den folgenden Befehlsnamen getrennt zurücknimmt.
+        EditorView.inputHandler.of((v, from, to, text) => {
+          if (text !== '\\') return false;
+          v.dispatch({
+            changes: { from, to, insert: text },
+            selection: { anchor: from + 1 },
+            annotations: isolateHistory.of('full'),
+            userEvent: 'input.type',
+          });
+          return true;
+        }),
         EditorView.updateListener.of((update) => {
           // Cursorbewegung ohne Textänderung: nur die Gliederung mitführen
           // (R4 - genau eine Zeile trägt die Hervorhebung).

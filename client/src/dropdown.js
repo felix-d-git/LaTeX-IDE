@@ -55,6 +55,20 @@ function buildItem(item, close) {
     wrap.className = 'ol-dropend';
     wrap.appendChild(row);
     wrap.appendChild(buildMenu(item.submenu, {}, close));
+    const setOpen = (on) => {
+      if (on) for (const sib of wrap.parentElement.querySelectorAll(':scope > .ol-dropend.open')) sib.classList.remove('open');
+      wrap.classList.toggle('open', on);
+    };
+    wrap.addEventListener('mouseenter', () => setOpen(true));
+    wrap.addEventListener('mouseleave', () => setOpen(false));
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setOpen(true);
+      wrap.querySelector('.ol-dropdown .ol-dropdown-item')?.focus();
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') row.click();
+    });
     return wrap;
   }
 
@@ -84,7 +98,18 @@ function onDocMouseDown(e) {
 }
 
 function onKey(e) {
-  if (e.key === 'Escape' && current) {
+  if (!current) return;
+  // Stufenweise wie Overleaf: erst das innerste offene Submenü schließen.
+  const openSubs = current.menu.querySelectorAll('.ol-dropend.open');
+  const innermost = openSubs[openSubs.length - 1];
+  if (innermost && (e.key === 'Escape' || e.key === 'ArrowLeft')) {
+    e.stopPropagation();
+    e.preventDefault();
+    innermost.classList.remove('open');
+    innermost.querySelector(':scope > .ol-dropdown-item').focus();
+    return;
+  }
+  if (e.key === 'Escape') {
     e.stopPropagation();
     closeDropdown();
   }

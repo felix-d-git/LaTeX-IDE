@@ -74,6 +74,7 @@ export const api = {
   deletePath: (relPath) => req('DELETE', `/api/tree?path=${encodeURIComponent(relPath)}`),
   uploadFile: (dir, name, contentBase64) => req('POST', '/api/tree/upload', { dir, name, content: contentBase64 }),
   compile: () => req('POST', '/api/compile'),
+  clearCache: () => req('POST', '/api/compile/clear-cache'),
   getComments: () => req('GET', '/api/comments'),
   addComment: (relPath, from, to, anchorText, text) =>
     req('POST', '/api/comments', { path: relPath, from, to, anchorText, text }),
@@ -87,6 +88,7 @@ export const api = {
   addHistoryLabel: (id, name) => req('POST', '/api/history/label', { id, name }),
   getHistoryDiff: (id, to, file) =>
     req('GET', `/api/history/diff?id=${encodeURIComponent(id)}&to=${encodeURIComponent(to)}&file=${encodeURIComponent(file)}`),
+  refs: () => req('GET', '/api/refs'),
   search: (q, opts) => {
     const params = new URLSearchParams({
       q,

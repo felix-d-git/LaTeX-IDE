@@ -225,8 +225,8 @@ html, body, #app {
 }
 .ol-dropend{ position: relative; }
 .ol-dropend > .ol-dropdown{ display: none; top: 0; left: calc(100% + 2px); }
-.ol-dropend:hover > .ol-dropdown{ display: block; }
-.ol-dropend:hover > .ol-dropdown-item{ background: var(--ol-hover); }
+.ol-dropend.open > .ol-dropdown{ display: block; }
+.ol-dropend.open > .ol-dropdown-item{ background: var(--ol-hover); }
 /* Kontextmenü im Dateibaum ist schmaler (R4) */
 .ol-dropdown.context-menu{ position: fixed; min-width: 160px; }
 
@@ -660,14 +660,13 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 .pdf-page canvas{ display: block; }
 .pdf-sync-marker{
   position: absolute;
-  width: 22px; height: 22px;
-  border: 3px solid #ff5252; border-radius: 50%;
+  background: rgba(255, 230, 0, .4);
   pointer-events: none;
-  animation: syncMarkerFade 2.5s ease-out forwards;
+  animation: syncMarkerFade 2.5s ease-in forwards;
 }
 @keyframes syncMarkerFade{
-  0% { opacity: 1; transform: scale(1.4); }
-  100% { opacity: 0; transform: scale(1); }
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* SyncTeX-Pille auf dem Editor/PDF-Resizer (R1) */
@@ -706,52 +705,67 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 }
 #log-panel-body{ flex: 1 1 auto; overflow: auto; padding: 12px 16px; font-size: var(--ol-fs-sm); }
 #error-panel-empty{ color: var(--ol-text-muted); font-size: var(--ol-fs-sm); padding: 8px 0; }
-.error-block{ margin-bottom: 12px; }
-.error-block-file{
-  font-weight: 600; font-size: var(--ol-fs-sm); color: var(--ol-text-muted);
-  border-bottom: 1px solid var(--ol-border); padding-bottom: 4px; margin-bottom: 4px;
-}
-.error-row{
-  font-size: var(--ol-fs-sm); padding: 5px 6px;
-  border-radius: var(--ol-r-sm); cursor: pointer; color: var(--ol-danger);
-}
-.error-row:hover{ background: #fdeeed; }
-.error-row-noloc{ cursor: default; color: var(--ol-text-muted); }
-.error-row-noloc:hover{ background: transparent; }
-#raw-log-details{ margin-top: 12px; font-size: var(--ol-fs-xs); }
-#raw-log-details summary{ cursor: pointer; color: var(--ol-text-muted); padding: 4px 0; }
 #pdf-log-view{
   margin: 8px 0 0; padding: 8px 10px;
   background: var(--ol-surface); border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm);
   font-family: var(--ol-font-mono); font-size: var(--ol-fs-xs);
   white-space: pre-wrap; max-height: 50vh; overflow: auto;
 }
+/* Help > Keyboard shortcuts */
+#shortcuts-grid{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+#shortcuts-grid h4{ margin: 0 0 8px; font-size: var(--ol-fs-sm); }
+.shortcut-row{ display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: var(--ol-fs-sm); }
+.shortcut-row > span:last-child{ flex: 0 0 auto; }
+#shortcuts-grid kbd{
+  display: inline-block; padding: 0 6px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-pill);
+  background: var(--ol-surface-alt); font: 400 11px/18px var(--ol-font-mono);
+}
+@media (max-width: 800px){ #shortcuts-grid{ grid-template-columns: 1fr; } }
+/* Overleaf-Log: Tabs mit Zählern, Karten mit farbigem Kopf, Fuß, Back-to-PDF-Pille. */
+#log-tabs{ display: flex; gap: 4px; }
+.log-tab{
+  height: 28px; padding: 0 10px; border: 0; border-radius: var(--ol-r-pill);
+  background: transparent; color: var(--ol-text); font-size: var(--ol-fs-sm); cursor: pointer;
+}
+.log-tab:hover{ background: var(--ol-hover); }
+.log-tab.active{ background: var(--ol-pressed); font-weight: 600; }
+.log-count:not(:empty){
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
+  border-radius: var(--ol-r-pill); background: var(--ol-border); font-size: 11px; line-height: 16px; text-align: center;
+}
+.log-card{ margin-bottom: 8px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm); background: var(--ol-surface); overflow: hidden; }
+.log-card-head{ display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-left: 4px solid; }
+.level-error .log-card-head{ border-left-color: var(--ol-danger); background: #fdeeed; }
+.level-warning .log-card-head{ border-left-color: #de8014; background: #fdf3e5; }
+.level-info .log-card-head{ border-left-color: #366cbf; background: #edf2fa; }
+.log-card-chevron, .log-card-goto{
+  flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center;
+  padding: 0; border: 0; border-radius: var(--ol-r-sm); background: transparent; color: var(--ol-text); cursor: pointer;
+}
+.log-card-chevron:hover, .log-card-goto:hover{ background: rgba(0,0,0,.08); }
+.log-card-chevron .ol-icon{ width: 16px; height: 16px; transition: transform .15s; }
+.log-card.is-open .log-card-chevron .ol-icon{ transform: rotate(90deg); }
+.log-card-goto{ font-size: 16px; }
+.log-card-title{ flex: 1 1 auto; min-width: 0; font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
+.log-card-loc{ flex: 0 0 auto; color: var(--ol-text-muted); font-size: var(--ol-fs-xs); line-height: 24px; }
+.log-card-body{ padding: 8px 12px; }
+.log-card-hint{ margin: 0 0 8px; }
+.log-card-body pre{
+  margin: 0; padding: 6px 8px; background: var(--ol-surface-alt); border-radius: var(--ol-r-sm);
+  font-family: var(--ol-font-mono); font-size: var(--ol-fs-xs); white-space: pre-wrap;
+}
+#log-panel-footer{
+  flex: 0 0 auto; display: flex; justify-content: space-between; gap: 8px;
+  padding: 8px 16px; border-top: 1px solid var(--ol-border);
+}
+#log-panel-footer button, .back-to-pdf{
+  height: var(--ol-h-btn); padding: 0 12px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-pill);
+  background: var(--ol-surface); color: var(--ol-text); font-size: var(--ol-fs-sm); cursor: pointer;
+}
+#log-panel-footer button:hover, .back-to-pdf:hover{ background: var(--ol-hover); }
+.back-to-pdf{ margin-left: 8px; }
+:root[data-theme="dark"] .log-card-head{ background: transparent; }
 
-#error-context-view{
-  position: absolute; inset: var(--ol-pdf-toolbar-h) 0 0 0; z-index: var(--z-log);
-  background: var(--ol-surface); color: var(--ol-text);
-  display: flex; flex-direction: column;
-}
-#error-context-header{
-  display: flex; justify-content: space-between; align-items: center;
-  height: var(--ol-panel-header-h); padding: 6px 8px;
-  border-bottom: 1px solid var(--ol-border);
-  flex-shrink: 0; font-size: var(--ol-fs-sm);
-}
-#error-context-header button{
-  height: var(--ol-h-btn); padding: 0 12px;
-  border: 0; border-radius: var(--ol-r-pill);
-  background: var(--ol-pressed); color: var(--ol-text);
-  font-size: var(--ol-fs-sm); cursor: pointer;
-}
-#error-context-code{
-  flex: 1; overflow: auto; margin: 0; padding: 10px 14px;
-  font-family: var(--ol-font-mono); font-size: var(--ol-fs-code); line-height: var(--ol-lh-code);
-}
-.error-context-line{ display: flex; gap: 12px; padding: 1px 0; white-space: pre; }
-.error-context-line .ln{ color: var(--ol-text-muted); min-width: 2.5em; text-align: right; user-select: none; flex-shrink: 0; }
-.error-context-line.is-error-line{ background: rgba(184,58,51,.12); }
-.error-context-line.is-error-line .ln{ color: var(--ol-danger); font-weight: 600; }
 
 /* ---------------------------------------------------------------
    Rail-Panel-Inhalte (Suche / Review / Kommentare)
@@ -846,7 +860,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
    R7 — Modals
    --------------------------------------------------------------- */
 
-#settings-dialog, #share-dialog, #new-file-dialog, #new-folder-dialog,
+#settings-dialog, #share-dialog, #new-file-dialog, #new-folder-dialog, #shortcuts-dialog,
 #copy-project-dialog, #word-count-dialog, #open-project-dialog,
 #hotkey-settings, #comment-compose{
   position: fixed; inset: 0;
@@ -868,6 +882,10 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   box-shadow: var(--ol-shadow);
 }
 .dialog-box.modal-lg{ max-width: 960px; }
+/* Overleaf: Dialog gleitet in .3s von oben ein (Bootstrap .modal.fade). */
+.dialog-box{ animation: dialog-in .3s ease-out; }
+@keyframes dialog-in{ from{ transform: translateY(-50px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce){ .dialog-box{ animation: none; } }
 .dialog-header{
   flex: 0 0 auto;
   height: var(--ol-h-modal-header);
@@ -1216,4 +1234,10 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   background: var(--ol-surface-alt); color: var(--ol-text); border-color: var(--ol-border);
 }
 :root[data-theme="dark"] .dash-search{ background: var(--ol-surface-alt); }
-:root[data-theme="dark"] .error-row:hover{ background: rgba(184,58,51,.18); }
+
+/* Overleaf-Fokusring: 2px weiß, 3px #366cbf, 5px #97b6e5 - nur bei Tastaturfokus. */
+:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px #366cbf, 0 0 0 5px #97b6e5;
+}
+.cm-editor :focus-visible, .cm-content:focus-visible{ box-shadow: none; }

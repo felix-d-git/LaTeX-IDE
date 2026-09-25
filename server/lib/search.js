@@ -63,4 +63,30 @@ function replaceInProject(root, query, replacement, opts = {}) {
   return { totalReplacements, changedFiles };
 }
 
-module.exports = { searchProject, replaceInProject };
+// Labels aus .tex und Bib-Keys aus .bib für \ref{}/\cite{}-Vorschläge und
+// Insert > Citation/Cross reference.
+function collectRefs(root) {
+  const labels = new Set();
+  const bibKeys = new Map();
+  for (const relPath of flattenFiles(buildTree(root))) {
+    const ext = path.extname(relPath).toLowerCase();
+    if (ext !== '.tex' && ext !== '.bib') continue;
+    const content = fs.readFileSync(path.join(root, relPath), 'utf8');
+    if (ext === '.tex') {
+      for (const m of content.matchAll(/\\label\{([^}]+)\}/g)) labels.add(m[1]);
+    } else {
+      for (const m of content.matchAll(/@(\w+)\s*\{\s*([^,\s]+)\s*,([\s\S]*?)(?=\n\s*@|$)/g)) {
+        if (/^(comment|string|preamble)$/i.test(m[1])) continue;
+        // Titel mit einer Ebene verschachtelter Klammern ("{JEDEC} Standard"), Klammern danach entfernen.
+        const title = (m[3].match(/\btitle\s*=\s*[{"]((?:[^{}"]|\{[^{}]*\})*)/i) || [])[1] || '';
+        bibKeys.set(m[2], title.replace(/[{}]/g, '').trim());
+      }
+    }
+  }
+  return {
+    labels: [...labels].sort(),
+    bibKeys: [...bibKeys].map(([key, title]) => ({ key, title })).sort((a, b) => a.key.localeCompare(b.key)),
+  };
+}
+
+module.exports = { searchProject, replaceInProject, collectRefs };
