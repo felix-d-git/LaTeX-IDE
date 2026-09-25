@@ -3,7 +3,7 @@ import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './ed
 
 // R5: 32px-Formatierungsleiste über dem Text, Buttons 24x24 mit 4px Radius,
 // links Formatierung, Mitte der Code/Visual-Umschalter, rechts Werkzeuge.
-export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComment }) {
+export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComment, onSetVisual, isVisual }) {
   const bar = document.getElementById('editor-toolbar');
   const left = bar.querySelector('.ol-toolbar-left');
   const mode = bar.querySelector('.ol-toolbar-mode');
@@ -53,16 +53,22 @@ export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComm
 
   const codeBtn = document.createElement('button');
   codeBtn.type = 'button';
-  codeBtn.className = 'mode-btn is-active';
+  codeBtn.className = 'mode-btn';
   codeBtn.textContent = 'Code';
   const visualBtn = document.createElement('button');
   visualBtn.type = 'button';
   visualBtn.className = 'mode-btn';
   visualBtn.textContent = 'Visual';
-  visualBtn.title = 'Rich-Text-Modus – nicht umgesetzt (Backlog, siehe STATUS.md)';
-  visualBtn.addEventListener('click', () =>
-    alert('"Visual"-Modus (Rich Text) ist nicht umgesetzt – der Editor arbeitet im Code-Modus.')
-  );
+  visualBtn.title = 'Formeln, Abbildungen und Formatierung gerendert anzeigen';
+  const setMode = (visual) => {
+    onSetVisual(visual);
+    codeBtn.classList.toggle('is-active', !visual);
+    visualBtn.classList.toggle('is-active', visual);
+  };
+  codeBtn.addEventListener('click', () => setMode(false));
+  visualBtn.addEventListener('click', () => setMode(true));
+  codeBtn.classList.toggle('is-active', !isVisual());
+  visualBtn.classList.toggle('is-active', isVisual());
   mode.append(codeBtn, visualBtn);
 
   right.append(

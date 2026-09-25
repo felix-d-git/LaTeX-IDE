@@ -86,7 +86,78 @@ const editorMgr = createEditorManager(els.editorContainer, {
     scheduleOutlineRefresh();
   },
   onSelectionChanged: () => scheduleOutlineRefresh(),
+  onDropImages: (files, pos) => insertDroppedImages(files, pos),
+  resolveImage: (rawPath) => resolveImagePath(rawPath),
 });
+
+const dirOf = (p) => (p && p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+
+function treeFiles() {
+  const out = new Set();
+  const walk = (nodes) => {
+    for (const n of nodes || []) n.type === 'dir' ? walk(n.children) : out.add(n.path);
+  };
+  walk(currentTree);
+  return out;
+}
+
+// \includegraphics-Pfad → Projektdatei; LaTeX sucht relativ zur Hauptdatei,
+// Endung darf fehlen. ponytail: kein \graphicspath.
+function resolveImagePath(rawPath) {
+  const files = treeFiles();
+  const bases = [dirOf(mainFile), dirOf(editorMgr.getActivePath())];
+  for (const base of bases) {
+    const parts = [];
+    for (const seg of `${base}/${rawPath}`.split('/')) {
+      if (!seg || seg === '.') continue;
+      if (seg === '..') parts.pop();
+      else parts.push(seg);
+    }
+    const p = parts.join('/');
+    for (const ext of ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps']) if (files.has(p + ext)) return p + ext;
+  }
+  return null;
+}
+
+function relativeTo(fromDir, target) {
+  const a = fromDir ? fromDir.split('/') : [];
+  const b = target.split('/');
+  let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/');
+}
+
+// Bild in den Editor gezogen: nach <Ordner der Datei>/Bilder hochladen und
+// eine komplette figure-Umgebung an der Drop-Stelle einfügen.
+async function insertDroppedImages(files, pos) {
+  const path = editorMgr.getActivePath();
+  if (!path) return;
+  const dir = dirOf(path) ? `${dirOf(path)}/Bilder` : 'Bilder';
+  const blocks = [];
+  try {
+    for (const file of files) {
+      const name = file.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]/g, '-');
+      const { path: saved } = await api.uploadFile(dir, name, await readFileAsBase64(file));
+      const rel = relativeTo(dirOf(mainFile), saved.replace(/\\/g, '/'));
+      const stem = rel.split('/').pop().replace(/\.[^.]+$/, '');
+      blocks.push(
+        `\\begin{figure}[h]\n  \\centering\n  \\includegraphics[width=0.8\\textwidth]{${rel}}\n  \\caption{}\n  \\label{fig:${stem}}\n\\end{figure}\n`
+      );
+    }
+  } catch (e) {
+    alert('Fehler beim Hochladen: ' + e.message);
+  }
+  await loadTree();
+  if (!blocks.length || editorMgr.getActivePath() !== path) return;
+  const view = editorMgr.view;
+  const line = view.state.doc.lineAt(Math.min(pos, view.state.doc.length));
+  const empty = !line.text.trim();
+  const at = empty ? line.from : line.to;
+  const insert = (empty ? '' : '\n') + blocks.join('\n');
+  const caret = at + insert.indexOf('\\caption{') + '\\caption{'.length;
+  view.dispatch({ changes: { from: at, to: empty ? line.to : at, insert }, selection: { anchor: caret }, scrollIntoView: true });
+  view.focus();
+}
 
 const previewMgr = createPreviewManager(els.previewContainer);
 
@@ -551,6 +622,8 @@ const editorToolbar = setupEditorToolbar({
   onFind: () => editorMgr.openSearch(),
   onFindInProject: () => searchPanelApi.toggle(),
   onAddComment: () => commentsPanel.triggerAddComment(),
+  onSetVisual: (on) => editorMgr.setVisual(on),
+  isVisual: () => editorMgr.isVisual(),
 });
 
 const menuCtx = {

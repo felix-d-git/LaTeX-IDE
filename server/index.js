@@ -52,6 +52,18 @@ app.use(authMw.ensureCsrfCookie);
 app.use(authMw.checkCsrf);
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/dist', express.static(path.join(__dirname, '..', 'client', 'dist')));
+app.use('/katex', express.static(path.join(__dirname, '..', 'node_modules', 'katex', 'dist')));
+
+// Fehlende/gesperrte Datei beim Streamen: 404 statt unbehandeltem Stream-Fehler (Server-Absturz).
+function streamFile(res, abs) {
+  fs.createReadStream(abs)
+    .on('error', () => {
+      if (res.headersSent) return res.destroy();
+      res.removeHeader('Content-Disposition');
+      res.status(404).json({ error: 'Datei nicht gefunden.' });
+    })
+    .pipe(res);
+}
 
 let wss = null;
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
@@ -369,7 +381,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.pdf"`);
-  fs.createReadStream(pdfAbs).pipe(res);
+  streamFile(res, pdfAbs);
 });
 
 app.post('/api/projects/trash', (req, res) => {
@@ -597,7 +609,7 @@ app.get('/api/pdf', (req, res) => {
     const abs = safeResolve(root, req.query.path);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Cache-Control', 'no-store');
-    fs.createReadStream(abs).pipe(res);
+    streamFile(res, abs);
   } catch (e) {
     res.status(404).json({ error: e.message });
   }
@@ -614,7 +626,7 @@ app.get('/api/raw', (req, res) => {
     const ext = path.extname(abs).toLowerCase();
     res.setHeader('Content-Type', RAW_MIME[ext] || 'application/octet-stream');
     res.setHeader('Cache-Control', 'no-store');
-    fs.createReadStream(abs).pipe(res);
+    streamFile(res, abs);
   } catch (e) {
     res.status(404).json({ error: e.message });
   }

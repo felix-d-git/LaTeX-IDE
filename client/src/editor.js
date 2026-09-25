@@ -1,5 +1,6 @@
 import { EditorView, basicSetup } from 'codemirror';
-import { EditorState, StateField, StateEffect, Annotation, Prec } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, Annotation, Prec, Compartment } from '@codemirror/state';
+import { visualMode } from './visualEditor.js';
 import { Decoration, keymap } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
@@ -74,8 +75,15 @@ const overleafTheme = EditorView.theme(
   { dark: false }
 );
 
-export function createEditorManager(container, { onSave, onDirtyChange, onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged }) {
+export function createEditorManager(container, { onSave, onDirtyChange, onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage }) {
   const tabs = new Map(); // path -> { state, dirty }
+  const visualComp = new Compartment();
+  let visualOn = false;
+  try {
+    visualOn = localStorage.getItem('editorMode') === 'visual';
+  } catch {}
+  const visualExt = () => (visualOn ? visualMode({ resolveImage: resolveImage || (() => null) }) : []);
+  const IMAGE_RE = /\.(png|jpe?g|pdf|eps)$/i;
   let activePath = null;
   let saveTimer = null;
 
@@ -131,7 +139,23 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
             const tcTarget = event.target.closest && event.target.closest('[data-tc-id]');
             if (tcTarget && onTrackChangeClick) onTrackChangeClick(tcTarget.dataset.tcId);
           },
+          // Bilder aus dem Explorer in den Editor ziehen → Upload + figure-Umgebung.
+          dragover(event) {
+            if (!onDropImages || !event.dataTransfer?.types.includes('Files')) return false;
+            event.preventDefault();
+            return true;
+          },
+          drop(event, v) {
+            const files = [...(event.dataTransfer?.files || [])].filter((f) => IMAGE_RE.test(f.name));
+            if (!onDropImages || !files.length) return false;
+            event.preventDefault();
+            // precise=false: liefert auch unterhalb der letzten Zeile eine Position statt null.
+            const pos = v.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+            onDropImages(files, pos);
+            return true;
+          },
         }),
+        visualComp.of(visualExt()),
         // Highest precedence so user-configured editor hotkeys win over
         // basicSetup's bundled default bindings (e.g. lintKeymap's own
         // Mod-Shift-m, defaultKeymap's Mod-Shift-k) when the two collide.
@@ -291,6 +315,21 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
     if (fontFamily && scroller) scroller.style.fontFamily = fontFamily;
   }
 
+  // Code/Visual umschalten: aktive Ansicht + alle gecachten Tab-States.
+  function setVisual(on) {
+    visualOn = !!on;
+    try {
+      localStorage.setItem('editorMode', visualOn ? 'visual' : 'code');
+    } catch {}
+    const effects = visualComp.reconfigure(visualExt());
+    if (activePath) view.dispatch({ effects });
+    for (const [p, t] of tabs) if (p !== activePath) t.state = t.state.update({ effects }).state;
+  }
+
+  function isVisual() {
+    return visualOn;
+  }
+
   function setSpellcheck({ enabled, lang }) {
     view.contentDOM.spellcheck = !!enabled;
     if (lang) view.contentDOM.lang = lang;
@@ -319,6 +358,8 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
     refreshCommentsForPath,
     setFontSettings,
     setSpellcheck,
+    setVisual,
+    isVisual,
     view,
   };
 }
