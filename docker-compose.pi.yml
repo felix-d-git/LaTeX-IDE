@@ -1,18 +1,67 @@
+# LaTeX IDE (Mehrbenutzer) auf dem Pi, öffentlich per Tailscale Funnel
+# unter https://latex.<tailnet>.ts.net. Aufsetzen: siehe deploy-Notiz im Vault.
+#   docker compose -f docker-compose.pi.yml up -d --build
+# Daten + TeX Live liegen auf der SSD (nicht SD-Karte).
 services:
-  latex-ide:
-    build: ./app
-    container_name: latex-ide
-    restart: "no"
-    mem_limit: 1.5g
-    mem_reservation: 512m
-    cpus: 3.5
-    ports:
-      - "3078:3077"
+  app:
+    build: .
+    image: latex-collab
+    container_name: latex-collab
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    # Kompilieren ist teuer: begrenzt, damit andere Dienste daneben Luft haben.
+    mem_limit: ${LATEX_MEM:-1g}
+    memswap_limit: ${LATEX_MEM:-1g}
+    cpus: ${LATEX_CPUS:-2}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD fehlt in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL fehlt in .env}
+      COOKIE_SECURE: "true"
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TZ: ${TZ:-Europe/Berlin}
+      NODE_OPTIONS: --max-old-space-size=${LATEX_HEAP_MB:-384}
     volumes:
-      - /srv/latex-alt/projects:/app/projects
-      - /srv/latex-alt/workspace.json:/app/workspace.json
-      - /srv/latex-alt/auth-data.json:/app/auth-data.json
-      - /srv/latex-alt/sessions:/app/.sessions
-      - /srv/latex-alt/mail-outbox.log:/app/mail-outbox.log
-    env_file:
-      - .env
+      - ${LATEX_DATA_DIR:?LATEX_DATA_DIR fehlt - muss auf die SSD zeigen}:/app/data
+      - ${LATEX_TEXLIVE_DIR:?LATEX_TEXLIVE_DIR fehlt}:/data/texlive:ro
+    ports:
+      # Nur zum Prüfen auf dem Pi selbst (ssh -L 8095:127.0.0.1:8095 ...).
+      - "127.0.0.1:8095:3077"
+
+  tailscale:
+    image: tailscale/tailscale:v1.102.3
+    container_name: latex-tailscale
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    mem_limit: 256m
+    memswap_limit: 256m
+    hostname: latex
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: latex
+      TS_USERSPACE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tsstate:/var/lib/tailscale
+      - ./tailscale-serve.json:/config/serve.json:ro
+    depends_on:
+      - app
+
+volumes:
+  tsstate:

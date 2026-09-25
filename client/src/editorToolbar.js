@@ -1,4 +1,4 @@
-import { undo, redo } from '@codemirror/commands';
+import { yUndo as undo, yRedo as redo } from './collab.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';
 
 // R5: 32px-Formatierungsleiste über dem Text, Buttons 24x24 mit 4px Radius,

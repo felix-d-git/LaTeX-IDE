@@ -1,4 +1,4 @@
-import { api, adminApi } from './api.js';
+import { api, adminApi, authApi } from './api.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
 const SPELLING_KEY = 'latex-ide-spelling-v1';
@@ -270,10 +270,84 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
     }
   }
 
+  function renderPasswordSection() {
+    const box = document.createElement('div');
+    const h = document.createElement('h4');
+    h.textContent = 'Passwort ändern';
+    const pw = (placeholder, autocomplete) => {
+      const el = document.createElement('input');
+      el.type = 'password';
+      el.placeholder = placeholder;
+      el.autocomplete = autocomplete;
+      el.className = 'settings-pw-input';
+      return el;
+    };
+    const current = pw('Aktuelles Passwort', 'current-password');
+    const next = pw('Neues Passwort (mind. 8 Zeichen)', 'new-password');
+    const repeat = pw('Neues Passwort wiederholen', 'new-password');
+    const msg = document.createElement('p');
+    msg.className = 'settings-inert-note';
+    const btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = 'Passwort ändern';
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (next.value !== repeat.value) return (msg.textContent = 'Neue Passwörter stimmen nicht überein.');
+      try {
+        await authApi.changePassword(current.value, next.value);
+        current.value = next.value = repeat.value = '';
+        msg.textContent = 'Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.';
+      } catch (e) {
+        msg.textContent = e.message;
+      }
+    });
+    box.append(h, current, next, repeat, btn, msg);
+    return box;
+  }
+
+  // Desktop-app logins (API tokens). Revoking logs that app out immediately.
+  function renderDesktopSection() {
+    const box = document.createElement('div');
+    const h = document.createElement('h4');
+    h.textContent = 'Verbundene Desktop-Apps';
+    const list = document.createElement('div');
+    box.append(h, list);
+    async function refresh() {
+      list.innerHTML = '';
+      try {
+        const { tokens } = await authApi.listDesktopTokens();
+        if (!tokens.length) {
+          list.appendChild(inertNote('Keine Desktop-App verbunden.'));
+          return;
+        }
+        for (const t of tokens) {
+          const row = document.createElement('div');
+          row.className = 'invite-row';
+          const status = document.createElement('span');
+          status.className = 'invite-status';
+          status.textContent = `${t.label} – verbunden ${formatDate(t.createdAt)}${t.lastUsedAt ? `, zuletzt aktiv ${formatDate(t.lastUsedAt)}` : ''}`;
+          const revoke = document.createElement('button');
+          revoke.className = 'danger';
+          revoke.textContent = 'Trennen';
+          revoke.addEventListener('click', async () => {
+            await authApi.revokeDesktopToken(t.id);
+            refresh();
+          });
+          row.append(status, revoke);
+          list.appendChild(row);
+        }
+      } catch (e) {
+        list.appendChild(inertNote(e.message));
+      }
+    }
+    refresh();
+    return box;
+  }
+
   function renderAccountTab() {
     const wrap = document.createElement('div');
     const p = document.createElement('p');
-    p.textContent = `Angemeldet als ${currentUser.email}${currentUser.isAdmin ? ' (Admin)' : ''}.`;
+    p.textContent = `Angemeldet als ${currentUser.username} (${currentUser.email})${currentUser.isAdmin ? ' – Admin' : ''}.`;
     wrap.appendChild(p);
 
     const logoutBtn = document.createElement('button');
@@ -281,6 +355,9 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
     logoutBtn.textContent = 'Abmelden';
     logoutBtn.addEventListener('click', () => onLogout && onLogout());
     wrap.appendChild(logoutBtn);
+
+    wrap.appendChild(renderPasswordSection());
+    wrap.appendChild(renderDesktopSection());
 
     if (currentUser.isAdmin) {
       const inviteHeading = document.createElement('h4');

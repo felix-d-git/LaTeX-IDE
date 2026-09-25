@@ -1,5 +1,6 @@
 import { EditorView, Decoration, WidgetType } from '@codemirror/view';
 import { StateField, StateEffect, Annotation } from '@codemirror/state';
+import { ySyncAnnotation } from 'y-codemirror.next';
 
 // Scoped-down "Reviewing" mode: real Overleaf keeps deleted text visible
 // (struck through) in place until a change is resolved, which needs a
@@ -65,7 +66,8 @@ export const trackChangesField = StateField.define({
   update(deco, tr) {
     deco = deco.map(tr.changes);
 
-    if (reviewing && tr.docChanged && !tr.annotation(skipTracking)) {
+    // Edits arriving from collaborators (ySync) are theirs, not tracked as mine.
+    if (reviewing && tr.docChanged && !tr.annotation(skipTracking) && !tr.annotation(ySyncAnnotation)) {
       const adds = [];
       tr.changes.iterChanges((fromA, toA, fromB, toB) => {
         if (toB > fromB) {

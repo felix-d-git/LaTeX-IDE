@@ -328,6 +328,7 @@
           <div class="dash-sidebar-group">
             <div class="dash-sidebar-heading">Projekte</div>
             <button id="tab-projects" class="dash-link active">Alle Projekte</button>
+            <button id="tab-shared" class="dash-link">Geteilt mit mir</button>
             <button id="tab-archive" class="dash-link">Archiviert</button>
             <button id="tab-trash" class="dash-link">Papierkorb</button>
           </div>
@@ -458,25 +459,13 @@
           </button>
         </div>
         <div class="dialog-body-pad">
-          <p id="share-not-ready-hint">
-            🚧 Freigabe ist in Vorbereitung – dieses Tool läuft aktuell als reines
-            Single-User-Localhost-Werkzeug ohne Mehrbenutzer-/Netzwerk-Unterstützung.
-            Die folgenden Felder sind ein Vorschau-Layout und noch nicht funktionsfähig.
-          </p>
+          <p class="share-hint">Mitglieder bearbeiten das Projekt live mit dir. Sie brauchen ein bestätigtes Konto.</p>
           <div id="share-invite-row">
-            <input id="share-email-input" placeholder="E-Mail-Adressen, durch Komma getrennt" disabled />
-            <select id="share-role-select" disabled>
-              <option>Editor</option>
-              <option>Viewer</option>
-            </select>
-            <button id="btn-share-invite" class="primary" disabled>Einladen</button>
+            <input id="share-login-input" placeholder="Benutzername oder E-Mail" />
+            <button id="btn-share-invite" class="primary">Hinzufügen</button>
           </div>
-          <div id="share-link-row">
-            <label><input type="checkbox" id="share-link-toggle" disabled /> Link sharing is off</label>
-          </div>
-          <div id="share-members-list">
-            <div class="share-member"><span>Ich</span><span class="share-member-role">Owner</span></div>
-          </div>
+          <p id="share-error" class="hidden"></p>
+          <div id="share-members-list"></div>
         </div>
       </div>
     </div>

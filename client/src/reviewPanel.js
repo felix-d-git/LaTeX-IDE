@@ -1,4 +1,5 @@
 import { listChanges, acceptChange, rejectChange } from './trackChanges.js';
+import { listConflicts, resolveConflict } from './collab.js';
 
 function snippetOf(text, max = 80) {
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -42,8 +43,38 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
       return;
     }
 
+    // Offline conflicts first: both versions were merged in, the lines need a human look.
+    const conflicts = listConflicts(path);
+    for (const c of conflicts) {
+      const doc = editorMgr.view.state.doc;
+      const l1 = doc.lineAt(Math.min(c.from, doc.length)).number;
+      const l2 = doc.lineAt(Math.min(c.to, doc.length)).number;
+      const el = document.createElement('div');
+      el.className = 'review-item type-conflict';
+      const type = document.createElement('div');
+      type.className = 'review-item-type';
+      type.textContent = `⚠ Konflikt · Zeile ${l1 === l2 ? l1 : `${l1}–${l2}`}`;
+      const text = document.createElement('div');
+      text.className = 'review-item-text';
+      text.textContent =
+        'Du hast hier offline geändert, während jemand anderes dieselben Zeilen bearbeitet hat. Beide Änderungen wurden zusammengeführt – bitte prüfen.';
+      const actions = document.createElement('div');
+      actions.className = 'review-item-actions';
+      const doneBtn = document.createElement('button');
+      doneBtn.textContent = 'Erledigt';
+      doneBtn.className = 'primary';
+      doneBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resolveConflict(path, c.id);
+      });
+      actions.appendChild(doneBtn);
+      el.append(type, text, actions);
+      el.addEventListener('click', () => editorMgr.jumpToRange(c.from, c.to));
+      list.appendChild(el);
+    }
+
     const items = listChanges(editorMgr.view);
-    emptyEl.classList.toggle('hidden', items.length > 0);
+    emptyEl.classList.toggle('hidden', items.length + conflicts.length > 0);
     if (items.length === 0) {
       emptyEl.textContent = 'Keine nachverfolgten Änderungen in dieser Datei.';
       return;

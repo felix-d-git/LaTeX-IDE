@@ -30,6 +30,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   const view = document.getElementById('projects-view');
   const searchInput = document.getElementById('projects-search');
   const tabProjects = document.getElementById('tab-projects');
+  const tabShared = document.getElementById('tab-shared');
   const tabArchive = document.getElementById('tab-archive');
   const tabTrash = document.getElementById('tab-trash');
   const tbody = document.getElementById('projects-table-body');
@@ -44,7 +45,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   const btnConfirmCopy = document.getElementById('btn-confirm-copy-project');
   let pendingCopySource = null;
 
-  let mode = 'projects'; // 'projects' | 'archive' | 'trash'
+  let mode = 'projects'; // 'projects' | 'shared' | 'archive' | 'trash'
   let cache = { localProjects: [], trashedProjects: [], archivedProjects: [] };
   let sortKey = 'lastModified';
   let sortDir = -1; // -1 desc, 1 asc
@@ -79,6 +80,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
   function listForMode() {
     if (mode === 'projects') return cache.localProjects;
+    if (mode === 'shared') return cache.sharedProjects || [];
     if (mode === 'archive') return cache.archivedProjects || [];
     return cache.trashedProjects;
   }
@@ -118,7 +120,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       tdTitle.textContent = p.name;
       tdTitle.className = 'project-title';
       tdTitle.addEventListener('click', () => {
-        if (mode !== 'projects') return;
+        if (mode !== 'projects' && mode !== 'shared') return;
         onOpenProject(p.root);
         hide();
       });
@@ -145,6 +147,12 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
         tdActions.appendChild(iconBtn('file', 'Download PDF', () => downloadPdf(p.name)));
         tdActions.appendChild(iconBtn('archive', 'Archivieren', () => archiveProject(p.name)));
         tdActions.appendChild(iconBtn('close', 'In Papierkorb', () => trashProject(p.name), 'danger'));
+      } else if (mode === 'shared') {
+        // Owner's project: only open here; leaving is in the share dialog.
+        tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
+          onOpenProject(p.root);
+          hide();
+        }));
       } else if (mode === 'archive') {
         tdActions.appendChild(actionBtn('Wiederherstellen', 'primary', () => unarchiveProject(p.name)));
         tdActions.appendChild(iconBtn('close', 'In Papierkorb', () => trashProject(p.name), 'danger'));
@@ -304,6 +312,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   function setMode(newMode) {
     mode = newMode;
     tabProjects.classList.toggle('active', mode === 'projects');
+    tabShared.classList.toggle('active', mode === 'shared');
     tabArchive.classList.toggle('active', mode === 'archive');
     tabTrash.classList.toggle('active', mode === 'trash');
     render();
@@ -315,6 +324,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   btnNewProject.addEventListener('click', newProject);
   searchInput.addEventListener('input', render);
   tabProjects.addEventListener('click', () => setMode('projects'));
+  tabShared.addEventListener('click', () => setMode('shared'));
   tabArchive.addEventListener('click', () => setMode('archive'));
   tabTrash.addEventListener('click', () => setMode('trash'));
   sortHeaders.forEach((th) => {

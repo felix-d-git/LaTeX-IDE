@@ -36,7 +36,10 @@ function compile(root, mainRelPath, settings = {}) {
       mainRelPath,
     ];
 
-    const proc = spawn('latexmk', args, { cwd: root });
+    // openin_any=p: a document may not \input absolute paths or ../ outside the
+    // project (other users' projects, auth-data.json). No -shell-escape either.
+    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: path.join(root, OUT_DIR) };
+    const proc = spawn('latexmk', args, { cwd: root, env });
 
     let log = '';
     proc.stdout.on('data', (d) => (log += d.toString()));

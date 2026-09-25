@@ -1,18 +1,27 @@
-import { EditorView, basicSetup } from 'codemirror';
-import { EditorState, StateField, StateEffect, Annotation, Prec, Compartment } from '@codemirror/state';
+import { EditorView } from 'codemirror';
+import {
+  lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor,
+  rectangularSelection, crosshairCursor, highlightActiveLine,
+} from '@codemirror/view';
+import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
+import { defaultKeymap } from '@codemirror/commands';
+import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
+import { lintKeymap } from '@codemirror/lint';
+import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
+import { getSession, closeSession, listConflicts, conflictField, setConflictsEffect } from './collab.js';
+import { EditorState, StateField, StateEffect, Prec, Compartment } from '@codemirror/state';
 import { visualMode } from './visualEditor.js';
 import { Decoration, keymap } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
-import { indentWithTab, isolateHistory } from '@codemirror/commands';
+import { indentWithTab } from '@codemirror/commands';
 import { acceptCompletion, nextSnippetField, hasNextSnippetField } from '@codemirror/autocomplete';
 import { search, openSearchPanel } from '@codemirror/search';
 import { commentField, setCommentsEffect } from './comments.js';
 import { trackChangesField } from './trackChanges.js';
 import { tryHandleEditorKey, isGlobalAction } from './keybindings.js';
 import { latexCompletionSource } from './latexCompletions.js';
-
-const externalUpdate = Annotation.define();
 
 const addFlash = StateEffect.define();
 const clearFlash = StateEffect.define();
@@ -33,6 +42,36 @@ const flashField = StateField.define({
 });
 
 const stexLanguage = StreamLanguage.define(stex);
+
+// codemirror's basicSetup minus history(): undo/redo come from the Yjs
+// UndoManager, which only reverts your own edits, never a collaborator's.
+const basicSetup = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  bracketMatching(),
+  closeBrackets(),
+  autocompletion(),
+  rectangularSelection(),
+  crosshairCursor(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([
+    ...closeBracketsKeymap,
+    ...defaultKeymap,
+    ...searchKeymap,
+    ...yUndoManagerKeymap,
+    ...foldKeymap,
+    ...completionKeymap,
+    ...lintKeymap,
+  ]),
+];
 
 // R5: Editorfläche nach den gemessenen Werten — 12px/19.2px Monospace,
 // Zeilen-Padding 0 2px 0 6px, Gutter im Systemgrau statt CodeMirrors
@@ -75,8 +114,8 @@ const overleafTheme = EditorView.theme(
   { dark: false }
 );
 
-export function createEditorManager(container, { onSave, onDirtyChange, onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage }) {
-  const tabs = new Map(); // path -> { state, dirty }
+export function createEditorManager(container, { onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage }) {
+  const tabs = new Map(); // path -> { state }
   const visualComp = new Compartment();
   let visualOn = false;
   try {
@@ -85,7 +124,6 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
   const visualExt = () => (visualOn ? visualMode({ resolveImage: resolveImage || (() => null) }) : []);
   const IMAGE_RE = /\.(png|jpe?g|pdf|eps)$/i;
   let activePath = null;
-  let saveTimer = null;
 
   const view = new EditorView({
     parent: container,
@@ -99,12 +137,16 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
     });
   }
 
-  function buildState(content, path) {
+  // Text lives in the file's Y.Doc (collab.js); the editor state is a view on it.
+  function buildState(path) {
+    const session = getSession(path);
     const initialComments = getInitialComments ? getInitialComments(path) : [];
     return EditorState.create({
-      doc: content,
+      doc: session.ytext.toString(),
       extensions: [
         basicSetup,
+        yCollab(session.ytext, session.awareness, { undoManager: session.undoManager }),
+        conflictField,
         overleafTheme,
         // Suchen/Ersetzen-Leiste am unteren Rand des Editors (Strg+F), arbeitet
         // auf der gerade offenen Datei - die Projektsuche in der Rail sucht
@@ -182,14 +224,8 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
         // Overleaf: ein getipptes "\" ist ein eigener Undo-Schritt, damit
         // Undo "\" und den folgenden Befehlsnamen getrennt zurücknimmt.
         EditorView.inputHandler.of((v, from, to, text) => {
-          if (text !== '\\') return false;
-          v.dispatch({
-            changes: { from, to, insert: text },
-            selection: { anchor: from + 1 },
-            annotations: isolateHistory.of('full'),
-            userEvent: 'input.type',
-          });
-          return true;
+          if (text === '\\') session.undoManager.stopCapturing();
+          return false;
         }),
         EditorView.updateListener.of((update) => {
           // Cursorbewegung ohne Textänderung: nur die Gliederung mitführen
@@ -197,38 +233,35 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
           if (update.selectionSet && onSelectionChanged) onSelectionChanged();
           if (!update.docChanged) return;
           onDocChanged && onDocChanged(path);
-          const isExternal = update.transactions.some((t) => t.annotation(externalUpdate));
-          if (isExternal) return;
-          const tab = tabs.get(path);
-          if (tab) tab.dirty = true;
-          onDirtyChange && onDirtyChange(path, true);
-          clearTimeout(saveTimer);
-          saveTimer = setTimeout(() => {
-            const content = view.state.doc.toString();
-            onSave(path, content).then(() => {
-              const t = tabs.get(path);
-              if (t) t.dirty = false;
-              onDirtyChange && onDirtyChange(path, false);
-            });
-          }, 600);
         }),
       ],
     });
   }
 
-  function openFile(path, content) {
+  // Requires an open collab session for path (collab.openSession).
+  function openFile(path) {
     if (activePath && tabs.has(activePath)) {
       tabs.get(activePath).state = view.state;
     }
-    if (!tabs.has(path)) {
-      tabs.set(path, { state: buildState(content, path), dirty: false });
+    const session = getSession(path);
+    const cached = tabs.get(path);
+    // An inactive tab's state doesn't receive remote edits (the sync plugin
+    // only runs in the view) - rebuild it if the shared text moved on.
+    if (!cached || cached.state.doc.toString() !== session.ytext.toString()) {
+      tabs.set(path, { state: buildState(path) });
     }
     activePath = path;
     view.setState(tabs.get(path).state);
+    refreshConflicts(path);
     view.focus();
   }
 
+  function refreshConflicts(path) {
+    if (path === activePath && getSession(path)) view.dispatch({ effects: setConflictsEffect.of(listConflicts(path)) });
+  }
+
   function closeTab(path) {
+    closeSession(path);
     tabs.delete(path);
     if (activePath === path) {
       activePath = null;
@@ -244,20 +277,10 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
     return tabs.has(path);
   }
 
+  // Text changed outside the editor (search/replace, external tool): the
+  // content itself arrives via Yjs, here we only flash the changed lines.
   function applyExternalChange(path, content, changedRanges) {
-    if (path === activePath) {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: content },
-        annotations: externalUpdate.of(true),
-      });
-      flashRanges(changedRanges);
-      tabs.get(path).state = view.state;
-      tabs.get(path).dirty = false;
-      onDirtyChange && onDirtyChange(path, false);
-    } else if (tabs.has(path)) {
-      // Not the active tab: drop cached state so reopening fetches fresh content.
-      tabs.delete(path);
-    }
+    if (path === activePath) setTimeout(() => flashRanges(changedRanges), 300);
   }
 
   function flashRanges(changedRanges) {
@@ -280,8 +303,8 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
     return [...tabs.keys()];
   }
 
-  function isDirty(path) {
-    return tabs.has(path) ? tabs.get(path).dirty : false;
+  function isDirty() {
+    return false; // saved continuously via Yjs
   }
 
   // Öffnet CodeMirrors Suchen/Ersetzen-Leiste unten im Editor (Strg+F,
@@ -346,6 +369,7 @@ export function createEditorManager(container, { onSave, onDirtyChange, onCommen
 
   return {
     openFile,
+    refreshConflicts,
     closeTab,
     getActivePath,
     isOpen,

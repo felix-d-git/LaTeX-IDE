@@ -3,6 +3,9 @@ import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
 import { renderTree } from './fileTree.js';
 import { createEditorManager } from './editor.js';
+import {
+  configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts,
+} from './collab.js';
 import { createPdfViewer } from './pdfViewer.js';
 import { setupSearchPanel } from './searchPanel.js';
 import { setupProjectDialog } from './projectDialog.js';
@@ -54,9 +57,12 @@ const authView = setupAuthView({ onAuthenticated: () => location.reload() });
   try {
     currentUser = (await authApi.me()).user;
   } catch (e) {
+    // Desktop app without a (valid) token: log in via the server's web UI.
+    if (e.data && e.data.desktopLogin) return location.replace('/desktop/login');
     authView.show();
     return;
   }
+  if (authView.showDesktopConnect(currentUser)) return;
   authView.hide();
   await startApp(currentUser);
 })();
@@ -76,8 +82,6 @@ let activePaneKind = 'text'; // 'text' | 'preview' - which of the two panes is c
 const commentsManager = createCommentsManager();
 
 const editorMgr = createEditorManager(els.editorContainer, {
-  onSave: (path, content) => api.saveFile(path, content),
-  onDirtyChange: renderTabbar,
   getInitialComments: (path) => commentsManager.getForFile(path),
   onCommentClick: (id) => commentsPanel && commentsPanel.highlightComment(id),
   onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(Number(id)),
@@ -313,17 +317,15 @@ async function openFile(path, line) {
   if (!openOrder.includes(path)) openOrder.push(path);
 
   if (kind === 'text') {
-    if (!editorMgr.isOpen(path)) {
-      const { content, binary } = await api.getFile(path);
-      if (binary) {
-        alert('Diese Datei kann nicht als Text angezeigt werden: ' + path);
-        openOrder = openOrder.filter((p) => p !== path);
-        return;
-      }
-      editorMgr.openFile(path, content);
-    } else {
-      editorMgr.openFile(path, null);
+    try {
+      await openSession(path);
+    } catch (e) {
+      alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
+      openOrder = openOrder.filter((p) => p !== path);
+      renderTabbar();
+      return;
     }
+    editorMgr.openFile(path);
     showPane('text');
   } else {
     previewMgr.openFile(path, kind);
@@ -449,8 +451,21 @@ async function setMainFile(path) {
   refreshTreeHighlight();
 }
 
+let currentProjectId = null;
 async function loadTree() {
-  const { tree, mainFile: mf } = await api.getTree();
+  const { tree, mainFile: mf, projectId } = await api.getTree();
+  if (projectId !== currentProjectId) {
+    // Other project: tabs of the previous one point at files that don't exist here.
+    for (const p of [...openOrder]) {
+      if (fileKind(p) === 'text') editorMgr.closeTab(p);
+      else previewMgr.closeTab(p);
+    }
+    openOrder = [];
+    closeAllSessions();
+    setCollabProject(projectId);
+    currentProjectId = projectId;
+    renderTabbar();
+  }
   currentTree = tree;
   mainFile = mf;
   refreshTreeHighlight();
@@ -523,7 +538,8 @@ els.compileBtn.addEventListener('click', async () => {
   els.compileBtn.disabled = true;
   els.compileBtn.textContent = 'Kompiliere…';
   try {
-    const result = await api.compile();
+    // Desktop app compiles locally and may be offline: hand it the live texts.
+    const result = await api.compile(isDesktop ? openTexts() : undefined);
     els.pdfLogView.textContent = result.log;
     errorPanel.setLog(result);
     if (result.success) {
@@ -599,7 +615,7 @@ const errorPanel = setupErrorPanel({
 
 const hotkeySettings = setupHotkeySettings();
 const shortcutsReference = setupShortcutsReference();
-const shareDialog = setupShareDialog();
+const shareDialog = setupShareDialog({ currentUser, onLeft: () => projectsView.show() });
 const historyView = setupHistoryView();
 const settingsDialog = setupSettingsDialog({
   editorMgr,
@@ -722,13 +738,47 @@ registerAction('addComment', () => commentsPanel.triggerAddComment());
 registerAction('syncToPdf', () => syncTex.syncToPdf());
 initGlobalHotkeys();
 
+// --- Live collaboration status + conflicts ---
+const collabBadge = document.createElement('span');
+collabBadge.className = 'collab-offline-badge hidden';
+collabBadge.textContent = 'Offline – Änderungen werden lokal gespeichert';
+els.compileBtn.parentElement.insertBefore(collabBadge, els.compileBtn);
+setCollabUser(currentUser);
+configureCollab({
+  onStatus: (online) => collabBadge.classList.toggle('hidden', online),
+  onConflicts: (path) => {
+    editorMgr.refreshConflicts(path);
+    if (path === editorMgr.getActivePath() && listConflicts(path).length) reviewPanel.show();
+    else if (reviewPanel.isOpen()) reviewPanel.render();
+  },
+  // Server re-created the doc or the file vanished: reopen / drop the tab.
+  onReset: (path) => {
+    editorMgr.closeTab(path);
+    if (openOrder.includes(path)) openFile(path);
+  },
+  onGone: (path) => {
+    editorMgr.closeTab(path);
+    openOrder = openOrder.filter((p) => p !== path);
+    renderTabbar();
+    loadTree();
+  },
+});
+let isDesktop = false;
+fetch('/api/desktop/info')
+  .then((r) => (r.ok ? r.json() : {}))
+  .then((d) => (isDesktop = !!d.desktop))
+  .catch(() => {});
+
 connectWs({
   fileChanged: (msg) => {
     editorMgr.applyExternalChange(msg.path, msg.content, msg.changedRanges);
     renderTabbar();
     scheduleOutlineRefresh();
   },
-  fileDeleted: () => loadTree(),
+  fileDeleted: (msg) => {
+    closeTabsUnder(msg.path);
+    loadTree();
+  },
   treeChanged: () => loadTree(),
   pdfChanged: (msg) => pdfViewer.reload(),
   compileStatus: (msg) => {

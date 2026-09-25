@@ -21,7 +21,7 @@ if (!process.env.SESSION_SECRET) {
 }
 
 const sessionStore = new FileStore({
-  path: path.join(__dirname, '..', '..', '.sessions'),
+  path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),
   logFn: () => {},
 });
 
@@ -58,8 +58,15 @@ function ensureCsrfCookie(req, res, next) {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
+function bearerToken(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7).trim() : null;
+}
+
 function checkCsrf(req, res, next) {
   if (!MUTATING_METHODS.has(req.method)) return next();
+  // Bearer requests (desktop app) carry no cookies, so they can't be forged cross-site.
+  if (bearerToken(req) && !req.headers.cookie) return next();
   const header = req.get('X-CSRF-Token');
   if (!header || header !== req.cookies[CSRF_COOKIE_NAME]) {
     return res.status(403).json({ error: 'CSRF-Prüfung fehlgeschlagen. Bitte Seite neu laden und erneut versuchen.' });
@@ -67,17 +74,52 @@ function checkCsrf(req, res, next) {
   next();
 }
 
+// A password change logs out every other session: sessions older than the
+// change are rejected (the changing session re-stamps its own loginAt).
+function sessionUser(sessionData) {
+  if (!sessionData || !sessionData.userId) return null;
+  const user = auth.findUserById(sessionData.userId);
+  if (!user || !auth.isVerified(user)) return null;
+  if (user.passwordChangedAt && (sessionData.loginAt || 0) < new Date(user.passwordChangedAt).getTime()) return null;
+  return user;
+}
+
+function currentUser(req) {
+  const token = bearerToken(req);
+  if (token) return auth.findUserByApiToken(token);
+  return sessionUser(req.session);
+}
+
 function requireAuth(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.status(401).json({ error: 'Nicht angemeldet.' });
-  }
-  const user = auth.findUserById(req.session.userId);
-  if (!user) {
-    return res.status(401).json({ error: 'Nicht angemeldet.' });
-  }
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
   req.user = user;
   next();
 }
+
+// ponytail: in-memory fixed-window limiter, resets on restart - enough for a handful of users behind one Funnel.
+const hits = new Map();
+function rateLimit(name, max, windowMs, keyFn = (req) => req.ip) {
+  return (req, res, next) => {
+    const key = `${name}:${keyFn(req)}`;
+    const now = Date.now();
+    let e = hits.get(key);
+    if (!e || now > e.resetAt) {
+      e = { count: 0, resetAt: now + windowMs };
+      hits.set(key, e);
+    }
+    e.count += 1;
+    if (e.count > max) {
+      res.set('Retry-After', String(Math.ceil((e.resetAt - now) / 1000)));
+      return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
+    }
+    next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of hits) if (now > e.resetAt) hits.delete(k);
+}, 10 * 60 * 1000).unref();
 
 function requireAdmin(req, res, next) {
   if (!req.user || !req.user.isAdmin) {
@@ -94,6 +136,11 @@ function applyRememberMe(req, rememberMe) {
 // parsing + unsigning the session cookie and loading the session from the
 // same store express-session uses for regular HTTP requests.
 function getUserIdFromUpgradeRequest(req) {
+  const token = bearerToken(req);
+  if (token) {
+    const user = auth.findUserByApiToken(token);
+    return Promise.resolve(user ? user.id : null);
+  }
   return new Promise((resolve) => {
     const header = req.headers.cookie;
     if (!header) return resolve(null);
@@ -103,8 +150,8 @@ function getUserIdFromUpgradeRequest(req) {
     const sid = signature.unsign(raw.slice(2), SESSION_SECRET);
     if (!sid) return resolve(null);
     sessionStore.get(sid, (err, sessionData) => {
-      if (err || !sessionData) return resolve(null);
-      resolve(sessionData.userId || null);
+      const user = err ? null : sessionUser(sessionData);
+      resolve(user ? user.id : null);
     });
   });
 }
@@ -115,6 +162,8 @@ module.exports = {
   checkCsrf,
   requireAuth,
   requireAdmin,
+  currentUser,
+  rateLimit,
   applyRememberMe,
   getUserIdFromUpgradeRequest,
   CSRF_COOKIE_NAME,

@@ -23,6 +23,7 @@ const state = require('./state');
 const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
+const collab = require('./lib/collab');
 
 const RAW_MIME = {
   '.png': 'image/png',
@@ -42,9 +43,11 @@ function activeMainPdfAbs(root) {
 }
 
 const PORT = process.env.PORT || 3077;
-const PROJECTS_DIR = path.join(__dirname, '..', 'projects');
+const PROJECTS_DIR = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
 
 const app = express();
+// Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
+app.set('trust proxy', 'loopback, uniquelocal');
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.use(authMw.createSessionMiddleware());
@@ -105,7 +108,42 @@ function requireRoot(req, res) {
     res.status(400).json({ error: 'Kein aktives Projekt geoeffnet.' });
     return null;
   }
+  // Access can be revoked (share removed) while the project is still "active".
+  if (!canAccessRoot(req.user, root)) {
+    res.status(403).json({ error: 'Kein Zugriff mehr auf dieses Projekt.' });
+    return null;
+  }
   return root;
+}
+
+function isInside(dir, p) {
+  const d = path.resolve(dir);
+  const r = path.resolve(p);
+  return r === d || r.startsWith(d + path.sep);
+}
+
+// Owner = the user whose projects folder contains the root. Admin owns the
+// top-level projects/ (except users/), and may open any path anyway.
+function ownerIdOf(root) {
+  const usersDir = path.join(PROJECTS_DIR, 'users');
+  if (isInside(usersDir, root)) return path.relative(usersDir, path.resolve(root)).split(path.sep)[0];
+  const admin = auth.users.find((u) => u.isAdmin);
+  return admin ? admin.id : null;
+}
+
+function canManageRoot(user, root) {
+  return user.isAdmin || ownerIdOf(root) === user.id;
+}
+
+function canAccessRoot(user, root) {
+  if (!user || !root) return false;
+  if (canManageRoot(user, root)) return true;
+  return state.getShares(path.resolve(root)).includes(user.id);
+}
+
+// Stable id of a project for collab rooms / client caches: path below projects/.
+function projectIdOf(root) {
+  return path.relative(PROJECTS_DIR, path.resolve(root)).split(path.sep).join('/');
 }
 
 function ensureWatcher(root) {
@@ -114,7 +152,15 @@ function ensureWatcher(root) {
     entry.refCount += 1;
     return;
   }
-  watchersByRoot.set(root, { watcher: startWatcher(root, (msg) => broadcast(root, msg)), refCount: 1 });
+  const onEvent = (msg) => {
+    // Edited on disk outside the IDE -> fold into the live doc; clients get it via Yjs.
+    // ponytail: an external edit landing within the 500ms persist window of a live edit
+    // wins over that edit (last writer); fine for occasional external tools.
+    if (msg.type === 'fileChanged') collab.applyExternalText(root, msg.path, msg.content);
+    if (msg.type === 'fileDeleted') collab.onPathMoved(root, msg.path, null);
+    broadcast(root, msg);
+  };
+  watchersByRoot.set(root, { watcher: startWatcher(root, onEvent), refCount: 1 });
 }
 
 function releaseWatcher(root) {
@@ -144,32 +190,59 @@ function baseUrl(req) {
   return process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 }
 
-app.post('/api/auth/register', async (req, res) => {
-  const { token, email, password } = req.body;
+const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000);
+const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
+const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
+const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000);
+
+async function sendVerifyMail(req, user) {
+  const token = auth.createVerifyToken(user.id);
+  await mailer.sendMail({
+    to: user.email,
+    subject: 'LaTeX Web IDE - E-Mail-Adresse bestätigen',
+    text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${baseUrl(req)}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
+  });
+}
+
+// Registration stays invite-gated: without a valid admin token nobody gets an account.
+app.post('/api/auth/register', limitRegister, async (req, res) => {
+  const { token, username, email, password } = req.body;
   const invite = auth.getValidInvite(token || '');
   if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   try {
-    const user = await auth.createUser({ email, password, isAdmin: false });
+    const user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: false });
     auth.consumeInvite(token, user.id);
-    req.session.regenerate((err) => {
-      if (err) return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
-      req.session.userId = user.id;
-      authMw.applyRememberMe(req, true);
-      res.json({ user: auth.toPublicUser(user) });
-    });
+    await sendVerifyMail(req, user);
+    res.json({ ok: true, needsVerification: true, message: `Fast geschafft: Wir haben dir eine Bestätigungsmail an ${user.email} geschickt.` });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password, rememberMe } = req.body;
-  const user = auth.findUserByEmail(email || '');
+app.post('/api/auth/verify', limitToken, (req, res) => {
+  const user = auth.consumeVerifyToken(req.body.token || '');
+  if (!user) return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
+  res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
+});
+
+app.post('/api/auth/resend-verification', limitMail, async (req, res) => {
+  const user = auth.findUserByLogin(req.body.login || req.body.email || '');
+  if (user && !auth.isVerified(user)) await sendVerifyMail(req, user);
+  res.json({ ok: true, message: 'Falls ein unbestätigtes Konto existiert, wurde eine neue Bestätigungsmail verschickt.' });
+});
+
+app.post('/api/auth/login', limitLogin, async (req, res) => {
+  const { password, rememberMe } = req.body;
+  const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   const ok = user && (await auth.verifyPassword(user, password));
-  if (!ok) return res.status(401).json({ error: 'E-Mail oder Passwort falsch.' });
+  if (!ok) return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
+  if (!auth.isVerified(user)) {
+    return res.status(403).json({ error: 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).', unverified: true });
+  }
   req.session.regenerate((err) => {
     if (err) return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
     req.session.userId = user.id;
+    req.session.loginAt = Date.now();
     authMw.applyRememberMe(req, !!rememberMe);
     res.json({ user: auth.toPublicUser(user) });
   });
@@ -183,33 +256,35 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.get('/api/auth/me', (req, res) => {
-  const user = req.session && req.session.userId ? auth.findUserById(req.session.userId) : null;
+  const user = authMw.currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
   res.json({ user: auth.toPublicUser(user) });
 });
 
-app.post('/api/auth/forgot-password', async (req, res) => {
-  const user = auth.findUserByEmail(req.body.email || '');
-  // Always answer the same way, whether or not the address is registered -
-  // otherwise the endpoint would leak which e-mails have an account.
+app.post('/api/auth/forgot-password', limitMail, async (req, res) => {
+  const user = auth.findUserByLogin(req.body.login || req.body.email || '');
+  // Always answer the same way, whether or not the account exists -
+  // otherwise the endpoint would leak which e-mails/usernames are registered.
   if (user) {
     const token = auth.createResetToken(user.id);
     const link = `${baseUrl(req)}/?reset=${token}`;
     await mailer.sendMail({
       to: user.email,
       subject: 'LaTeX Web IDE - Passwort zurücksetzen',
-      text: `Zum Zurücksetzen deines Passworts auf diesen Link klicken (gültig 1 Stunde):\n${link}`,
+      text: `Zum Zurücksetzen deines Passworts auf diesen Link klicken (gültig 1 Stunde):\n${link}\n\nFalls du das nicht angefordert hast, ignoriere diese Mail.`,
     });
   }
-  res.json({ ok: true, message: 'Falls diese E-Mail-Adresse registriert ist, wurde ein Link zum Zurücksetzen verschickt.' });
+  res.json({ ok: true, message: 'Falls das Konto existiert, wurde ein Link zum Zurücksetzen an die hinterlegte E-Mail-Adresse verschickt.' });
 });
 
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', limitToken, async (req, res) => {
   const { token, password } = req.body;
   const user = auth.consumeResetToken(token || '');
   if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
   try {
-    await auth.setPassword(user, password);
+    // Clicking the mailed link proves the mailbox, so this also verifies the address.
+    user.emailVerified = true;
+    await auth.setPassword(user, password); // logs out all other sessions
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -242,6 +317,127 @@ app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin,
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
 
+// --- Account (logged in) ---
+
+app.post('/api/auth/change-password', limitLogin, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!(await auth.verifyPassword(req.user, currentPassword))) {
+    return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
+  }
+  try {
+    await auth.setPassword(req.user, newPassword);
+    // Every other session is now invalid; keep this one.
+    if (req.session && req.session.userId) req.session.loginAt = Date.now();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Desktop app login: the browser (session) mints a token that the local
+// desktop server stores and sends as Bearer. A token can't mint further tokens.
+app.post('/api/auth/desktop-token', (req, res) => {
+  if (!req.session || req.session.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Nur aus einer Browser-Anmeldung heraus möglich.' });
+  }
+  res.json({ token: auth.createApiToken(req.user.id, req.body.label) });
+});
+
+app.get('/api/auth/desktop-tokens', (req, res) => {
+  res.json({ tokens: auth.listApiTokens(req.user.id) });
+});
+
+app.delete('/api/auth/desktop-tokens/:id', (req, res) => {
+  auth.revokeApiToken(req.user.id, req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Sharing (of the active project) ---
+
+function shareInfo(root, user) {
+  const toMember = (id) => {
+    const u = auth.findUserById(id);
+    return u ? { id: u.id, username: auth.toPublicUser(u).username, email: u.email } : null;
+  };
+  return {
+    canManage: canManageRoot(user, root),
+    owner: toMember(ownerIdOf(root)),
+    members: state.getShares(path.resolve(root)).map(toMember).filter(Boolean),
+  };
+}
+
+app.get('/api/share', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  res.json(shareInfo(root, req.user));
+});
+
+app.post('/api/share', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (!canManageRoot(req.user, root)) return res.status(403).json({ error: 'Nur der Eigentümer kann das Projekt teilen.' });
+  const target = auth.findUserByLogin(req.body.login || '');
+  if (!target || !auth.isVerified(target)) return res.status(404).json({ error: 'Kein bestätigtes Konto mit diesem Benutzernamen / dieser E-Mail.' });
+  if (canManageRoot(target, root)) return res.status(400).json({ error: 'Diese Person hat bereits Zugriff.' });
+  const key = path.resolve(root);
+  const ids = state.getShares(key);
+  if (!ids.includes(target.id)) state.setShares(key, [...ids, target.id]);
+  res.json(shareInfo(root, req.user));
+});
+
+// Owner removes a member, or a member leaves (userId = self).
+app.delete('/api/share/:userId', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (!canManageRoot(req.user, root) && req.params.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Nur der Eigentümer kann Mitglieder entfernen.' });
+  }
+  const key = path.resolve(root);
+  state.setShares(key, state.getShares(key).filter((id) => id !== req.params.userId));
+  res.json(shareInfo(root, req.user));
+});
+
+// --- Collab ---
+
+// Identity of a file's Y.Doc - client keys its offline cache (IndexedDB) by it.
+app.get('/api/collab/epoch', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  try {
+    if (!isTextFile(req.query.path || '')) return res.status(400).json({ error: 'Keine Textdatei.' });
+    safeResolve(root, req.query.path);
+    res.json({ projectId: projectIdOf(root), epoch: collab.getEpoch(root, req.query.path) });
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+// File list with hashes for the desktop app's local compile mirror.
+app.get('/api/collab/manifest', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  collab.flushRoot(root);
+  const files = [];
+  const walk = (rel) => {
+    for (const d of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
+      if (isIgnored(d.name)) continue;
+      const r = rel ? `${rel}/${d.name}` : d.name;
+      if (d.isDirectory()) walk(r);
+      else if (d.isFile()) {
+        const buf = fs.readFileSync(path.join(root, r));
+        files.push({ path: r, size: buf.length, sha1: crypto.createHash('sha1').update(buf).digest('hex') });
+      }
+    }
+  };
+  walk('');
+  res.json({
+    projectId: projectIdOf(root),
+    mainFile: state.getMainFile(root) || findMainCandidate(root),
+    settings: state.getProjectSettings(root),
+    files,
+  });
+});
+
 // --- Projects ---
 
 app.get('/api/projects/list', (req, res) => {
@@ -249,7 +445,14 @@ app.get('/api/projects/list', (req, res) => {
   res.json({
     activeRoot: state.getActiveRoot(req.user.id),
     recentRoots: state.getRecentRoots(req.user.id),
-    localProjects: projects.listProjects(projectsDir),
+    localProjects: projects.listProjects(projectsDir).filter((p) => !(req.user.isAdmin && p.name === 'users')),
+    sharedProjects: state
+      .sharedRootsFor(req.user.id)
+      .filter((root) => fs.existsSync(root))
+      .map((root) => {
+        const owner = auth.findUserById(ownerIdOf(root));
+        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?' };
+      }),
     trashedProjects: projects.listTrash(projectsDir),
     archivedProjects: projects.listArchived(projectsDir),
   });
@@ -271,15 +474,11 @@ app.post('/api/projects/open', (req, res) => {
   if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     return res.status(400).json({ error: 'Ordner nicht gefunden.' });
   }
-  // Non-admin users may only ever activate a project inside their own
-  // isolated folder - otherwise they could type any local path (e.g. the
-  // admin's thesis folder) into the "open folder" dialog and read/edit it.
-  if (!req.user.isAdmin) {
-    const projectsDirResolved = path.resolve(userProjectsDir(req.user));
-    const resolvedRoot = path.resolve(root);
-    if (resolvedRoot !== projectsDirResolved && !resolvedRoot.startsWith(projectsDirResolved + path.sep)) {
-      return res.status(403).json({ error: 'Kein Zugriff auf diesen Ordner.' });
-    }
+  // Non-admin users may only activate a project inside their own folder or
+  // one shared with them - otherwise they could type any local path (e.g.
+  // the admin's thesis folder) into the "open folder" dialog and read it.
+  if (!canAccessRoot(req.user, root)) {
+    return res.status(403).json({ error: 'Kein Zugriff auf diesen Ordner.' });
   }
   const previousRoot = state.getActiveRoot(req.user.id);
   state.setActiveRoot(req.user.id, root);
@@ -287,7 +486,7 @@ app.post('/api/projects/open', (req, res) => {
   if (previousRoot !== root) ensureWatcher(root);
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (main) state.setMainFile(root, main);
-  res.json({ activeRoot: root, mainFile: main });
+  res.json({ activeRoot: root, mainFile: main, projectId: projectIdOf(root) });
 });
 
 app.post('/api/projects/create', (req, res) => {
@@ -307,7 +506,10 @@ app.post('/api/projects/rename', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses umbenannt wird.' });
   }
   try {
+    collab.flushRoot(root);
+    // ponytail: members who have this project open keep the old path until they reopen it from the dashboard.
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
+    state.moveRoot(path.resolve(root), path.resolve(newRoot));
     res.json({ root: newRoot });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -355,6 +557,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
     return res.status(400).json({ error: e.message });
   }
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  collab.flushRoot(root);
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.zip"`);
   const archive = archiver('zip', { zlib: { level: 9 } });
@@ -422,7 +625,7 @@ app.delete('/api/projects/trash/:name', (req, res) => {
 app.get('/api/tree', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  res.json({ tree: buildTree(root), mainFile: state.getMainFile(root) });
+  res.json({ tree: buildTree(root), mainFile: state.getMainFile(root), projectId: projectIdOf(root) });
 });
 
 app.get('/api/file', (req, res) => {
@@ -430,6 +633,7 @@ app.get('/api/file', (req, res) => {
   if (!root) return;
   try {
     const abs = safeResolve(root, req.query.path);
+    collab.flushRoot(root);
     if (isTextFile(req.query.path)) {
       res.json({ path: req.query.path, content: fs.readFileSync(abs, 'utf8'), binary: false });
     } else {
@@ -451,6 +655,7 @@ app.put('/api/file', (req, res) => {
     state.selfWrittenHashes.set(relPath, hash);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf8');
+    collab.applyExternalText(root, relPath, content);
     history.snapshot(root, { trigger: 'autosave' });
     maybeAutocompile(root);
     res.json({ ok: true });
@@ -485,7 +690,9 @@ app.post('/api/tree/rename', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    collab.flushRoot(root);
     const relPath = treeOps.renamePath(root, req.body.path, req.body.newName);
+    collab.onPathMoved(root, req.body.path, relPath);
     res.json({ ok: true, path: relPath });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -500,7 +707,10 @@ app.post('/api/tree/move', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    collab.flushRoot(root);
     const relPath = treeOps.movePath(root, req.body.path, req.body.targetDir, !!req.body.overwrite);
+    if (req.body.overwrite) collab.onPathMoved(root, relPath, null);
+    collab.onPathMoved(root, req.body.path, relPath);
     res.json({ ok: true, path: relPath });
   } catch (e) {
     if (e.conflict) return res.status(409).json({ conflict: true, error: e.message });
@@ -513,6 +723,7 @@ app.delete('/api/tree', (req, res) => {
   if (!root) return;
   try {
     treeOps.deletePath(root, req.query.path);
+    collab.onPathMoved(root, req.query.path, null);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -541,8 +752,26 @@ app.post('/api/main-file', (req, res) => {
 
 // --- Compile ---
 
-async function runCompile(root, main) {
+// The Pi compiles one document at a time; a second request for the same
+// project while it is still waiting shares the queued run.
+// ponytail: one global queue - per-core workers if the server gets stronger.
+let compileChain = Promise.resolve();
+const queuedCompile = new Map(); // root -> promise of a not-yet-started run
+
+function runCompile(root, main) {
+  if (queuedCompile.has(root)) return queuedCompile.get(root);
   broadcast(root, { type: 'compileStatus', status: 'running' });
+  const run = compileChain.then(() => {
+    queuedCompile.delete(root);
+    return doCompile(root, main);
+  });
+  queuedCompile.set(root, run);
+  compileChain = run.catch(() => {});
+  return run;
+}
+
+async function doCompile(root, main) {
+  collab.flushRoot(root);
   const result = await compile(root, main, state.getProjectSettings(root));
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
   broadcast(root, { type: 'compileStatus', status, log: result.log });
@@ -639,6 +868,7 @@ app.get('/api/download/zip', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const name = path.basename(root) || 'project';
+  collab.flushRoot(root);
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${name}.zip"`);
   const archive = archiver('zip', { zlib: { level: 9 } });
@@ -785,9 +1015,12 @@ app.post('/api/replace', (req, res) => {
   if (!root) return;
   const { query, replacement, regex, caseSensitive, wholeWord } = req.body;
   try {
+    collab.flushRoot(root);
     const result = replaceInProject(root, query, replacement, { regex, caseSensitive, wholeWord });
     for (const f of result.changedFiles) {
       const content = fs.readFileSync(path.join(root, f.file), 'utf8');
+      state.selfWrittenHashes.set(f.file, crypto.createHash('sha1').update(content).digest('hex'));
+      collab.applyExternalText(root, f.file, content);
       broadcast(root, { type: 'fileChanged', path: f.file, content, changedRanges: [], source: 'replace' });
     }
     res.json(result);
@@ -797,7 +1030,60 @@ app.post('/api/replace', (req, res) => {
 });
 
 const server = http.createServer(app);
-wss = new WebSocketServer({ server, path: '/ws' });
+wss = new WebSocketServer({ noServer: true });
+const yjsWss = new WebSocketServer({ noServer: true, maxPayload: 20 * 1024 * 1024 });
+
+collab.setHooks({
+  markSelfWrite: (root, rel, text) => state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(text).digest('hex')),
+  onPersist: (root) => {
+    history.snapshot(root, { trigger: 'autosave' });
+    maybeAutocompile(root);
+  },
+});
+
+function rejectUpgrade(socket, code, text) {
+  socket.write(`HTTP/1.1 ${code} ${text}\r\nConnection: close\r\n\r\n`);
+  socket.destroy();
+}
+
+// /ws = app events (tree/pdf/compile), /yjs/<projectId>/<file> = live text sync.
+server.on('upgrade', async (req, socket, head) => {
+  let url;
+  try {
+    url = new URL(req.url, 'http://localhost');
+  } catch {
+    return rejectUpgrade(socket, 400, 'Bad Request');
+  }
+  // Cross-site WebSocket hijacking guard (cookies ride along on upgrades).
+  const origin = req.headers.origin;
+  if (origin) {
+    let host = null;
+    try {
+      host = new URL(origin).host;
+    } catch {}
+    if (host !== req.headers.host) return rejectUpgrade(socket, 403, 'Forbidden');
+  }
+  if (url.pathname === '/ws') {
+    return wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  }
+  if (!url.pathname.startsWith('/yjs/')) return rejectUpgrade(socket, 404, 'Not Found');
+  const parts = url.pathname.slice(5).split('/');
+  if (parts.length !== 2) return rejectUpgrade(socket, 400, 'Bad Request');
+  let root;
+  let rel;
+  try {
+    root = path.resolve(PROJECTS_DIR, decodeURIComponent(parts[0]));
+    rel = decodeURIComponent(parts[1]);
+    safeResolve(root, rel);
+  } catch {
+    return rejectUpgrade(socket, 400, 'Bad Request');
+  }
+  const userId = await authMw.getUserIdFromUpgradeRequest(req);
+  const user = userId && auth.findUserById(userId);
+  if (!user) return rejectUpgrade(socket, 401, 'Unauthorized');
+  if (!canAccessRoot(user, root) || !isTextFile(rel) || !fs.existsSync(root)) return rejectUpgrade(socket, 403, 'Forbidden');
+  yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch')));
+});
 
 wss.on('connection', async (ws, req) => {
   const userId = await authMw.getUserIdFromUpgradeRequest(req);
@@ -825,6 +1111,7 @@ async function bootstrapAdmin() {
   const adminUser = await auth.createUser({
     email: email || 'admin@local.host',
     password: password || 'bitte-sofort-aendern',
+    username: process.env.ADMIN_USERNAME || 'admin',
     isAdmin: true,
   });
   state.migrateLegacyGlobalState(adminUser.id);
@@ -837,6 +1124,14 @@ function restoreWatchers() {
   for (const root of Object.values(state.workspace.activeRootByUser)) {
     if (root && fs.existsSync(root)) ensureWatcher(root);
   }
+}
+
+// docker stop / Ctrl+C: get pending live edits onto disk first.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    collab.flushAll();
+    process.exit(0);
+  });
 }
 
 bootstrapAdmin()

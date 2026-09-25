@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, '..', 'workspace.json');
+const CONFIG_PATH = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'workspace.json');
 
 function loadWorkspace() {
   if (fs.existsSync(CONFIG_PATH)) {
@@ -15,7 +15,8 @@ function loadWorkspace() {
 }
 
 function saveWorkspace(ws) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(ws, null, 2), 'utf8');
+  fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), 'utf8');
+  fs.renameSync(CONFIG_PATH + '.tmp', CONFIG_PATH);
 }
 
 const workspace = loadWorkspace();
@@ -23,6 +24,7 @@ if (!workspace.settingsByRoot) workspace.settingsByRoot = {};
 if (!workspace.mainFileByRoot) workspace.mainFileByRoot = {};
 if (!workspace.activeRootByUser) workspace.activeRootByUser = {};
 if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
+if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
 
 // One-time migration: pre-auth workspace.json had a single global
 // activeRoot/recentRoots (single-user tool). Once the admin account exists,
@@ -77,6 +79,32 @@ function setProjectSettings(root, partial) {
   return workspace.settingsByRoot[root];
 }
 
+// --- Sharing: root -> [userId] of members besides the owner ---
+
+function getShares(root) {
+  return workspace.sharesByRoot[root] || [];
+}
+
+function setShares(root, userIds) {
+  if (userIds.length) workspace.sharesByRoot[root] = userIds;
+  else delete workspace.sharesByRoot[root];
+  saveWorkspace(workspace);
+}
+
+function sharedRootsFor(userId) {
+  return Object.keys(workspace.sharesByRoot).filter((r) => workspace.sharesByRoot[r].includes(userId));
+}
+
+// Project renamed: carry its per-root settings/main file/shares over.
+function moveRoot(oldRoot, newRoot) {
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot']) {
+    if (workspace[k][oldRoot] === undefined) continue;
+    workspace[k][newRoot] = workspace[k][oldRoot];
+    delete workspace[k][oldRoot];
+  }
+  saveWorkspace(workspace);
+}
+
 // Tracks hashes of content this server itself just wrote, so the
 // file watcher can tell "external edit" (e.g. Claude Code) apart from
 // our own save round-trip and only flash-highlight real external changes.
@@ -93,4 +121,8 @@ module.exports = {
   getProjectSettings,
   setProjectSettings,
   selfWrittenHashes,
+  getShares,
+  setShares,
+  sharedRootsFor,
+  moveRoot,
 };

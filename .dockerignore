@@ -14,3 +14,10 @@ tectonic-poc
 includeonly-poc
 Backup1_03_08_2026
 .env
+projects
+data
+desktop-data
+installer
+graphify-out
+scripts
+*-poc

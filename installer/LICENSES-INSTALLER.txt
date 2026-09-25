@@ -1,0 +1,23 @@
+LatexIDE Desktop - Lizenzhinweise zum Installer
+=================================================
+
+Node.js
+-------
+Wird als vorkompilierte Binary mitgeliefert (Ordner "node\" bzw. "node/").
+Lizenz: MIT-artige Node.js-Lizenz, siehe LICENSE-Datei im mitgelieferten
+Node-Ordner. Quelle: https://nodejs.org/
+
+TeX Live / MacTeX
+------------------
+Wird NICHT mitgeliefert. Der Installer laedt TeX Live (Windows) bzw.
+MacTeX (macOS) waehrend der Installation direkt von einem offiziellen
+CTAN-/TUG-Spiegelserver (ftp.tu-chemnitz.de, historisches TeX Live 2025)
+herunter und installiert es lokal. TeX Live/MacTeX stehen unter freien
+Lizenzen der jeweiligen Pakete (ueberwiegend LPPL, teils andere freie
+Lizenzen); Details siehe https://www.tug.org/texlive/LICENSE.TL bzw.
+die Lizenzdateien innerhalb der TeX-Live-Installation.
+
+App-Abhaengigkeiten
+--------------------
+Siehe THIRD_PARTY_NOTICES.md im Projekt-Repository fuer die Liste der
+verwendeten npm-Pakete und deren Lizenzen.

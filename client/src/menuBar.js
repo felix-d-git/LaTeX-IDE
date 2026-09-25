@@ -1,4 +1,5 @@
-import { undo, redo, selectAll, indentMore, indentLess } from '@codemirror/commands';
+import { selectAll, indentMore, indentLess } from '@codemirror/commands';
+import { yUndo as undo, yRedo as redo } from './collab.js';
 import { startCompletion } from '@codemirror/autocomplete';
 import { openDropdown, closeDropdown, isDropdownOpenFor, anyDropdownOpen } from './dropdown.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';
@@ -152,8 +153,8 @@ export function setupMenuBar(ctx) {
         { label: 'Keyboard shortcuts', onClick: () => ctx.onShowShortcuts() },
         { label: 'Customize shortcuts', onClick: () => ctx.onShowHotkeys() },
         { type: 'divider' },
-        // Wie Overleaf: LaTeX-Doku auf overleaf.com/learn. "Contact us" entfällt (lokales Tool).
-        { label: 'Documentation', onClick: () => window.open('https://www.overleaf.com/learn', '_blank', 'noopener') },
+        // Neutrale LaTeX-Doku (kein Bezug auf fremde Marken im veröffentlichten Tool).
+        { label: 'Documentation', onClick: () => window.open('https://en.wikibooks.org/wiki/LaTeX', '_blank', 'noopener') },
       ],
     },
   ];

@@ -17,17 +17,29 @@ async function req(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
 
 export const authApi = {
   me: () => req('GET', '/api/auth/me'),
-  register: (token, email, password) => req('POST', '/api/auth/register', { token, email, password }),
-  login: (email, password, rememberMe) => req('POST', '/api/auth/login', { email, password, rememberMe }),
+  register: (token, username, email, password) => req('POST', '/api/auth/register', { token, username, email, password }),
+  login: (login, password, rememberMe) => req('POST', '/api/auth/login', { login, password, rememberMe }),
   logout: () => req('POST', '/api/auth/logout'),
-  forgotPassword: (email) => req('POST', '/api/auth/forgot-password', { email }),
+  forgotPassword: (login) => req('POST', '/api/auth/forgot-password', { login }),
   resetPassword: (token, password) => req('POST', '/api/auth/reset-password', { token, password }),
+  verify: (token) => req('POST', '/api/auth/verify', { token }),
+  resendVerification: (login) => req('POST', '/api/auth/resend-verification', { login }),
+  changePassword: (currentPassword, newPassword) => req('POST', '/api/auth/change-password', { currentPassword, newPassword }),
+  createDesktopToken: (label) => req('POST', '/api/auth/desktop-token', { label }),
+  listDesktopTokens: () => req('GET', '/api/auth/desktop-tokens'),
+  revokeDesktopToken: (id) => req('DELETE', `/api/auth/desktop-tokens/${encodeURIComponent(id)}`),
+};
+
+export const shareApi = {
+  get: () => req('GET', '/api/share'),
+  add: (login) => req('POST', '/api/share', { login }),
+  remove: (userId) => req('DELETE', `/api/share/${encodeURIComponent(userId)}`),
 };
 
 export const adminApi = {
@@ -73,7 +85,8 @@ export const api = {
   },
   deletePath: (relPath) => req('DELETE', `/api/tree?path=${encodeURIComponent(relPath)}`),
   uploadFile: (dir, name, contentBase64) => req('POST', '/api/tree/upload', { dir, name, content: contentBase64 }),
-  compile: () => req('POST', '/api/compile'),
+  collabEpoch: (relPath) => req('GET', `/api/collab/epoch?path=${encodeURIComponent(relPath)}`),
+  compile: (overrides) => req('POST', '/api/compile', overrides ? { overrides } : undefined),
   clearCache: () => req('POST', '/api/compile/clear-cache'),
   getComments: () => req('GET', '/api/comments'),
   addComment: (relPath, from, to, anchorText, text) =>

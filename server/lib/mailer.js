@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const OUTBOX_PATH = path.join(__dirname, '..', '..', 'mail-outbox.log');
+const OUTBOX_PATH = path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), 'mail-outbox.log');
 
 // No real SMTP configured yet (local test setup) -> log the link instead of
 // sending mail, so the admin can copy it manually. Setting SMTP_HOST etc.
