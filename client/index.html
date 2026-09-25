@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>LaTeX Web IDE</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Inline-Icon-Sprite: bewusst lokal statt Material-Symbols-Webfont,
+       damit die IDE komplett offline/ohne CDN läuft (siehe R9, Icons 20px). -->
+  <svg id="icon-sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2.5h7l5 5v14H6z"/><path d="M13 2.5v5h5"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5h6l2 2.5h10v11H3z"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-2.5 4 3.5"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+      <symbol id="i-review" viewBox="0 0 24 24"><path d="M4 4.5h16v12H9l-5 4z"/><path d="M8 9h8M8 12.5h5"/></symbol>
+      <symbol id="i-comment" viewBox="0 0 24 24"><path d="M4 4.5h16v12H9l-5 4z"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 1 1 2.9 2.6v1.4"/><circle cx="12.6" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.6M12 18.6v2.6M4.5 12H2M22 12h-2.5M6.2 6.2 4.4 4.4M19.6 19.6l-1.8-1.8M17.8 6.2l1.8-1.8M4.4 19.6l1.8-1.8"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M3.5 4.5v4h4"/><path d="M12 7.5V12l3 2"/></symbol>
+      <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><path d="M11 4.5v15"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M18 8v6M15 11h6"/></symbol>
+      <symbol id="i-note-add" viewBox="0 0 24 24"><path d="M6 2.5h7l5 5v6"/><path d="M13 2.5v5h5"/><path d="M6 2.5v19h6"/><path d="M17 15.5v6M14 18.5h6"/></symbol>
+      <symbol id="i-folder-add" viewBox="0 0 24 24"><path d="M3 6.5h6l2 2.5h10v11H3z"/><path d="M12 13.5v5M9.5 16h5"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16.5V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M4 15v4.5h16V15"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6.5 9.5 12 15l5.5-5.5"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6.5 15 12l-5.5 5.5"/></symbol>
+      <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6.5 9 12l5.5 5.5"/></symbol>
+      <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M6.5 14.5 12 9l5.5 5.5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></symbol>
+      <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="7.5" width="8" height="11" rx="4"/><path d="M9 5.5 10.5 8M15 5.5 13.5 8M4.5 11H8M16 11h3.5M4.5 16H8M16 16h3.5M12 8.5v10"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5v12"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M4 17v3.5h16V17"/></symbol>
+      <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/></symbol>
+      <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5"/></symbol>
+      <symbol id="i-sync-right" viewBox="0 0 24 24"><path d="M4 12h14"/><path d="M13.5 7.5 18 12l-4.5 4.5"/></symbol>
+      <symbol id="i-sync-left" viewBox="0 0 24 24"><path d="M20 12H6"/><path d="M10.5 7.5 6 12l4.5 4.5"/></symbol>
+      <symbol id="i-bold" viewBox="0 0 24 24"><path d="M7.5 4.5h5.8a3.7 3.7 0 0 1 0 7.4H7.5z"/><path d="M7.5 11.9h6.6a3.8 3.8 0 0 1 0 7.6H7.5z"/></symbol>
+      <symbol id="i-italic" viewBox="0 0 24 24"><path d="M10 4.5h7M7 19.5h7M14.5 4.5 9.5 19.5"/></symbol>
+      <symbol id="i-list-bullet" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="5" cy="17.5" r="1.2" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-list-number" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4 4.5h1.2v4M3.6 15.4c0-.7.6-1.2 1.3-1.2s1.2.5 1.2 1.1c0 1.2-2.4 1.5-2.4 3.2h2.6"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.8a3.8 3.8 0 0 0 5.4 0l2.6-2.6a3.8 3.8 0 0 0-5.4-5.4l-1 1"/><path d="M14 10.2a3.8 3.8 0 0 0-5.4 0L6 12.8a3.8 3.8 0 0 0 5.4 5.4l1-1"/></symbol>
+      <symbol id="i-math" viewBox="0 0 24 24"><path d="M5 4.5h14l-8 7.5 8 7.5H5"/></symbol>
+      <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 10h18M3 15h18M9.5 5v14M15 5v14"/></symbol>
+      <symbol id="i-heading" viewBox="0 0 24 24"><path d="M5 5v14M13 5v14M5 12h8"/><path d="M17 19v-7l2.5-1.5"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 9.5h10a5.5 5.5 0 0 1 0 11H8"/><path d="M7.5 5.5 3.5 9.5l4 4"/></symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24"><path d="M20 9.5H10a5.5 5.5 0 0 0 0 11h6"/><path d="M16.5 5.5l4 4-4 4"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5 19 12 7 19.5z"/></symbol>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9.5 20v-6h5v6"/></symbol>
+      <symbol id="i-outline" viewBox="0 0 24 24"><path d="M4 6.5h16M7 12h13M10 17.5h10"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M14.5 5.5 18.5 9.5"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 5.5H5.5A1.5 1.5 0 0 0 4 7v9"/></symbol>
+      <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4" rx="1"/><path d="M5 8.5V20h14V8.5"/><path d="M10 12.5h4"/></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.6" fill="currentColor" stroke="none"/></symbol>
+    </defs>
+  </svg>
+
+  <div id="auth-view" class="hidden">
+    <div id="auth-box">
+      <h1>LaTeX Web IDE</h1>
+      <h2 id="auth-title"></h2>
+      <div id="auth-error" class="hidden"></div>
+      <div id="auth-body"></div>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- R1/R2/R3: EINE 40px-Toolbar mit drei Gruppen (links Menü, Mitte
+         Projekttitel, rechts Aktionen) statt der bisherigen zwei Zeilen. -->
+    <nav id="topbar">
+      <div id="menubar"></div>
+
+      <div id="project-selector">
+        <button id="active-project-label" aria-expanded="false" aria-haspopup="true">
+          <span class="project-name">Kein Projekt geöffnet</span>
+          <svg class="chevron ol-icon"><use href="#i-chevron-down"></use></svg>
+        </button>
+      </div>
+
+      <div id="topbar-actions">
+        <div class="toolbar-button-container">
+          <button id="btn-history" aria-label="Verlauf anzeigen" title="Verlauf anzeigen">
+            <svg class="ol-icon"><use href="#i-history"></use></svg>
+          </button>
+        </div>
+        <div class="toolbar-button-container">
+          <button id="btn-layout" aria-label="Layout-Optionen" aria-expanded="false" title="Layout-Optionen">
+            <svg class="ol-icon"><use href="#i-layout"></use></svg>
+          </button>
+        </div>
+        <div class="toolbar-button-container">
+          <button id="btn-share" class="primary" title="Projekt freigeben">
+            <span class="button-content"><svg class="ol-icon"><use href="#i-share"></use></svg>Share</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div id="main">
+      <!-- R4: Icon-Rail, 40px fest -->
+      <nav id="rail">
+        <div id="rail-tabs">
+          <button id="btn-rail-files" class="rail-tab is-active" data-pane="pane-files" data-tip="Dateibaum">
+            <svg class="ol-icon"><use href="#i-file"></use></svg>
+          </button>
+          <button id="btn-search" class="rail-tab" data-pane="search-panel" data-tip="Projektsuche">
+            <svg class="ol-icon"><use href="#i-search"></use></svg>
+          </button>
+          <button id="btn-review" class="rail-tab" data-pane="review-panel" data-tip="Review">
+            <svg class="ol-icon"><use href="#i-review"></use></svg>
+          </button>
+          <button id="btn-comments" class="rail-tab" data-pane="comments-panel" data-tip="Kommentare">
+            <svg class="ol-icon"><use href="#i-comment"></use></svg>
+          </button>
+        </div>
+        <div id="rail-footer">
+          <button id="btn-hotkeys" class="rail-tab" data-tip="Tastenkürzel">
+            <svg class="ol-icon"><use href="#i-help"></use></svg>
+          </button>
+          <button id="btn-settings" class="rail-tab" data-tip="Einstellungen">
+            <svg class="ol-icon"><use href="#i-settings"></use></svg>
+          </button>
+        </div>
+      </nav>
+
+      <!-- R1/R7: Rail-Panels ersetzen den Sidebar-Inhalt inline, keine
+           schwebenden Panels mehr. -->
+      <aside id="sidebar">
+        <div id="pane-files" class="rail-pane">
+          <div id="file-tree-header">
+            <button class="file-tree-expand-collapse" aria-label="Dateibaum ein-/ausklappen">
+              <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+              <h4 class="title">File tree</h4>
+            </button>
+            <div id="file-tree-actions">
+              <button id="btn-tree-new-file" title="Neue Datei">
+                <svg class="ol-icon"><use href="#i-note-add"></use></svg>
+              </button>
+              <button id="btn-tree-new-folder" title="Neuer Ordner">
+                <svg class="ol-icon"><use href="#i-folder-add"></use></svg>
+              </button>
+              <button id="btn-tree-upload" title="Datei hochladen">
+                <svg class="ol-icon"><use href="#i-upload"></use></svg>
+              </button>
+              <button id="btn-tree-close" title="Panel schließen">
+                <svg class="ol-icon"><use href="#i-close"></use></svg>
+              </button>
+            </div>
+          </div>
+          <div id="file-tree"></div>
+          <div id="resizer-tree" class="vertical-resize-handle"></div>
+          <div id="file-outline">
+            <div class="outline-header">
+              <button class="outline-toggle" aria-label="Gliederung ein-/ausklappen">
+                <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+                <span>File outline</span>
+              </button>
+            </div>
+            <div class="outline-body" id="outline-body"></div>
+          </div>
+        </div>
+
+        <div id="search-panel" class="rail-pane hidden">
+          <div class="rail-panel-header">
+            <strong>Projektsuche</strong>
+            <button id="btn-close-search" class="panel-close" title="Schließen">
+              <svg class="ol-icon"><use href="#i-close"></use></svg>
+            </button>
+          </div>
+          <!-- Reine Suche über alle Projektdateien - Ersetzen passiert
+               ausschließlich im Editor-Panel (Strg+F), nicht hier. -->
+          <div id="search-panel-body">
+            <input id="search-query" placeholder="Suchbegriff…" />
+            <div id="search-options">
+              <label><input type="checkbox" id="opt-regex" /> Regex</label>
+              <label><input type="checkbox" id="opt-case" /> Groß/Klein</label>
+              <label><input type="checkbox" id="opt-word" /> Ganzes Wort</label>
+            </div>
+            <div id="search-buttons">
+              <button id="btn-do-search" class="primary">Suchen</button>
+            </div>
+            <div id="search-results"></div>
+          </div>
+        </div>
+
+        <div id="review-panel" class="rail-pane hidden">
+          <div class="rail-panel-header">
+            <strong>Review <span id="review-file-label"></span></strong>
+            <button id="btn-close-review" class="panel-close" title="Schließen">
+              <svg class="ol-icon"><use href="#i-close"></use></svg>
+            </button>
+          </div>
+          <div id="review-panel-body">
+            <select id="review-mode-select" title="Editing vs. Reviewing (Tracked Changes)">
+              <option value="editing">Editing</option>
+              <option value="reviewing">Reviewing</option>
+            </select>
+            <div id="review-empty">Keine nachverfolgten Änderungen in dieser Datei.</div>
+            <div id="review-list"></div>
+          </div>
+        </div>
+
+        <div id="comments-panel" class="rail-pane hidden">
+          <div class="rail-panel-header">
+            <strong>Kommentare <span id="comments-file-label"></span></strong>
+            <button id="btn-close-comments" class="panel-close" title="Schließen">
+              <svg class="ol-icon"><use href="#i-close"></use></svg>
+            </button>
+          </div>
+          <div id="comments-panel-body">
+            <button id="btn-add-comment" class="primary">Kommentar zur Auswahl</button>
+            <div id="comments-list"></div>
+          </div>
+        </div>
+      </aside>
+
+      <div id="resizer-sidebar" class="horizontal-resize-handle"></div>
+
+      <div id="editor-and-pdf">
+        <section id="editor-pane">
+          <!-- R5: Tab-Zeile liegt IN der Editor-Spalte, 36px, #f4f5f6 -->
+          <div id="tabbar-row">
+            <div id="tabbar"></div>
+          </div>
+
+          <!-- R5: Formatierungs-Toolbar über dem Text, 32px, sticky -->
+          <div id="editor-toolbar">
+            <div class="ol-toolbar-left"></div>
+            <div class="ol-toolbar-mode"></div>
+            <div class="ol-toolbar-right"></div>
+          </div>
+
+          <div id="editor-container"></div>
+          <div id="preview-container" class="hidden"></div>
+        </section>
+
+        <div id="resizer-pdf" class="horizontal-resize-handle"></div>
+
+        <section id="pdf-pane">
+          <!-- R6: Kompilieren/Fehler/Download liegen hier, nicht in der Tab-Zeile -->
+          <div id="pdf-toolbar">
+            <div class="toolbar-pdf-left">
+              <div class="compile-button-group">
+                <button id="btn-compile">Kompilieren</button>
+                <button id="btn-compile-options" aria-label="Kompilier-Optionen" aria-expanded="false">
+                  <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+                </button>
+              </div>
+              <button id="btn-errors" class="icon-btn" title="Logs und Fehler anzeigen">
+                <svg class="ol-icon"><use href="#i-bug"></use></svg>
+                <span id="error-badge" class="badge hidden">0</span>
+              </button>
+              <button id="btn-download-pdf" title="Kompiliertes PDF herunterladen">
+                <svg class="ol-icon"><use href="#i-download"></use></svg>
+              </button>
+            </div>
+            <div class="toolbar-pdf-right">
+              <div id="toolbar-pdf-controls">
+                <button id="pdf-prev" class="icon-btn" title="Vorherige Seite">
+                  <svg class="ol-icon"><use href="#i-chevron-left"></use></svg>
+                </button>
+                <button id="pdf-next" class="icon-btn" title="Nächste Seite">
+                  <svg class="ol-icon"><use href="#i-chevron-right"></use></svg>
+                </button>
+                <input id="pdf-page-input" class="page-input" value="1" aria-label="Seite" />
+                <span id="pdf-page-label">–/–</span>
+                <button id="pdf-zoom-out" class="icon-btn" title="Verkleinern">
+                  <svg class="ol-icon"><use href="#i-zoom-out"></use></svg>
+                </button>
+                <button id="pdf-zoom-in" class="icon-btn" title="Vergrößern">
+                  <svg class="ol-icon"><use href="#i-zoom-in"></use></svg>
+                </button>
+                <button id="pdf-zoom-level" class="zoom-select" aria-expanded="false" title="Zoomstufe">100%</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="pdf-container"><div id="pdf-empty">Noch kein PDF kompiliert.</div></div>
+
+          <!-- R1: SyncTeX als schwebende Pille auf dem Editor/PDF-Resizer -->
+          <div id="sync-bar">
+            <button id="btn-sync-to-pdf" title="Cursor-Position im PDF anzeigen (Code → PDF)">
+              <svg class="ol-icon"><use href="#i-sync-right"></use></svg>
+            </button>
+            <button id="btn-sync-to-code" title="Zuletzt im PDF angeklickte Stelle im Code anzeigen (PDF → Code)">
+              <svg class="ol-icon"><use href="#i-sync-left"></use></svg>
+            </button>
+          </div>
+
+          <!-- R1/R6: Log-/Fehleransicht als volldeckendes Overlay der PDF-Spalte -->
+          <div id="log-panel" class="hidden">
+            <div id="log-panel-header">
+              <strong>Logs und Fehler</strong>
+              <button id="btn-close-errors" class="panel-close" title="Zurück zur PDF-Vorschau">
+                <svg class="ol-icon"><use href="#i-close"></use></svg>
+              </button>
+            </div>
+            <div id="log-panel-body">
+              <div id="error-panel-empty">Keine Fehler beim letzten Kompilieren.</div>
+              <div id="error-blocks"></div>
+              <details id="raw-log-details">
+                <summary>Vollständiges Compile-Log</summary>
+                <pre id="pdf-log-view"></pre>
+              </details>
+            </div>
+          </div>
+
+          <div id="error-context-view" class="hidden">
+            <div id="error-context-header">
+              <span id="error-context-title"></span>
+              <button id="btn-close-error-context">← Zurück zur PDF-Vorschau</button>
+            </div>
+            <div id="error-context-code"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- R8: Dashboard „All projects" -->
+    <section id="projects-view" class="hidden">
+      <nav class="dash-nav">
+        <img class="dash-logo" src="/logo.png" alt="" width="28" height="28">
+        <span class="dash-nav-title">LaTeX Web IDE</span>
+      </nav>
+      <div class="dash-body">
+        <aside class="dash-sidebar">
+          <div class="dash-sidebar-group">
+            <div class="dash-sidebar-heading">Projekte</div>
+            <button id="tab-projects" class="dash-link active">Alle Projekte</button>
+            <button id="tab-archive" class="dash-link">Archiviert</button>
+            <button id="tab-trash" class="dash-link">Papierkorb</button>
+          </div>
+          <div class="dash-sidebar-group">
+            <div class="dash-sidebar-heading">Aktionen</div>
+            <button id="btn-open-project" class="dash-link">Ordner öffnen…</button>
+          </div>
+        </aside>
+        <div class="dash-content">
+          <h1>Alle Projekte</h1>
+          <div class="dash-toolbar">
+            <div class="dash-search-wrap">
+              <svg class="ol-icon dash-search-icon"><use href="#i-search"></use></svg>
+              <input id="projects-search" class="dash-search" placeholder="In Projekten suchen…" />
+            </div>
+            <button id="btn-new-project" class="btn-new-project">Neues Projekt</button>
+          </div>
+          <div id="projects-table-wrap">
+            <table id="projects-table">
+              <colgroup>
+                <col class="c-select" />
+                <col class="c-title" />
+                <col class="c-owner" />
+                <col class="c-modified" />
+                <col class="c-actions" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="c-select"><input type="checkbox" id="projects-select-all" aria-label="Alle auswählen" /></th>
+                  <th data-sort="name" class="sortable">Titel<span class="sort-arrow"></span></th>
+                  <th>Eigentümer</th>
+                  <th data-sort="lastModified" class="sortable">Zuletzt geändert<span class="sort-arrow"></span></th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="projects-table-body"></tbody>
+            </table>
+            <div id="projects-empty" class="hidden">Keine Projekte gefunden.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="comment-compose" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:500px">
+        <div class="dialog-header">
+          <h3>Kommentar hinzufügen</h3>
+          <button id="btn-cancel-comment" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <p id="comment-compose-snippet"></p>
+          <textarea id="comment-compose-text" placeholder="Kommentar eingeben…" rows="4"></textarea>
+          <div class="dialog-buttons">
+            <button class="btn-secondary" id="btn-cancel-comment-2">Abbrechen</button>
+            <button id="btn-confirm-comment" class="primary">Hinzufügen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="hotkey-settings" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:760px">
+        <div class="dialog-header">
+          <h3>Tastenkürzel</h3>
+          <button id="btn-close-hotkeys" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <p id="hotkey-settings-hint">
+            Klicke „+ Hotkey" und drücke danach die gewünschte Tastenkombination
+            (mindestens mit Strg/Alt/Umschalt). Eine Kombination darf sowohl
+            einer Editor- als auch einer Global-Aktion zugewiesen sein — sie
+            beeinflussen sich nicht gegenseitig, da Editor-Kürzel nur bei Fokus
+            im Editor greifen. Hinweis: Strg+Alt-Kombinationen entsprechen auf
+            manchen Tastaturlayouts AltGr und können mit Sonderzeichen kollidieren.
+          </p>
+          <div id="hotkey-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="open-project-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:560px">
+        <div class="dialog-header">
+          <h3>Projekt öffnen</h3>
+          <button id="btn-cancel-open" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <p>Lokalen Ordnerpfad des LaTeX-Projekts eingeben:</p>
+          <input id="open-project-path" placeholder="C:\Users\...\MeinProjekt" />
+          <div id="open-project-recent"></div>
+          <div class="dialog-buttons">
+            <button id="btn-confirm-open" class="primary">Öffnen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="share-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:560px">
+        <div class="dialog-header">
+          <h3>Freigabe</h3>
+          <button id="btn-close-share" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <p id="share-not-ready-hint">
+            🚧 Freigabe ist in Vorbereitung – dieses Tool läuft aktuell als reines
+            Single-User-Localhost-Werkzeug ohne Mehrbenutzer-/Netzwerk-Unterstützung.
+            Die folgenden Felder sind ein Vorschau-Layout und noch nicht funktionsfähig.
+          </p>
+          <div id="share-invite-row">
+            <input id="share-email-input" placeholder="E-Mail-Adressen, durch Komma getrennt" disabled />
+            <select id="share-role-select" disabled>
+              <option>Editor</option>
+              <option>Viewer</option>
+            </select>
+            <button id="btn-share-invite" class="primary" disabled>Einladen</button>
+          </div>
+          <div id="share-link-row">
+            <label><input type="checkbox" id="share-link-toggle" disabled /> Link sharing is off</label>
+          </div>
+          <div id="share-members-list">
+            <div class="share-member"><span>Ich</span><span class="share-member-role">Owner</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- R7: Settings als 960px-Modal mit vertikaler Tabliste links -->
+    <div id="settings-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box modal-lg">
+        <div class="dialog-header">
+          <h3>Settings</h3>
+          <button id="btn-close-settings" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div id="settings-tabs">
+            <button class="tab-btn active" data-settings-tab="editor">Editor</button>
+            <button class="tab-btn" data-settings-tab="spelling">Spelling and language</button>
+            <button class="tab-btn" data-settings-tab="compiler">Compiler</button>
+            <button class="tab-btn" data-settings-tab="references">References</button>
+            <button class="tab-btn" data-settings-tab="appearance">Appearance</button>
+            <button class="tab-btn" data-settings-tab="account">Account</button>
+          </div>
+          <div id="settings-tab-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="history-view" class="hidden">
+      <div id="history-view-header">
+        <h1>Verlauf</h1>
+        <div id="history-tabs">
+          <button id="history-tab-all" class="tab-btn active">All history</button>
+          <button id="history-tab-labels" class="tab-btn">Labels</button>
+        </div>
+        <button id="btn-close-history">✕ Zurück zum Editor</button>
+      </div>
+      <div id="history-body">
+        <aside id="history-file-tree"></aside>
+        <section id="history-diff-pane">
+          <div id="history-diff-empty">Version links auswählen, um einen Diff zu sehen.</div>
+          <div id="history-diff-content" class="hidden"></div>
+        </section>
+        <aside id="history-snapshot-list"></aside>
+      </div>
+    </div>
+
+    <div id="new-file-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:700px">
+        <div class="dialog-header">
+          <h3>Add files</h3>
+          <button id="btn-close-new-file" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div id="new-file-tabs">
+            <button class="tab-btn active" data-nf-tab="new">New file</button>
+            <button class="tab-btn" data-nf-tab="upload">Upload</button>
+            <button class="tab-btn" data-nf-tab="other-project">From another project</button>
+            <button class="tab-btn" data-nf-tab="external-url">From external URL</button>
+            <button class="tab-btn" data-nf-tab="zotero">From Zotero</button>
+          </div>
+          <div id="new-file-tab-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="new-folder-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:500px">
+        <div class="dialog-header">
+          <h3>New folder</h3>
+          <button id="btn-close-new-folder" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <input id="new-folder-name-input" placeholder="Folder name" />
+          <div class="dialog-buttons">
+            <button id="btn-cancel-new-folder" class="btn-secondary">Cancel</button>
+            <button id="btn-confirm-new-folder" class="primary">Create</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="copy-project-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:500px">
+        <div class="dialog-header">
+          <h3>Copy project</h3>
+          <button id="btn-close-copy-project" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <label>New name<input id="copy-project-name-input" /></label>
+          <div class="dialog-buttons">
+            <button id="btn-cancel-copy-project" class="btn-secondary">Cancel</button>
+            <button id="btn-confirm-copy-project" class="primary">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="word-count-dialog" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:440px">
+        <div class="dialog-header">
+          <h3>Word count</h3>
+          <button id="btn-close-word-count" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <div id="word-count-body">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/dist/bundle.js"></script>
+</body>
+</html>

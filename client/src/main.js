@@ -1,0 +1,667 @@
+import { api, authApi } from './api.js';
+import { setupAuthView } from './authView.js';
+import { connectWs } from './wsClient.js';
+import { renderTree } from './fileTree.js';
+import { createEditorManager } from './editor.js';
+import { createPdfViewer } from './pdfViewer.js';
+import { setupSearchPanel } from './searchPanel.js';
+import { setupProjectDialog } from './projectDialog.js';
+import { setupProjectsView } from './projectsView.js';
+import { createCommentsManager } from './comments.js';
+import { setupCommentsPanel } from './commentsPanel.js';
+import { createPreviewManager, fileKind } from './previewManager.js';
+import { setupSyncTex } from './syncTex.js';
+import { setupErrorPanel } from './errorPanel.js';
+import { setupHotkeySettings } from './hotkeySettings.js';
+import { setupShareDialog } from './shareDialog.js';
+import { setupHistoryView } from './historyView.js';
+import { setupMenuBar, setupLayoutMenu, setupProjectMenu } from './menuBar.js';
+import { setupSettingsDialog } from './settingsDialog.js';
+import { setupNewFileDialog, setupNewFolderDialog } from './newFileDialog.js';
+import { setupWordCountDialog } from './wordCountDialog.js';
+import { setupReviewPanel } from './reviewPanel.js';
+import { setReviewingMode } from './trackChanges.js';
+import { registerAction, initGlobalHotkeys } from './keybindings.js';
+import { setupRail } from './rail.js';
+import { setupResizers } from './resizers.js';
+import { setupOutline } from './outline.js';
+import { setupEditorToolbar } from './editorToolbar.js';
+import { openDropdown, closeDropdown, isDropdownOpenFor } from './dropdown.js';
+
+const els = {
+  activeProjectLabel: document.querySelector('#active-project-label .project-name'),
+  projectButton: document.getElementById('active-project-label'),
+  fileTree: document.getElementById('file-tree'),
+  tabbar: document.getElementById('tabbar'),
+  editorContainer: document.getElementById('editor-container'),
+  previewContainer: document.getElementById('preview-container'),
+  compileBtn: document.getElementById('btn-compile'),
+  compileOptionsBtn: document.getElementById('btn-compile-options'),
+  pdfContainer: document.getElementById('pdf-container'),
+  pdfLogView: document.getElementById('pdf-log-view'),
+  downloadPdfBtn: document.getElementById('btn-download-pdf'),
+};
+
+const authView = setupAuthView({ onAuthenticated: () => location.reload() });
+
+// Everything the app does lives inside startApp(), only entered once
+// /api/auth/me confirms a live session - showing the login/register screen
+// otherwise instead of letting the rest of this file run against a
+// logged-out session (every API call would just 401).
+(async function boot() {
+  let currentUser;
+  try {
+    currentUser = (await authApi.me()).user;
+  } catch (e) {
+    authView.show();
+    return;
+  }
+  authView.hide();
+  await startApp(currentUser);
+})();
+
+async function startApp(currentUser) {
+
+let currentTree = null;
+let mainFile = null;
+let activeProjectRoot = '';
+let commentsPanel = null; // set once setupCommentsPanel runs (needs editorMgr first)
+let reviewPanel = null; // set once setupReviewPanel runs (needs editorMgr first)
+let syncTex = null; // set once setupSyncTex runs (needs pdfViewer first)
+let outline = null; // set once setupOutline runs (needs editorMgr first)
+let openOrder = []; // ordered list of open tab paths, text and preview tabs interleaved
+let activePaneKind = 'text'; // 'text' | 'preview' - which of the two panes is currently shown
+
+const commentsManager = createCommentsManager();
+
+const editorMgr = createEditorManager(els.editorContainer, {
+  onSave: (path, content) => api.saveFile(path, content),
+  onDirtyChange: renderTabbar,
+  getInitialComments: (path) => commentsManager.getForFile(path),
+  onCommentClick: (id) => commentsPanel && commentsPanel.highlightComment(id),
+  onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(Number(id)),
+  onDocChanged: () => {
+    if (reviewPanel && reviewPanel.isOpen()) reviewPanel.render();
+    scheduleOutlineRefresh();
+  },
+  onSelectionChanged: () => scheduleOutlineRefresh(),
+});
+
+const previewMgr = createPreviewManager(els.previewContainer);
+
+const pdfViewer = createPdfViewer(
+  els.pdfContainer,
+  {
+    zoomLabel: document.getElementById('pdf-zoom-level'),
+    pageLabel: document.getElementById('pdf-page-label'),
+    pageInput: document.getElementById('pdf-page-input'),
+  },
+  { onPdfDoubleClick: (page, x, y) => syncTex && syncTex.handlePdfDoubleClick(page, x, y) }
+);
+
+// --- PDF-Toolbar (R6) ---------------------------------------------------
+
+document.getElementById('pdf-zoom-in').addEventListener('click', () => pdfViewer.zoom(0.2));
+document.getElementById('pdf-zoom-out').addEventListener('click', () => pdfViewer.zoom(-0.2));
+document.getElementById('pdf-prev').addEventListener('click', () => pdfViewer.goToPage(pdfViewer.getCurrentPage() - 1));
+document.getElementById('pdf-next').addEventListener('click', () => pdfViewer.goToPage(pdfViewer.getCurrentPage() + 1));
+
+const pageInput = document.getElementById('pdf-page-input');
+pageInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const n = parseInt(pageInput.value, 10);
+  if (!Number.isNaN(n)) pdfViewer.goToPage(n);
+  pageInput.blur();
+});
+
+const zoomBtn = document.getElementById('pdf-zoom-level');
+const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+zoomBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (isDropdownOpenFor(zoomBtn)) return closeDropdown();
+  const mode = pdfViewer.getZoomMode();
+  const items = [
+    { label: 'An Breite anpassen', checked: mode === 'fit-width', onClick: () => pdfViewer.setZoom('fit-width') },
+    { label: 'Ganze Seite', checked: mode === 'fit-page', onClick: () => pdfViewer.setZoom('fit-page') },
+    { type: 'divider' },
+    ...ZOOM_LEVELS.map((z) => ({
+      label: `${Math.round(z * 100)}%`,
+      checked: mode === z,
+      onClick: () => pdfViewer.setZoom(z),
+    })),
+  ];
+  openDropdown(zoomBtn, items, { align: 'right' });
+});
+
+// --- Layout -------------------------------------------------------------
+
+const LAYOUT_STORAGE_KEY = 'latex-ide-layout-mode';
+const appEl = document.getElementById('app');
+let layoutMode = 'split';
+
+function applyLayout(mode) {
+  layoutMode = mode || 'split';
+  appEl.classList.remove('layout-editor-only', 'layout-pdf-only', 'layout-focus');
+  if (layoutMode !== 'split') appEl.classList.add('layout-' + layoutMode);
+  localStorage.setItem(LAYOUT_STORAGE_KEY, layoutMode);
+}
+
+applyLayout(localStorage.getItem(LAYOUT_STORAGE_KEY) || 'split');
+
+const rail = setupRail();
+setupResizers();
+
+function showPane(kind) {
+  activePaneKind = kind;
+  els.editorContainer.classList.toggle('hidden', kind !== 'text');
+  els.previewContainer.classList.toggle('hidden', kind !== 'preview');
+}
+
+function getActiveOpenPath() {
+  return activePaneKind === 'text' ? editorMgr.getActivePath() : previewMgr.getActivePath();
+}
+
+// --- Datei-Tabs (R5) ----------------------------------------------------
+
+function tabIconFor(path) {
+  return /\.(png|jpe?g|gif|bmp|svg|webp)$/i.test(path) ? 'image' : 'file';
+}
+
+function renderTabbar() {
+  els.tabbar.innerHTML = '';
+  for (const path of openOrder) {
+    const kind = fileKind(path);
+    const paneKind = kind === 'text' ? 'text' : 'preview';
+    const activePathForKind = paneKind === 'text' ? editorMgr.getActivePath() : previewMgr.getActivePath();
+    const isActive = activePaneKind === paneKind && activePathForKind === path;
+
+    const tab = document.createElement('div');
+    tab.className = 'tab' + (isActive ? ' active' : '');
+
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon';
+    icon.innerHTML = `<svg class="ol-icon"><use href="#i-${tabIconFor(path)}"></use></svg>`;
+    content.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    const dirty = paneKind === 'text' && editorMgr.isDirty(path);
+    label.textContent = path.split('/').pop() + (dirty ? ' •' : '');
+    content.appendChild(label);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tab-close';
+    close.title = 'Tab schließen';
+    close.innerHTML = '<svg class="ol-icon"><use href="#i-close"></use></svg>';
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (paneKind === 'text') editorMgr.closeTab(path);
+      else previewMgr.closeTab(path);
+      openOrder = openOrder.filter((p) => p !== path);
+      renderTabbar();
+    });
+    content.appendChild(close);
+
+    tab.appendChild(content);
+    tab.addEventListener('click', () => openFile(path));
+    els.tabbar.appendChild(tab);
+  }
+}
+
+function closeActiveTab() {
+  const path = getActiveOpenPath();
+  if (!path) return;
+  const paneKind = fileKind(path) === 'text' ? 'text' : 'preview';
+  if (paneKind === 'text') editorMgr.closeTab(path);
+  else previewMgr.closeTab(path);
+  openOrder = openOrder.filter((p) => p !== path);
+  renderTabbar();
+}
+
+function cycleTab(delta) {
+  if (openOrder.length === 0) return;
+  const current = getActiveOpenPath();
+  const idx = current ? openOrder.indexOf(current) : -1;
+  const nextIdx = ((idx === -1 ? 0 : idx) + delta + openOrder.length) % openOrder.length;
+  openFile(openOrder[nextIdx]);
+}
+
+let outlineTimer = null;
+function scheduleOutlineRefresh() {
+  clearTimeout(outlineTimer);
+  outlineTimer = setTimeout(() => outline && outline.render(), 400);
+}
+
+async function openFile(path, line) {
+  const kind = fileKind(path);
+  if (!openOrder.includes(path)) openOrder.push(path);
+
+  if (kind === 'text') {
+    if (!editorMgr.isOpen(path)) {
+      const { content, binary } = await api.getFile(path);
+      if (binary) {
+        alert('Diese Datei kann nicht als Text angezeigt werden: ' + path);
+        openOrder = openOrder.filter((p) => p !== path);
+        return;
+      }
+      editorMgr.openFile(path, content);
+    } else {
+      editorMgr.openFile(path, null);
+    }
+    showPane('text');
+  } else {
+    previewMgr.openFile(path, kind);
+    showPane('preview');
+  }
+
+  renderTabbar();
+  refreshTreeHighlight();
+  if (outline) outline.render();
+  if (commentsPanel && commentsPanel.isOpen()) commentsPanel.renderList();
+  if (line && kind === 'text') {
+    const doc = editorMgr.view.state.doc;
+    const ln = Math.min(line, doc.lines);
+    const pos = doc.line(ln).from;
+    editorMgr.view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+    editorMgr.view.focus();
+    if (outline) outline.render();
+  }
+}
+
+function closeTabsUnder(relPath) {
+  const affected = openOrder.filter((p) => p === relPath || p.startsWith(relPath + '/'));
+  for (const p of affected) {
+    if (fileKind(p) === 'text') editorMgr.closeTab(p);
+    else previewMgr.closeTab(p);
+  }
+  openOrder = openOrder.filter((p) => !affected.includes(p));
+  renderTabbar();
+}
+
+function createTreeFolder(parentPath) {
+  newFolderDialog.show(parentPath);
+}
+
+function createTreeFile(parentPath) {
+  newFileDialog.show(parentPath);
+}
+
+async function renameTreeNode(relPath, isDir, currentName) {
+  const newName = prompt('Neuer Name:', currentName);
+  if (!newName || newName === currentName) return;
+  try {
+    await api.renamePath(relPath, newName);
+    closeTabsUnder(relPath); // renamed path's tabs would otherwise point at a now-nonexistent file
+    await loadTree();
+  } catch (e) {
+    alert('Fehler beim Umbenennen: ' + e.message);
+  }
+}
+
+async function deleteTreeNode(relPath, isDir) {
+  const label = isDir ? 'den Ordner (inkl. Inhalt)' : 'die Datei';
+  if (!confirm(`${label.charAt(0).toUpperCase() + label.slice(1)} "${relPath}" wirklich löschen?`)) return;
+  try {
+    await api.deletePath(relPath);
+    closeTabsUnder(relPath);
+    await loadTree();
+  } catch (e) {
+    alert('Fehler beim Löschen: ' + e.message);
+  }
+}
+
+async function moveTreeNode(sourcePath, targetDir) {
+  try {
+    let result = await api.movePath(sourcePath, targetDir, false);
+    if (result.conflict) {
+      const name = sourcePath.split('/').pop();
+      if (!confirm(`"${name}" existiert bereits im Zielordner. Überschreiben?`)) return;
+      result = await api.movePath(sourcePath, targetDir, true);
+    }
+    closeTabsUnder(sourcePath); // moved path's tabs would otherwise point at a now-nonexistent location
+    await loadTree();
+  } catch (e) {
+    alert('Fehler beim Verschieben: ' + e.message);
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadDroppedFiles(targetDir, entries) {
+  try {
+    for (const { relPath, file } of entries) {
+      const content = await readFileAsBase64(file);
+      const slash = relPath.lastIndexOf('/');
+      const subDir = slash === -1 ? '' : relPath.slice(0, slash);
+      const name = slash === -1 ? relPath : relPath.slice(slash + 1);
+      const dir = targetDir && subDir ? `${targetDir}/${subDir}` : targetDir || subDir;
+      await api.uploadFile(dir, name, content);
+    }
+    await loadTree();
+  } catch (e) {
+    alert('Fehler beim Hochladen: ' + e.message);
+  }
+}
+
+function refreshTreeHighlight() {
+  if (!currentTree) return;
+  renderTree(els.fileTree, currentTree, {
+    activePath: getActiveOpenPath(),
+    mainFile,
+    onOpen: openFile,
+    onSetMain: setMainFile,
+    onCreateFolder: createTreeFolder,
+    onCreateFile: createTreeFile,
+    onRename: renameTreeNode,
+    onDelete: deleteTreeNode,
+    onMove: moveTreeNode,
+    onUploadFiles: uploadDroppedFiles,
+    onUploadHere: (dir) => newFileDialog.show(dir, 'upload'),
+  });
+}
+
+async function setMainFile(path) {
+  await api.setMainFile(path);
+  mainFile = path;
+  refreshTreeHighlight();
+}
+
+async function loadTree() {
+  const { tree, mainFile: mf } = await api.getTree();
+  currentTree = tree;
+  mainFile = mf;
+  refreshTreeHighlight();
+}
+
+async function loadProject(root) {
+  activeProjectRoot = root;
+  const name = root.split(/[\\/]/).pop() || root;
+  els.activeProjectLabel.textContent = name;
+  els.projectButton.title = root;
+  await Promise.all([loadTree(), commentsManager.loadAll()]);
+}
+
+async function openProjectByRoot(root) {
+  try {
+    const result = await api.openProject(root);
+    mainFile = result.mainFile;
+    await loadProject(result.activeRoot);
+  } catch (e) {
+    alert('Fehler beim Öffnen: ' + e.message);
+  }
+}
+
+// --- Kompilieren (R6: Zustand steckt im Button und im Badge, keine
+//     eigene Statuszeile - die gibt es im Original nicht) ----------------
+
+let autoCompile = localStorage.getItem('latex-ide-autocompile') === '1';
+
+els.compileOptionsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (isDropdownOpenFor(els.compileOptionsBtn)) return closeDropdown();
+  openDropdown(
+    els.compileOptionsBtn,
+    [
+      { label: 'Jetzt kompilieren', icon: 'play', onClick: () => els.compileBtn.click() },
+      { type: 'divider' },
+      {
+        label: 'Automatisch kompilieren (beim Speichern)',
+        checked: autoCompile,
+        onClick: () => {
+          autoCompile = !autoCompile;
+          localStorage.setItem('latex-ide-autocompile', autoCompile ? '1' : '0');
+        },
+      },
+      { label: 'Logs anzeigen', icon: 'bug', onClick: () => errorPanel.show() },
+    ],
+    { align: 'left' }
+  );
+});
+
+els.downloadPdfBtn.addEventListener('click', async () => {
+  const p = pdfViewer.getCurrentPath();
+  if (!p) return alert('Noch kein PDF vorhanden - zuerst kompilieren.');
+  const projectName = activeProjectRoot.split(/[\\/]/).pop() || 'dokument';
+  const res = await fetch(`/api/pdf?path=${encodeURIComponent(p)}`);
+  if (!res.ok) return alert('PDF konnte nicht heruntergeladen werden.');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${projectName}.pdf`;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+els.compileBtn.addEventListener('click', async () => {
+  els.compileBtn.disabled = true;
+  els.compileBtn.textContent = 'Kompiliere…';
+  try {
+    const result = await api.compile();
+    els.pdfLogView.textContent = result.log;
+    errorPanel.setErrors(result.errors);
+    if (result.success) {
+      errorPanel.hide();
+    } else if (!result.pdfPath) {
+      // Ohne PDF ist die Log-Ansicht das einzig Sinnvolle in der Spalte
+      errorPanel.show();
+    }
+    if (result.pdfPath) pdfViewer.load(result.pdfPath);
+  } catch (e) {
+    els.pdfLogView.textContent = String(e.message || e);
+    errorPanel.setErrors([{ file: '', line: null, message: e.message }]);
+    errorPanel.show();
+  } finally {
+    els.compileBtn.disabled = false;
+    els.compileBtn.textContent = 'Kompilieren';
+  }
+});
+
+const searchPanelApi = setupSearchPanel({
+  onOpenResult: (file, line) => openFile(file, line),
+});
+
+setupProjectDialog({
+  onOpened: ({ activeRoot, mainFile: mf }) => {
+    mainFile = mf;
+    loadProject(activeRoot);
+  },
+});
+
+const projectsView = setupProjectsView({
+  onOpenProject: openProjectByRoot,
+  currentUser,
+});
+
+commentsPanel = setupCommentsPanel({
+  commentsManager,
+  editorMgr,
+  getActivePath: () => editorMgr.getActivePath(),
+});
+
+reviewPanel = setupReviewPanel({
+  editorMgr,
+  getActivePath: () => editorMgr.getActivePath(),
+});
+
+document.getElementById('review-mode-select').addEventListener('change', (e) => {
+  setReviewingMode(e.target.value === 'reviewing');
+});
+
+const newFileDialog = setupNewFileDialog({
+  onCreated: async (newPath) => {
+    await loadTree();
+    if (fileKind(newPath) === 'text') openFile(newPath);
+  },
+  onUpload: uploadDroppedFiles,
+});
+
+const newFolderDialog = setupNewFolderDialog({ onCreated: () => loadTree() });
+
+const wordCountDialog = setupWordCountDialog();
+
+syncTex = setupSyncTex({
+  editorMgr,
+  pdfViewer,
+  getActivePath: () => editorMgr.getActivePath(),
+  onJumpToCode: (file, line) => openFile(file, line),
+});
+
+const errorPanel = setupErrorPanel({
+  onJumpTo: (file, line) => openFile(file, line),
+  getFileLines: async (file) => {
+    try {
+      const { content, binary } = await api.getFile(file);
+      return binary ? null : content.split('\n');
+    } catch (e) {
+      return null;
+    }
+  },
+});
+
+const hotkeySettings = setupHotkeySettings();
+const shareDialog = setupShareDialog();
+const historyView = setupHistoryView();
+const settingsDialog = setupSettingsDialog({
+  editorMgr,
+  onShowHotkeys: () => hotkeySettings.show(),
+  currentUser,
+  onLogout: async () => {
+    await authApi.logout();
+    location.reload();
+  },
+});
+
+outline = setupOutline({
+  editorMgr,
+  getActivePath: () => editorMgr.getActivePath(),
+});
+outline.render();
+
+const editorToolbar = setupEditorToolbar({
+  getView: () => editorMgr.view,
+  onFind: () => editorMgr.openSearch(),
+  onFindInProject: () => searchPanelApi.toggle(),
+  onAddComment: () => commentsPanel.triggerAddComment(),
+});
+
+const menuCtx = {
+  getView: () => editorMgr.view,
+  onFind: () => editorMgr.openSearch(),
+  onFindInProject: () => searchPanelApi.toggle(),
+  onShowHistory: () => historyView.show(),
+  onShowHotkeys: () => hotkeySettings.show(),
+  onShowSettings: () => settingsDialog.show(),
+  onAddComment: () => commentsPanel.triggerAddComment(),
+  getPdfPath: () => pdfViewer.getCurrentPath(),
+  onZoom: (delta) => pdfViewer.zoom(delta),
+  onLayout: (mode) => applyLayout(mode),
+  getLayout: () => layoutMode,
+  onTreeChanged: () => loadTree(),
+  onNewFile: () => newFileDialog.show(''),
+  onNewFolder: () => newFolderDialog.show(''),
+  onUploadFile: () => newFileDialog.show('', 'upload'),
+  onWordCount: () => wordCountDialog.show(),
+  onHome: () => projectsView.show(),
+  onOpenFolder: () => document.getElementById('btn-open-project').click(),
+  canOpenFolder: () => !!currentUser.isAdmin,
+  getOutlineVisible: () => !document.getElementById('pane-files').classList.contains('outline-collapsed'),
+  onToggleOutline: () => document.querySelector('.outline-toggle').click(),
+  getToolbarVisible: () => editorToolbar.isVisible(),
+  onToggleToolbar: () => editorToolbar.setVisible(!editorToolbar.isVisible()),
+  onMakeCopy: () => {
+    const name = activeProjectRoot.split(/[\\/]/).pop();
+    if (name) projectsView.showCopyDialogFor(name);
+  },
+};
+
+setupMenuBar(menuCtx);
+setupLayoutMenu(menuCtx);
+setupProjectMenu(menuCtx);
+
+// Arbitrary local-folder access only makes sense for the admin (who runs the
+// server and owns the pre-existing outside-of-projects/ Bachelorarbeit
+// folder) - non-admin accounts are restricted server-side to their own
+// isolated projects/users/<id>/ folder anyway, so the dialog would just
+// produce confusing 403s for them.
+if (!currentUser.isAdmin) document.getElementById('btn-open-project').classList.add('hidden');
+
+// Die Suche hatte bisher keinen eigenen Button (nur Strg+F) - im Redesign
+// ist sie ein Rail-Tab und braucht deshalb eine Verdrahtung.
+document.getElementById('btn-search').addEventListener('click', () => searchPanelApi.toggle());
+document.getElementById('btn-settings').addEventListener('click', () => settingsDialog.show());
+document.getElementById('btn-tree-new-folder').addEventListener('click', () => createTreeFolder(''));
+document.getElementById('btn-tree-new-file').addEventListener('click', () => createTreeFile(''));
+document.getElementById('btn-tree-upload').addEventListener('click', () => newFileDialog.show('', 'upload'));
+document.getElementById('btn-cancel-comment-2').addEventListener('click', () =>
+  document.getElementById('btn-cancel-comment').click()
+);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  hotkeySettings.hide();
+  shareDialog.hide();
+  settingsDialog.hide();
+  if (appEl.classList.contains('layout-focus')) applyLayout('split');
+});
+
+registerAction('compile', () => els.compileBtn.click());
+registerAction('toggleAllProjects', () => projectsView.toggle());
+registerAction('toggleComments', () => commentsPanel.toggle());
+registerAction('toggleErrors', () => errorPanel.toggle());
+registerAction('toggleSearch', () => searchPanelApi.toggle());
+// Strg+F: Suchen/Ersetzen-Leiste unten im Editor, in beiden Scopes registriert
+// (greift also auch, wenn der Fokus gerade außerhalb des Editors liegt).
+registerAction('searchInFile', () => editorMgr.openSearch());
+registerAction('searchInFileEditor', () => editorMgr.openSearch());
+registerAction('toggleHistory', () => historyView.toggle());
+registerAction('closeTab', () => closeActiveTab());
+registerAction('nextTab', () => cycleTab(1));
+registerAction('prevTab', () => cycleTab(-1));
+registerAction('addComment', () => commentsPanel.triggerAddComment());
+registerAction('syncToPdf', () => syncTex.syncToPdf());
+initGlobalHotkeys();
+
+connectWs({
+  fileChanged: (msg) => {
+    editorMgr.applyExternalChange(msg.path, msg.content, msg.changedRanges);
+    renderTabbar();
+    scheduleOutlineRefresh();
+  },
+  fileDeleted: () => loadTree(),
+  treeChanged: () => loadTree(),
+  pdfChanged: (msg) => pdfViewer.reload(),
+  compileStatus: (msg) => {
+    if (msg.status === 'running') els.compileBtn.textContent = 'Kompiliere…';
+  },
+  commentsChanged: async (msg) => {
+    await commentsManager.loadAll();
+    editorMgr.refreshCommentsForPath(msg.path, commentsManager.getForFile(msg.path));
+    if (commentsPanel.isOpen() && editorMgr.getActivePath() === msg.path) commentsPanel.renderList();
+  },
+});
+
+(async function init() {
+  const { activeRoot } = await api.listProjects();
+  if (activeRoot) {
+    await loadProject(activeRoot);
+  } else {
+    projectsView.show();
+  }
+})();
+
+}

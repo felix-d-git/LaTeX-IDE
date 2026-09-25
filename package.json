@@ -1,0 +1,37 @@
+{
+  "name": "latex-web-ide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lokale Overleaf-artige Web-IDE fuer LaTeX-Projekte, nutzt eine lokal installierte TeX-Distribution (latexmk).",
+  "type": "commonjs",
+  "scripts": {
+    "build:client": "node build.js",
+    "start": "npm run build:client && node server/index.js",
+    "dev": "node build.js --watch & node server/index.js"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.6.0",
+    "@codemirror/language": "^6.10.1",
+    "@codemirror/legacy-modes": "^6.4.0",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.28.0",
+    "archiver": "^7.0.1",
+    "bcryptjs": "^3.0.3",
+    "chokidar": "^3.6.0",
+    "codemirror": "^6.0.1",
+    "cookie": "^2.0.1",
+    "cookie-parser": "^1.4.7",
+    "cookie-signature": "^1.2.2",
+    "diff": "^5.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "express-session": "^1.19.0",
+    "nodemailer": "^9.0.3",
+    "pdfjs-dist": "^4.4.168",
+    "session-file-store": "^1.5.0",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
+}

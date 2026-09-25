@@ -1,0 +1,16 @@
+node_modules
+client/dist
+.git
+.sessions
+.firecrawl
+.playwright-cli
+*.log
+auth-data.json
+workspace.json
+projects/**/.latex-ide-out
+projects/**/.latex-ide-history
+swiftlatex-poc
+tectonic-poc
+includeonly-poc
+Backup1_03_08_2026
+.env
