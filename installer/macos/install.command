@@ -72,7 +72,7 @@ fi
 
 echo "Kopiere App-Dateien nach $APP_DIR..."
 mkdir -p "$APP_DIR"
-for item in client server package.json package-lock.json build.js LICENSES-INSTALLER.txt; do
+for item in client server package.json package-lock.json build.js LICENSE THIRD_PARTY_NOTICES.md LICENSES-INSTALLER.txt; do
     if [ -e "$SCRIPT_DIR/$item" ]; then
         rm -rf "$APP_DIR/$item"
         cp -R "$SCRIPT_DIR/$item" "$APP_DIR/$item"

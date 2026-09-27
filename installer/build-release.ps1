@@ -75,6 +75,8 @@ Copy-ToStaging 'server' 'server'
 Copy-ToStaging 'package.json' 'package.json'
 Copy-ToStaging 'package-lock.json' 'package-lock.json'
 Copy-ToStaging 'build.js' 'build.js'
+Copy-ToStaging 'LICENSE' 'LICENSE'
+Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE.cmd') 'LatexIDE.cmd'
 
@@ -155,10 +157,11 @@ Write-Host "Node.js nach $NodeDestDir kopiert."
 Write-Step "Windows-Installer bauen (Inno Setup)"
 
 $IsccCandidates = @(
+    $env:ISCC,
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 )
-$Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$Iscc = $IsccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
 if ($Iscc) {
     & $Iscc (Join-Path $InstallerDir 'windows\LatexIDE.iss')
@@ -175,7 +178,8 @@ if ($Iscc) {
 
 Write-Step "macOS-Paket erzeugen: installer\out\LatexIDE-macOS.zip"
 
-$MacStagingDir = Join-Path $OutDir 'staging-macos'
+# Temp statt out/: Nextcloud/AV sperrt sonst Dateien waehrend Compress-Archive
+$MacStagingDir = Join-Path $env:TEMP 'latexide-staging-macos'
 if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 

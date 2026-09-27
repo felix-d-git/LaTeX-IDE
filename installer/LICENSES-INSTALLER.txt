@@ -1,6 +1,16 @@
 LatexIDE Desktop - Lizenzhinweise zum Installer
 =================================================
 
+LatexIDE selbst
+---------------
+GNU Affero General Public License v3.0 (AGPL-3.0-only), siehe LICENSE.
+Quellcode: https://github.com/felix-d-git/latex-web-ide
+
+TeX Live, MacTeX und Tectonic sind eigenstaendige Programme (bloße
+Zusammenstellung, GPL-3.0 §5 / AGPL-3.0 §5). LatexIDE startet sie nur als
+externe Prozesse und bindet keinen ihrer Programmteile ein; sie lassen sich
+durch ein anderes TeX-System ersetzen (Umgebungsvariable TEX_BACKEND).
+
 Node.js
 -------
 Wird als vorkompilierte Binary mitgeliefert (Ordner "node\" bzw. "node/").

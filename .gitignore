@@ -16,3 +16,6 @@ swiftlatex-poc/
 .playwright-cli/
 .firecrawl/
 graphify-out/
+
+# Installer-Build
+installer/out/

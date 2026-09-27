@@ -17,14 +17,23 @@ function findMainCandidate(root) {
 
 const ENGINE_FLAG = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' };
 
-function compile(root, mainRelPath, settings = {}) {
-  return new Promise((resolve) => {
-    const outDir = path.join(root, OUT_DIR);
-    fs.mkdirSync(outDir, { recursive: true });
+// The TeX system is swappable and always runs as a separate process (spawn,
+// no shell) - the app never links TeX code. latexmk = TeX Live/MiKTeX (default),
+// tectonic = MIT-licensed single binary (XeTeX-based, fetches packages itself).
+// tectonic can \input files outside the project even with --untrusted, so the
+// multi-user server refuses it (server/index.js) - desktop app only.
+// ponytail: tectonic ignores the compiler setting and has no synctex binary for
+// the PDF<->source jump; SwiftLaTeX would be a browser-side (WASM) swap instead.
+const BACKEND = process.env.TEX_BACKEND === 'tectonic' ? 'tectonic' : 'latexmk';
 
-    const engineFlag = ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex;
-    const args = [
-      engineFlag,
+function texCommand(mainRelPath, settings) {
+  if (BACKEND === 'tectonic') {
+    return ['tectonic', ['-X', 'compile', '--untrusted', '--synctex', '--keep-logs', '--keep-intermediates', '--outdir', OUT_DIR, mainRelPath]];
+  }
+  return [
+    'latexmk',
+    [
+      ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex,
       '-g', // force a real rerun even if latexmk thinks nothing changed since the last (possibly failed) run
       '-interaction=nonstopmode', // skip past recoverable errors instead of blocking on stdin
       // Default (Overleaf-style): keep producing a best-effort PDF past errors.
@@ -34,12 +43,21 @@ function compile(root, mainRelPath, settings = {}) {
       '-synctex=1',
       `-outdir=${OUT_DIR}`,
       mainRelPath,
-    ];
+    ],
+  ];
+}
+
+function compile(root, mainRelPath, settings = {}) {
+  return new Promise((resolve) => {
+    const outDir = path.join(root, OUT_DIR);
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const [cmd, args] = texCommand(mainRelPath, settings);
 
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
     const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: path.join(root, OUT_DIR) };
-    const proc = spawn('latexmk', args, { cwd: root, env });
+    const proc = spawn(cmd, args, { cwd: root, env });
 
     let log = '';
     proc.stdout.on('data', (d) => (log += d.toString()));
@@ -48,7 +66,7 @@ function compile(root, mainRelPath, settings = {}) {
     proc.on('error', (err) => {
       resolve({
         success: false,
-        log: `Konnte "latexmk" nicht starten: ${err.message}\nIst TeX Live/MiKTeX im PATH installiert?`,
+        log: `Konnte "${cmd}" nicht starten: ${err.message}\nIst ${cmd === 'tectonic' ? 'Tectonic' : 'TeX Live/MiKTeX'} im PATH installiert?`,
         errors: [],
         pdfPath: null,
       });
@@ -128,7 +146,7 @@ function parseLog(log, root) {
   };
   lines.forEach((line, i) => {
     for (const open of line.matchAll(/\((\.\/[^\s()]+\.tex)/g)) currentFile = normalizeTexPath(root, open[1]);
-    let m = line.match(/^(.*\.tex):(\d+):\s*(.*)$/);
+    let m = line.match(/^(?:error: )?(.*\.tex):(\d+):\s*(.*)$/); // tectonic prefixes "error: "
     // TeX bricht Log-Zeilen hart nach 79 Zeichen um - Fehlermeldung wieder zusammensetzen.
     for (let j = i; m && lines[j].length >= 79 && j + 1 < lines.length; j++) m[3] += lines[j + 1];
     if (m) return push(errors, { file: normalizeTexPath(root, m[1]), line: Number(m[2]), message: m[3].trim() }, i);
@@ -145,4 +163,4 @@ function parseLog(log, root) {
   return { errors, warnings, infos };
 }
 
-module.exports = { compile, findMainCandidate, OUT_DIR, parseLog };
+module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND };

@@ -155,6 +155,8 @@ export function setupMenuBar(ctx) {
         { type: 'divider' },
         // Neutrale LaTeX-Doku (kein Bezug auf fremde Marken im veröffentlichten Tool).
         { label: 'Documentation', onClick: () => window.open('https://en.wikibooks.org/wiki/LaTeX', '_blank', 'noopener') },
+        // AGPL-3.0 §13: users of the hosted version must be able to get the source.
+        { label: 'Source code (AGPL-3.0)', onClick: () => window.open('https://github.com/felix-d-git/latex-web-ide', '_blank', 'noopener') },
       ],
     },
   ];

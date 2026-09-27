@@ -1,7 +1,10 @@
 # LaTeX Web IDE — Arbeitsregeln
 
 - Betrieb (ab 25.09.2026, Mehrbenutzer): Server auf dem Pi in `~/container/latex` (Container `latex-collab` + `latex-tailscale`, Funnel `https://latex.example.org`), Deploy per `git archive` → `docker compose -f docker-compose.pi.yml up -d --build`. `.env` nur auf dem Pi. Daten `/srv/latex/data`, TeX Live 2025 read-only aus `/srv/latex/texlive` (Pfad im Container `/data/texlive` = Installationspfad, nicht ändern).
-- Alte On-Demand-Installation (`~/container/latex-webide`, systemd `latex-ide-proxy.socket`, Port 3078) ist davon unabhängig.
+- Alte On-Demand-Installation am 27.09.2026 entfernt; ihre Daten liegen unangetastet in `/srv/latex-alt`. Alter Code auf Branch `legacy-local`.
+- Branches: `multiuser` = neue Version, Merge nach `master` erst nach Freigabe durch den User.
+- TeX-Backend per `TEX_BACKEND` (`latexmk` Standard, `tectonic`): tectonic nur in der Desktop-App, `server/index.js` verweigert den Start damit (liest Dateien außerhalb des Projekts). TeX läuft nur als externer Prozess (Lizenz: AGPL-3.0 + bloße Zusammenstellung).
+- Installer bauen: `installer\build-release.ps1`; Inno Setup per `$env:ISCC` (auch portabel), Ausgabe `installer\out\` (gitignored).
 - Desktop-App: `server/desktop.js` (Port 3178, `REMOTE_URL`, `LATEX_IDE_DATA`), kompiliert lokal gegen einen Spiegel; Installer unter `installer/`.
 - Datenpfad per `DATA_DIR` (auth-data.json, .sessions, workspace.json, projects/, mail-outbox.log); ohne = Repo-Wurzel.
 - Git-Remote: `origin` = https://github.com/felix-d-git/latex-web-ide (privat), Push/Releases nur auf Anweisung; Releases als Tag `vX.Y.Z` + GitHub-Release. Seit 25.09.2026 global nur noch `felix-d-git` (Credential Manager + `user.email` = GitHub-noreply-Adresse); das alte Konto `altes-konto` wird nicht mehr genutzt.

@@ -10,7 +10,9 @@ const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
 const { buildTree, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
+const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
+// tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
+if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, replaceInProject, collectRefs } = require('./lib/search');
 const { startWatcher } = require('./lib/watcher');
 const projects = require('./lib/projects');
