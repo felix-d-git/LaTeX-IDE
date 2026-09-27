@@ -80,6 +80,15 @@ Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE.cmd') 'LatexIDE.cmd'
 
+# Update-Quelle fuer die Desktop-App. Solange das Repo privat ist, kommt ein
+# (fine-grained, nur Lesen "Contents") Token aus $env:GITHUB_TOKEN in die App -
+# nie ins Repo (update-config.json ist gitignored und entsteht nur im Staging).
+if (-not $WhatIf) {
+    $UpdateCfg = @{ repo = 'felix-d-git/latex-web-ide' }
+    if ($env:GITHUB_TOKEN) { $UpdateCfg.token = $env:GITHUB_TOKEN } else { Write-Warning "GITHUB_TOKEN nicht gesetzt - Auto-Update funktioniert erst, wenn das Repo oeffentlich ist." }
+    [IO.File]::WriteAllText((Join-Path $StagingDir 'update-config.json'), ($UpdateCfg | ConvertTo-Json))
+}
+
 if ($WhatIf) {
     Write-Host "[WhatIf] Trockenlauf beendet - kein npm ci / build / prune ausgefuehrt."
     return

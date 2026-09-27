@@ -1,9 +1,10 @@
 // Desktop app: serves the same web client on localhost, forwards everything
 // to the shared server (REMOTE_URL) with the user's desktop token, and
 // compiles locally against a mirror of the project - the Pi can't compile
-// for everyone. Offline, cached GETs keep the UI usable, Yjs keeps editing
-// alive in the browser's IndexedDB, and compiles use the last mirror plus the
-// open editor texts the client sends along.
+// for everyone. Projects the user owns are kept as a real copy in LOCAL_DIR
+// (default Documents\LatexIDE), synced both ways while online; offline, tree,
+// files and compile come from that copy. Other GETs fall back to a cache, Yjs
+// keeps editing alive in the browser's IndexedDB.
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -13,6 +14,10 @@ const httpProxy = require('http-proxy');
 const { compile, OUT_DIR } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
+const { buildTree, isTextFile } = require('./lib/fsTree');
+const { syncFolder } = require('./lib/localSync');
+const os = require('os');
+const { spawn } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 3178;
 const REMOTE = (process.env.REMOTE_URL || 'https://latex.example.org').replace(/\/+$/, '');
@@ -20,6 +25,8 @@ const DATA = process.env.LATEX_IDE_DATA || path.join(__dirname, '..', 'desktop-d
 const CONFIG_PATH = path.join(DATA, 'config.json');
 const CACHE_DIR = path.join(DATA, 'cache');
 const MIRROR_DIR = path.join(DATA, 'mirror');
+const SYNC_DIR = path.join(DATA, 'sync');
+const APP_VERSION = require('../package.json').version;
 const LOCAL_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
 const LOCAL_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const CSRF_COOKIE = 'csrfToken';
@@ -44,6 +51,17 @@ function writeJson(file, value) {
 }
 
 let config = readJson(CONFIG_PATH, {});
+// Written by the installer (dir page "lokale Kopie") / build-release.ps1 (update source).
+const readInstallJson = (name) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', name), 'utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    return {};
+  }
+};
+const install = readInstallJson('install.json');
+const LOCAL_DIR = path.resolve(process.env.LATEX_IDE_LOCAL || install.localDir || config.localDir || path.join(os.homedir(), 'Documents', 'LatexIDE'));
+fs.mkdirSync(LOCAL_DIR, { recursive: true });
 function setToken(token) {
   config = { ...config, token: token || undefined };
   writeJson(CONFIG_PATH, config);
@@ -74,13 +92,22 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {})
       redirect: 'manual',
     });
   } catch (e) {
+    online = false;
     throw new Offline(e.message);
   }
   // Funnel down / Pi off: Tailscale answers with 502/503/504 instead of a refused connection.
-  if ([502, 503, 504].includes(res.status)) throw new Offline(`HTTP ${res.status}`);
+  if ([502, 503, 504].includes(res.status)) {
+    online = false;
+    throw new Offline(`HTTP ${res.status}`);
+  }
   if (res.status === 401) setToken(null); // revoked or expired - log in again
+  if (!online) {
+    online = true;
+    setImmediate(syncAll); // back online: merge the offline copy
+  }
   return res;
 }
+let online = true;
 
 async function remoteJson(pathAndQuery) {
   const res = await remote(pathAndQuery);
@@ -124,15 +151,69 @@ app.get('/desktop-callback', (req, res) => {
     return res.status(400).send('Ungültige oder abgelaufene Anmeldung. Bitte die Desktop-App neu starten.');
   }
   setToken(String(token));
+  setImmediate(syncAll);
   res.redirect(`http://localhost:${PORT}/`);
 });
 
 app.get('/api/desktop/info', (req, res) => {
-  res.json({ desktop: true, connected: !!config.token, remote: REMOTE });
+  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
+});
+
+// --- auto-update from GitHub releases ---
+// Repo is private for now: the token (read-only, contents) comes from the
+// build (update-config.json, gitignored) or env GITHUB_TOKEN; once the repo is
+// public it simply works without one.
+const updateCfg = readInstallJson('update-config.json');
+const UPDATE_REPO = process.env.UPDATE_REPO || updateCfg.repo || 'felix-d-git/latex-web-ide';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || updateCfg.token || '';
+
+// '0.2.0' > '0.1.9'; ignores a leading v.
+function newer(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map(Number);
+  const pb = String(b).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
+
+async function github(url, accept = 'application/vnd.github+json') {
+  const headers = { Accept: accept, 'User-Agent': 'LatexIDE-Desktop' };
+  if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+  const r = await fetch(url, { headers, signal: AbortSignal.timeout(accept.includes('octet') ? 600000 : 10000) });
+  if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
+  return r;
+}
+
+let latest = null; // { version, assetUrl }
+app.get('/api/desktop/update', async (req, res) => {
+  try {
+    const rel = await (await github(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)).json();
+    const asset = (rel.assets || []).find((a) => /setup.*\.exe$/i.test(a.name));
+    const version = String(rel.tag_name || '').replace(/^v/, '');
+    latest = asset ? { version, assetUrl: asset.url } : null;
+    res.json({ available: !!asset && process.platform === 'win32' && newer(version, APP_VERSION), version, current: APP_VERSION });
+  } catch (e) {
+    res.json({ available: false, current: APP_VERSION, error: e.message }); // offline / no release yet: stay quiet
+  }
+});
+
+// Downloads the setup to Temp, starts it silently (keeps the chosen dirs, restarts the app) and exits,
+// so the installer can replace node.exe and the server files.
+app.post('/api/desktop/update/install', async (req, res) => {
+  if (!latest) return res.status(400).json({ error: 'Kein Update bekannt.' });
+  try {
+    const buf = Buffer.from(await (await github(latest.assetUrl, 'application/octet-stream')).arrayBuffer());
+    const exe = path.join(os.tmpdir(), `LatexIDE-Setup-${latest.version}.exe`);
+    fs.writeFileSync(exe, buf);
+    spawn(exe, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { detached: true, stdio: 'ignore' }).unref();
+    res.json({ ok: true });
+    setTimeout(() => process.exit(0), 500);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
 });
 
 // Only forgets the token locally - the server-side entry can be revoked in
-// the web UI (Einstellungen → Account → Verbundene Desktop-Apps).
+// the web UI (Profil → Verbundene Desktop-Apps).
 app.post('/api/auth/logout', (req, res) => {
   setToken(null);
   res.json({ ok: true });
@@ -145,8 +226,73 @@ app.use('/api', (req, res, next) => {
 
 // --- local compile ---
 
-let current = readJson(path.join(MIRROR_DIR, 'current.json'), null); // { projectId, dir, mainFile, settings }
+let current = readJson(path.join(MIRROR_DIR, 'current.json'), null); // { projectId, dir, mainFile, settings, owned }
 const wordCounts = new Map();
+
+// --- offline copy of owned projects ---
+
+let owned = readJson(path.join(SYNC_DIR, 'owned.json'), []); // [{ name, projectId }]
+const syncKey = (id) => String(id).replace(/[^\w-]/g, '_');
+const ownedEntry = (projectId) => owned.find((p) => p.projectId === projectId);
+const localDirOf = (p) => path.join(LOCAL_DIR, p.name.replace(/[<>:"/\\|?*]/g, '_'));
+
+// One sync at a time: the periodic run and a compile must not touch a folder together.
+let syncLock = Promise.resolve();
+function syncOwned(p) {
+  const run = syncLock.then(() => syncOwnedNow(p));
+  syncLock = run.catch(() => {});
+  return run;
+}
+
+async function syncOwnedNow(p) {
+  const q = `project=${encodeURIComponent(p.projectId)}`;
+  const need = async (res, what) => {
+    if (!res.ok) throw new Error(`${what} fehlgeschlagen (HTTP ${res.status})`);
+    return res;
+  };
+  const dir = localDirOf(p);
+  fs.mkdirSync(dir, { recursive: true });
+  const r = await syncFolder(dir, path.join(SYNC_DIR, syncKey(p.projectId) + '.json'), {
+    manifest: () => remoteJson(`/api/collab/manifest?${q}`),
+    download: async (rel) => Buffer.from(await (await need(await remote(`/api/raw?${q}&path=${encodeURIComponent(rel)}`), rel)).arrayBuffer()),
+    upload: async (rel, buf) =>
+      need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: buf }), rel),
+    remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
+  });
+  if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
+  return { ...r, dir };
+}
+
+async function refreshOwned() {
+  owned = (await remoteJson('/api/collab/owned')).projects;
+  writeJson(path.join(SYNC_DIR, 'owned.json'), owned);
+}
+
+let syncing = null;
+function syncAll() {
+  if (syncing || !config.token) return syncing;
+  syncing = (async () => {
+    try {
+      await refreshOwned();
+      for (const p of owned) {
+        try {
+          await syncOwned(p);
+        } catch (e) {
+          if (e instanceof Offline) throw e;
+          console.error(`Sync ${p.name}: ${e.message}`);
+        }
+      }
+    } catch (e) {
+      if (!(e instanceof Offline)) console.error('Sync:', e.message);
+    } finally {
+      syncing = null;
+    }
+  })();
+  return syncing;
+}
+fs.mkdirSync(SYNC_DIR, { recursive: true });
+setInterval(syncAll, 60 * 1000);
+setTimeout(syncAll, 2000);
 
 // Bring the mirror of the active project up to date: fetch changed files,
 // drop removed ones. Offline: keep using the last mirror.
@@ -157,6 +303,15 @@ async function syncMirror() {
   } catch (e) {
     if (e instanceof Offline && current) return current;
     throw e;
+  }
+  // Own project: compile straight in the offline copy (after a two-way sync).
+  if (!ownedEntry(man.projectId)) await refreshOwned(); // new project or first run after login
+  const own = ownedEntry(man.projectId);
+  if (own) {
+    const r = await syncOwned(own);
+    current = { projectId: man.projectId, dir: r.dir, mainFile: r.mainFile, settings: r.settings, owned: true };
+    writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+    return current;
   }
   const dir = path.join(MIRROR_DIR, String(man.projectId).replace(/[^\w-]/g, '_'));
   fs.mkdirSync(dir, { recursive: true });
@@ -200,14 +355,16 @@ app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
     const proj = await syncMirror();
     if (!proj.mainFile) return { status: 400, body: { error: 'Keine .tex-Hauptdatei gefunden.' } };
     // Open editor texts are newer than the server copy (or the server is unreachable).
-    const index = readJson(path.join(proj.dir, '.mirror.json'), {});
+    // They reach the server through Yjs, so the next sync takes the server's version.
+    const indexPath = proj.owned ? path.join(SYNC_DIR, syncKey(proj.projectId) + '.json') : path.join(proj.dir, '.mirror.json');
+    const index = readJson(indexPath, {});
     for (const [rel, text] of Object.entries((req.body && req.body.overrides) || {})) {
       const abs = inside(proj.dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, String(text));
-      index[rel] = 'local'; // forces a re-download on the next online sync
+      index[rel] = proj.owned ? 'ide' : 'local'; // forces a re-download on the next online sync
     }
-    writeJson(path.join(proj.dir, '.mirror.json'), index);
+    writeJson(indexPath, index);
     const result = await compile(proj.dir, proj.mainFile, proj.settings);
     if (result.pdfPath) {
       try {
@@ -293,6 +450,38 @@ app.get('/api/synctex/inverse', async (req, res) => {
   }
 });
 
+// --- offline: tree/files of the own project straight from the local copy ---
+
+function offlineCopy() {
+  return !online && current && current.owned && fs.existsSync(current.dir) ? current : null;
+}
+
+const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
+
+// Answers from the offline copy; false = not applicable (other route/project).
+function serveLocal(req, res) {
+  const c = offlineCopy();
+  if (!c || req.method !== 'GET' || !LOCAL_GETS.has(req.baseUrl + req.path)) return false;
+  res.setHeader('X-Offline', '1');
+  if (req.baseUrl + req.path === '/api/tree') {
+    res.json({ tree: buildTree(c.dir), mainFile: c.mainFile, projectId: c.projectId });
+    return true;
+  }
+  try {
+    const abs = inside(c.dir, req.query.path);
+    if (req.baseUrl + req.path === '/api/raw') {
+      res.sendFile(abs, { headers: { 'Cache-Control': 'no-store' } });
+      return true;
+    }
+    const buf = fs.readFileSync(abs);
+    const text = isTextFile(req.query.path);
+    res.json({ path: req.query.path, content: text ? buf.toString('utf8') : buf.toString('base64'), binary: !text });
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+  return true;
+}
+
 // --- everything else: forward to the server, cache GETs for offline use ---
 
 // ponytail: cache key is the URL only - the server's "active project" is
@@ -303,6 +492,7 @@ const FORWARD_REQ = ['content-type', 'accept'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
 
 app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, res) => {
+  if (serveLocal(req, res)) return; // known offline: don't wait for the remote timeout
   const url = req.originalUrl;
   const headers = {};
   for (const h of FORWARD_REQ) if (req.headers[h]) headers[h] = req.headers[h];
@@ -315,9 +505,21 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, r
     if (req.method === 'GET' && r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
       writeJson(cacheFile(url), { contentType: r.headers.get('content-type'), body: buf.toString('utf8') });
     }
+    // Remember which own project is open, so offline the tree comes from its copy.
+    if (req.method === 'GET' && r.ok && req.path === '/tree') {
+      try {
+        const { projectId, mainFile } = JSON.parse(buf.toString('utf8'));
+        const own = ownedEntry(projectId);
+        if (own && (!current || current.projectId !== projectId)) {
+          current = { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true };
+          writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+        }
+      } catch {}
+    }
     res.status(r.status).end(buf);
   } catch (e) {
     if (!(e instanceof Offline)) return res.status(500).json({ error: e.message });
+    if (serveLocal(req, res)) return;
     const cached = req.method === 'GET' && readJson(cacheFile(url), null);
     if (!cached) return res.status(503).json({ error: 'Server nicht erreichbar (offline).', offline: true });
     res.setHeader('Content-Type', cached.contentType);

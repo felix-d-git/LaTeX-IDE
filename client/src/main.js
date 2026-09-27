@@ -4,7 +4,7 @@ import { connectWs } from './wsClient.js';
 import { renderTree } from './fileTree.js';
 import { createEditorManager } from './editor.js';
 import {
-  configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts,
+  configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts, prewarm,
 } from './collab.js';
 import { createPdfViewer } from './pdfViewer.js';
 import { setupSearchPanel } from './searchPanel.js';
@@ -20,6 +20,8 @@ import { setupShareDialog } from './shareDialog.js';
 import { setupHistoryView } from './historyView.js';
 import { setupMenuBar, setupLayoutMenu, setupProjectMenu } from './menuBar.js';
 import { setupSettingsDialog } from './settingsDialog.js';
+import { setupProfileDialog } from './profileDialog.js';
+import { setupHelpDialog } from './helpDialog.js';
 import { setupNewFileDialog, setupNewFolderDialog } from './newFileDialog.js';
 import { setupWordCountDialog } from './wordCountDialog.js';
 import { setupReviewPanel } from './reviewPanel.js';
@@ -31,6 +33,9 @@ import { setupOutline } from './outline.js';
 import { setupEditorToolbar } from './editorToolbar.js';
 import { openDropdown, openDropdownAt, closeDropdown, isDropdownOpenFor } from './dropdown.js';
 import { setupModals } from './modals.js';
+import { offlineBanner } from './offlineBanner.js';
+
+let isDesktop = false; // set once /api/desktop/info answers
 
 const els = {
   activeProjectLabel: document.querySelector('#active-project-label .project-name'),
@@ -469,6 +474,7 @@ async function loadTree() {
   currentTree = tree;
   mainFile = mf;
   refreshTreeHighlight();
+  if (isDesktop && !offlineBanner.isOffline()) prewarm([...treeFiles()].filter((p) => fileKind(p) === 'text'));
 }
 
 async function loadProject(root) {
@@ -620,12 +626,15 @@ const historyView = setupHistoryView();
 const settingsDialog = setupSettingsDialog({
   editorMgr,
   onShowHotkeys: () => hotkeySettings.show(),
+});
+const profileDialog = setupProfileDialog({
   currentUser,
   onLogout: async () => {
     await authApi.logout();
     location.reload();
   },
 });
+const helpDialog = setupHelpDialog();
 
 outline = setupOutline({
   editorMgr,
@@ -650,6 +659,7 @@ const menuCtx = {
   onShowHotkeys: () => hotkeySettings.show(),
   onShowShortcuts: () => shortcutsReference.show(),
   onShowSettings: () => settingsDialog.show(),
+  onShowHelp: () => helpDialog.show(),
   onAddComment: () => commentsPanel.triggerAddComment(),
   getPdfPath: () => pdfViewer.getCurrentPath(),
   onZoom: (delta) => pdfViewer.zoom(delta),
@@ -705,7 +715,9 @@ if (!currentUser.isAdmin) document.getElementById('btn-open-project').classList.
 // Die Suche hatte bisher keinen eigenen Button (nur Strg+F) - im Redesign
 // ist sie ein Rail-Tab und braucht deshalb eine Verdrahtung.
 document.getElementById('btn-search').addEventListener('click', () => searchPanelApi.toggle());
-document.getElementById('btn-settings').addEventListener('click', () => settingsDialog.show());
+for (const [ids, dlg] of [[['btn-settings', 'btn-dash-settings'], settingsDialog], [['btn-help', 'btn-dash-help'], helpDialog], [['btn-profile', 'btn-dash-profile'], profileDialog]]) {
+  for (const id of ids) document.getElementById(id).addEventListener('click', () => dlg.show());
+}
 document.getElementById('btn-tree-new-folder').addEventListener('click', () => createTreeFolder(''));
 document.getElementById('btn-tree-new-file').addEventListener('click', () => createTreeFile(''));
 document.getElementById('btn-tree-upload').addEventListener('click', () => newFileDialog.show('', 'upload'));
@@ -718,6 +730,8 @@ document.addEventListener('keydown', (e) => {
   hotkeySettings.hide();
   shareDialog.hide();
   settingsDialog.hide();
+  profileDialog.hide();
+  helpDialog.hide();
   if (appEl.classList.contains('layout-focus')) applyLayout('split');
 });
 
@@ -739,13 +753,9 @@ registerAction('syncToPdf', () => syncTex.syncToPdf());
 initGlobalHotkeys();
 
 // --- Live collaboration status + conflicts ---
-const collabBadge = document.createElement('span');
-collabBadge.className = 'collab-offline-badge hidden';
-collabBadge.textContent = 'Offline – Änderungen werden lokal gespeichert';
-els.compileBtn.parentElement.insertBefore(collabBadge, els.compileBtn);
 setCollabUser(currentUser);
 configureCollab({
-  onStatus: (online) => collabBadge.classList.toggle('hidden', online),
+  onStatus: (online) => offlineBanner.set(!online),
   onConflicts: (path) => {
     editorMgr.refreshConflicts(path);
     if (path === editorMgr.getActivePath() && listConflicts(path).length) reviewPanel.show();
@@ -763,11 +773,24 @@ configureCollab({
     loadTree();
   },
 });
-let isDesktop = false;
 fetch('/api/desktop/info')
   .then((r) => (r.ok ? r.json() : {}))
-  .then((d) => (isDesktop = !!d.desktop))
+  .then((d) => {
+    isDesktop = !!d.desktop;
+    if (isDesktop && d.online === false) offlineBanner.set(true);
+    if (isDesktop) checkDesktopUpdate();
+  })
   .catch(() => {});
+
+// Desktop app: the local server asks GitHub for a newer release.
+async function checkDesktopUpdate() {
+  const u = await fetch('/api/desktop/update').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!u || !u.available) return;
+  if (!confirm(`Update verfügbar – Version ${u.version} (installiert: ${u.current}).\n\nJetzt installieren? Die App wird dafür beendet.`)) return;
+  const csrf = document.cookie.match(/(?:^|; )csrfToken=([^;]*)/);
+  const r = await fetch('/api/desktop/update/install', { method: 'POST', headers: csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf[1]) } : {} }).catch(() => null);
+  if (!r || !r.ok) alert('Update konnte nicht geladen werden. Später erneut versuchen.');
+}
 
 connectWs({
   fileChanged: (msg) => {

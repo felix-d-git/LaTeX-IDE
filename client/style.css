@@ -862,7 +862,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 
 #settings-dialog, #share-dialog, #new-file-dialog, #new-folder-dialog, #shortcuts-dialog,
 #copy-project-dialog, #word-count-dialog, #open-project-dialog,
-#hotkey-settings, #comment-compose{
+#hotkey-settings, #comment-compose, #profile-dialog, #help-dialog{
   position: fixed; inset: 0;
   z-index: var(--z-modal);
   overflow-x: hidden; overflow-y: auto;
@@ -906,22 +906,22 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 .dialog-body-pad{ padding: 16px; font-size: var(--ol-fs-sm); }
 .dialog-buttons{ display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
-#settings-dialog .dialog-body{ height: 500px; }
-#settings-tabs{
+#settings-dialog .dialog-body, #help-dialog .dialog-body{ height: 500px; }
+#settings-tabs, #help-tabs{
   flex: 0 0 23.9%; min-width: 180px;
   display: flex; flex-direction: column; gap: 4px; padding: 4px;
   border-right: 1px solid var(--ol-border);
   overflow-y: auto;
 }
-#settings-tabs .tab-btn{
+#settings-tabs .tab-btn, #help-tabs .tab-btn{
   height: var(--ol-h-row); padding: 4px 8px;
   border: 0; border-radius: var(--ol-r-sm);
   background: transparent; color: var(--ol-text);
   font-size: var(--ol-fs-sm); text-align: left; cursor: pointer;
 }
-#settings-tabs .tab-btn:hover{ background: var(--ol-hover); }
-#settings-tabs .tab-btn.active{ background: var(--ol-accent-bg); color: var(--ol-accent-fg); }
-#settings-tab-body{ flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 16px 24px; font-size: var(--ol-fs-sm); }
+#settings-tabs .tab-btn:hover, #help-tabs .tab-btn:hover{ background: var(--ol-hover); }
+#settings-tabs .tab-btn.active, #help-tabs .tab-btn.active{ background: var(--ol-accent-bg); color: var(--ol-accent-fg); }
+#settings-tab-body, #help-body{ flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 16px 24px; font-size: var(--ol-fs-sm); }
 
 #new-file-dialog .dialog-body{ flex-direction: column; }
 #new-file-tabs{
@@ -1026,6 +1026,13 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   border-bottom: 1px solid var(--ol-border);
 }
 #projects-view .dash-logo{ display: block; width: 28px; height: 28px; }
+#projects-view .dash-nav-actions{ margin-left: auto; display: flex; gap: 4px; }
+#projects-view .dash-nav-actions button{ display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--ol-r-sm, 4px); background: transparent; color: var(--ol-text-muted); cursor: pointer; }
+#projects-view .dash-nav-actions button:hover{ background: var(--ol-surface-hover, rgba(0,0,0,.06)); color: var(--ol-text); }
+#help-body ul{ margin: 0; padding-left: 20px; line-height: 1.6; }
+#help-body li{ margin-bottom: 8px; }
+#profile-body h4{ margin: 20px 0 8px; }
+#profile-body .settings-pw-input{ display: block; margin-bottom: 6px; }
 #projects-view .dash-nav-title{ font-size: var(--ol-fs-base); font-weight: 600; color: var(--ol-text); }
 #projects-view .dash-body{ flex: 1 1 auto; display: flex; min-height: 0; background: var(--ol-surface); }
 #projects-view .dash-sidebar{
@@ -1273,6 +1280,10 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 /* Live-Kollaboration: Offline-Konflikte + Verbindungsstatus */
 .cm-collab-conflict{ background: #fff4d6; box-shadow: inset 3px 0 0 #e0a800; }
 .review-item.type-conflict .review-item-type{ color: #b07d00; font-weight: 600; }
-.collab-offline-badge{ font-size: var(--ol-fs-sm); color: #b07d00; background: #fff4d6; border-radius: var(--ol-r-pill); padding: 2px 10px; margin-right: 8px; white-space: nowrap; }
-.collab-offline-badge.hidden{ display: none; }
+#offline-banner{ position: fixed; top: 0; left: 0; right: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; gap: 12px; padding: 6px 40px; background: #fff4d6; color: #7a5600; border-bottom: 1px solid #f0d58a; font-size: var(--ol-fs-sm); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+#offline-banner.hidden{ display: none; }
+#offline-banner .offline-banner-close{ position: absolute; right: 10px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: var(--ol-r-sm); }
+#offline-banner .offline-banner-close:hover{ background: rgba(0,0,0,.06); }
+#offline-banner.minimized{ height: 4px; padding: 0; border: 0; background: #f2c14e; cursor: pointer; box-shadow: none; }
+#offline-banner.minimized > *{ display: none; }
 .settings-pw-input{ display: block; width: 100%; max-width: 320px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); }

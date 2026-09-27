@@ -79,7 +79,8 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   }
 
   function listForMode() {
-    if (mode === 'projects') return cache.localProjects;
+    // Shared projects also belong under "Alle Projekte", flagged so they get owner-less actions.
+    if (mode === 'projects') return [...cache.localProjects, ...(cache.sharedProjects || []).map((p) => ({ ...p, shared: true }))];
     if (mode === 'shared') return cache.sharedProjects || [];
     if (mode === 'archive') return cache.archivedProjects || [];
     return cache.trashedProjects;
@@ -136,7 +137,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
       const tdActions = document.createElement('td');
       tdActions.className = 'project-actions';
-      if (mode === 'projects') {
+      if (mode === 'projects' && !p.shared) {
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
           onOpenProject(p.root);
           hide();
@@ -147,7 +148,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
         tdActions.appendChild(iconBtn('file', 'Download PDF', () => downloadPdf(p.name)));
         tdActions.appendChild(iconBtn('archive', 'Archivieren', () => archiveProject(p.name)));
         tdActions.appendChild(iconBtn('close', 'In Papierkorb', () => trashProject(p.name), 'danger'));
-      } else if (mode === 'shared') {
+      } else if (mode === 'shared' || p.shared) {
         // Owner's project: only open here; leaving is in the share dialog.
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
           onOpenProject(p.root);

@@ -17,6 +17,8 @@ async function req(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  // Desktop app: answers from cache/local copy (or none at all) mean the server is unreachable.
+  window.dispatchEvent(new CustomEvent('lide-offline', { detail: res.headers.get('X-Offline') === '1' || !!data.offline }));
   if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
@@ -34,6 +36,7 @@ export const authApi = {
   createDesktopToken: (label) => req('POST', '/api/auth/desktop-token', { label }),
   listDesktopTokens: () => req('GET', '/api/auth/desktop-tokens'),
   revokeDesktopToken: (id) => req('DELETE', `/api/auth/desktop-tokens/${encodeURIComponent(id)}`),
+  deleteAccount: (password) => req('POST', '/api/auth/delete-account', { password }),
 };
 
 export const shareApi = {

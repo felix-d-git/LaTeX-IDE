@@ -52,7 +52,6 @@ export function setupShortcutsReference() {
 
 export function setupHotkeySettings() {
   const modal = document.getElementById('hotkey-settings');
-  const btnOpen = document.getElementById('btn-hotkeys');
   const btnClose = document.getElementById('btn-close-hotkeys');
   const list = document.getElementById('hotkey-list');
 
@@ -151,7 +150,6 @@ export function setupHotkeySettings() {
     render();
   });
 
-  btnOpen.addEventListener('click', show);
   btnClose.addEventListener('click', hide);
 
   return { show, hide };

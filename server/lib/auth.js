@@ -226,7 +226,15 @@ function revokeApiToken(userId, id) {
   save(data);
 }
 
+// Removes the account and everything keyed to it (tokens, invites it used stay as history).
+function deleteUser(id) {
+  data.users = data.users.filter((u) => u.id !== id);
+  for (const k of ['apiTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
+  save(data);
+}
+
 module.exports = {
+  deleteUser,
   findUserByEmail,
   findUserByUsername,
   findUserByLogin,

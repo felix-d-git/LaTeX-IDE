@@ -26,9 +26,9 @@ const ENGINE_FLAG = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualate
 // the PDF<->source jump; SwiftLaTeX would be a browser-side (WASM) swap instead.
 const BACKEND = process.env.TEX_BACKEND === 'tectonic' ? 'tectonic' : 'latexmk';
 
-function texCommand(mainRelPath, settings) {
+function texCommand(mainRelPath, settings, outDir) {
   if (BACKEND === 'tectonic') {
-    return ['tectonic', ['-X', 'compile', '--untrusted', '--synctex', '--keep-logs', '--keep-intermediates', '--outdir', OUT_DIR, mainRelPath]];
+    return ['tectonic', ['-X', 'compile', '--untrusted', '--synctex', '--keep-logs', '--keep-intermediates', '--outdir', outDir, mainRelPath]];
   }
   return [
     'latexmk',
@@ -41,22 +41,23 @@ function texCommand(mainRelPath, settings) {
       ...(settings.stopOnFirstError ? ['-halt-on-error'] : ['-f']),
       '-file-line-error', // emit "file:line: message" so errors can be mapped back to source
       '-synctex=1',
-      `-outdir=${OUT_DIR}`,
+      `-outdir=${outDir}`,
       mainRelPath,
     ],
   ];
 }
 
-function compile(root, mainRelPath, settings = {}) {
+// outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
+function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR) {
   return new Promise((resolve) => {
-    const outDir = path.join(root, OUT_DIR);
+    const outDir = path.join(root, outRel);
     fs.mkdirSync(outDir, { recursive: true });
 
-    const [cmd, args] = texCommand(mainRelPath, settings);
+    const [cmd, args] = texCommand(mainRelPath, settings, outRel.split(path.sep).join('/'));
 
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
-    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: path.join(root, OUT_DIR) };
+    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir };
     const proc = spawn(cmd, args, { cwd: root, env });
 
     let log = '';
@@ -86,7 +87,7 @@ function compile(root, mainRelPath, settings = {}) {
         hasErrors: errors.length > 0 || code !== 0,
         log,
         errors,
-        pdfPath: pdfExists ? path.join(OUT_DIR, pdfName).split(path.sep).join('/') : null,
+        pdfPath: pdfExists ? path.join(outRel, pdfName).split(path.sep).join('/') : null,
       });
     });
   });

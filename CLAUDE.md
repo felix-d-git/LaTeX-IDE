@@ -6,6 +6,9 @@
 - TeX-Backend per `TEX_BACKEND` (`latexmk` Standard, `tectonic`): tectonic nur in der Desktop-App, `server/index.js` verweigert den Start damit (liest Dateien außerhalb des Projekts). TeX läuft nur als externer Prozess (Lizenz: AGPL-3.0 + bloße Zusammenstellung).
 - Installer bauen: `installer\build-release.ps1`; Inno Setup per `$env:ISCC` (auch portabel), Ausgabe `installer\out\` (gitignored).
 - Desktop-App: `server/desktop.js` (Port 3178, `REMOTE_URL`, `LATEX_IDE_DATA`), kompiliert lokal gegen einen Spiegel; Installer unter `installer/`.
+- Lokale Kopie (Owner-Projekte): Ordner aus `LATEX_IDE_LOCAL` → `install.json` (vom Installer) → Config → `~/Documents/LatexIDE`. Tests immer mit `LATEX_IDE_LOCAL` auf Temp, sonst landet Testzeug in echten Dokumenten.
+- Auto-Update: Repo privat → Installer-Build braucht `$env:GITHUB_TOKEN` (fine-grained, nur Contents:read), landet in `update-config.json` im Paket (gitignored, nie committen). Version in `package.json` **und** `LatexIDE.iss` gleich hochzählen, Release-Tag `vX.Y.Z` mit `LatexIDE-Setup.exe` als Asset.
+- Server-Update: `scripts/server-update.sh` (Cron auf dem Pi, 3 Backups), noch nicht eingerichtet; nicht ohne Freigabe auf dem Pi ausführen.
 - Datenpfad per `DATA_DIR` (auth-data.json, .sessions, workspace.json, projects/, mail-outbox.log); ohne = Repo-Wurzel.
 - Git-Remote: `origin` = https://github.com/felix-d-git/latex-web-ide (privat), Push/Releases nur auf Anweisung; Releases als Tag `vX.Y.Z` + GitHub-Release. Seit 25.09.2026 global nur noch `felix-d-git` (Credential Manager + `user.email` = GitHub-noreply-Adresse); das alte Konto `altes-konto` wird nicht mehr genutzt.
 - Nie committen/pushen: `projects/` (private Arbeiten), `.env`, `auth-data.json`, `workspace.json` (alle in `.gitignore`).

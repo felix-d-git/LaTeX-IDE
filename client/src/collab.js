@@ -101,7 +101,8 @@ async function createSession(path) {
     epoch = r.epoch;
     store.set(epochKey, epoch);
   } catch (e) {
-    if (e.status) throw e; // real server answer (404, 403) - not an offline situation
+    // real server answer (404, 403) - not an offline situation; the desktop app answers 503 {offline}
+    if (e.status && !(e.data && e.data.offline)) throw e;
     epoch = store.get(epochKey, null);
     if (!epoch) throw new Error('Offline – diese Datei wurde auf diesem Gerät noch nie geöffnet und ist daher nicht zwischengespeichert.');
   }
@@ -264,6 +265,35 @@ export function resolveConflict(path, id) {
   s.conflicts = s.conflicts.filter((c) => c.id !== id);
   store.set(`lide-conflicts:${s.dbName}`, s.conflicts);
   hooks.onConflicts(path);
+}
+
+// Desktop app: pull every text file's doc into IndexedDB while online, so
+// files never opened on this device can still be edited offline.
+// ponytail: sequential, one WebSocket at a time - fine for thesis-sized projects.
+export async function prewarm(paths) {
+  const pid = projectId;
+  for (const path of paths) {
+    if (projectId !== pid || !navigator.onLine) return;
+    if (sessions.has(path) || opening.has(path)) continue;
+    try {
+      const r = await api.collabEpoch(path);
+      if (r.projectId !== pid) return;
+      store.set(`lide-epoch:${pid}:${path}`, r.epoch);
+      const ydoc = new Y.Doc();
+      const idb = new IndexeddbPersistence(`latex-ide:${pid}:${path}:${r.epoch}`, ydoc);
+      await idb.whenSynced;
+      const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, { params: { epoch: r.epoch } });
+      await new Promise((resolve) => {
+        provider.once('sync', resolve);
+        setTimeout(resolve, 10000);
+      });
+      provider.destroy();
+      idb.destroy();
+      ydoc.destroy();
+    } catch {
+      return; // offline or project switched - try again next time
+    }
+  }
 }
 
 export function closeSession(path) {

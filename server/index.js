@@ -38,10 +38,16 @@ const RAW_MIME = {
   '.pdf': 'application/pdf',
 };
 
-function activeMainPdfAbs(root) {
+// compileMode 'individual' (default): every user compiles into their own
+// subfolder and only sees their own PDF; 'group': one shared output for all.
+function outRelFor(root, userId) {
+  return state.getProjectSettings(root).compileMode === 'group' ? OUT_DIR : path.join(OUT_DIR, `u-${userId}`);
+}
+
+function activeMainPdfAbs(root, userId) {
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return null;
-  return path.join(root, OUT_DIR, main.replace(/\.tex$/i, '.pdf'));
+  return path.join(root, outRelFor(root, userId), main.replace(/\.tex$/i, '.pdf'));
 }
 
 const PORT = process.env.PORT || 3077;
@@ -73,9 +79,10 @@ function streamFile(res, abs) {
 let wss = null;
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
 const AUTOCOMPILE_THROTTLE_MS = 5000;
-const wordCountByRoot = new Map(); // root -> { words, headers, mathInline, mathDisplay }, refreshed on each successful compile
+const wordCountByOut = new Map(); // abs output dir -> { words, headers, mathInline, mathDisplay }, refreshed on each successful compile
 
-function maybeAutocompile(root) {
+// userId = who saved; null (collab persist) = everyone who has the project open.
+function maybeAutocompile(root, userId) {
   const settings = state.getProjectSettings(root);
   if (!settings.autocompile) return;
   const last = lastAutocompileAt.get(root) || 0;
@@ -83,7 +90,9 @@ function maybeAutocompile(root) {
   lastAutocompileAt.set(root, Date.now());
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return;
-  runCompile(root, main).catch(() => {});
+  const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && state.getActiveRoot(c.userId) === root).map((c) => c.userId))];
+  if (settings.compileMode === 'group') users.splice(1);
+  for (const u of users) runCompile(root, main, u).catch(() => {});
 }
 
 // Multiple users can have different projects open at the same time, so
@@ -94,10 +103,12 @@ function maybeAutocompile(root) {
 // cached, so switching projects takes effect immediately).
 const watchersByRoot = new Map(); // root -> { watcher, refCount }
 
-function broadcast(root, msg) {
+// onlyUserId: restrict to one user's connections (per-user compile events).
+function broadcast(root, msg, onlyUserId) {
   if (!wss) return;
   const data = JSON.stringify(msg);
   wss.clients.forEach((client) => {
+    if (onlyUserId && client.userId !== onlyUserId) return;
     if (client.readyState === 1 && client.userId && state.getActiveRoot(client.userId) === root) {
       client.send(data);
     }
@@ -113,6 +124,18 @@ function requireRoot(req, res) {
   // Access can be revoked (share removed) while the project is still "active".
   if (!canAccessRoot(req.user, root)) {
     res.status(403).json({ error: 'Kein Zugriff mehr auf dieses Projekt.' });
+    return null;
+  }
+  return root;
+}
+
+// Desktop offline copy syncs every project the user owns, not just the active
+// one: ?project=<projectId> selects it (owner/admin only), else the active root.
+function requireSyncRoot(req, res) {
+  if (!req.query.project) return requireRoot(req, res);
+  const root = path.resolve(PROJECTS_DIR, String(req.query.project));
+  if (!isInside(PROJECTS_DIR, root) || root === path.resolve(PROJECTS_DIR) || !fs.existsSync(root) || !canManageRoot(req.user, root)) {
+    res.status(404).json({ error: 'Projekt nicht gefunden.' });
     return null;
   }
   return root;
@@ -336,6 +359,30 @@ app.post('/api/auth/change-password', limitLogin, async (req, res) => {
   }
 });
 
+// Delete own account incl. all projects in projects/users/<id> (also trash/archive).
+// The admin owns the top-level projects/ folder and can't delete itself.
+app.post('/api/auth/delete-account', limitLogin, async (req, res) => {
+  if (req.user.isAdmin) return res.status(400).json({ error: 'Das Admin-Konto kann nicht gelöscht werden.' });
+  if (!(await auth.verifyPassword(req.user, req.body.password))) {
+    return res.status(400).json({ error: 'Passwort ist falsch.' });
+  }
+  const ownDir = path.resolve(path.join(PROJECTS_DIR, 'users', req.user.id));
+  for (const [root, entry] of watchersByRoot) {
+    if (isInside(ownDir, root)) {
+      entry.watcher.close();
+      watchersByRoot.delete(root);
+    }
+  }
+  if (wss) wss.clients.forEach((c) => c.userId === req.user.id && c.close());
+  fs.rmSync(ownDir, { recursive: true, force: true });
+  state.purgeUser(req.user.id, ownDir);
+  auth.deleteUser(req.user.id);
+  req.session.destroy(() => {
+    res.clearCookie('latex_ide_sid');
+    res.json({ ok: true });
+  });
+});
+
 // Desktop app login: the browser (session) mints a token that the local
 // desktop server stores and sends as Bearer. A token can't mint further tokens.
 app.post('/api/auth/desktop-token', (req, res) => {
@@ -416,7 +463,7 @@ app.get('/api/collab/epoch', (req, res) => {
 
 // File list with hashes for the desktop app's local compile mirror.
 app.get('/api/collab/manifest', (req, res) => {
-  const root = requireRoot(req, res);
+  const root = requireSyncRoot(req, res);
   if (!root) return;
   collab.flushRoot(root);
   const files = [];
@@ -440,6 +487,49 @@ app.get('/api/collab/manifest', (req, res) => {
   });
 });
 
+// Projects the user owns = what the desktop app keeps as offline copy.
+app.get('/api/collab/owned', (req, res) => {
+  const dir = userProjectsDir(req.user);
+  const list = projects
+    .listProjects(dir)
+    .filter((p) => !(req.user.isAdmin && p.name === 'users'))
+    .map((p) => ({ name: p.name, projectId: projectIdOf(path.join(dir, p.name)) }));
+  res.json({ projects: list });
+});
+
+// Desktop sync upload/delete of one file (bytes as body) in an owned project.
+app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
+  const root = requireSyncRoot(req, res);
+  if (!root) return;
+  try {
+    const rel = String(req.query.path || '');
+    if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    const abs = safeResolve(root, rel);
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(buf).digest('hex'));
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, buf);
+    if (isTextFile(rel)) collab.applyExternalText(root, rel, buf.toString('utf8'));
+    history.snapshot(root, { trigger: 'autosave' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/collab/raw', (req, res) => {
+  const root = requireSyncRoot(req, res);
+  if (!root) return;
+  try {
+    if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    treeOps.deletePath(root, req.query.path);
+    collab.onPathMoved(root, req.query.path, null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // --- Projects ---
 
 app.get('/api/projects/list', (req, res) => {
@@ -453,7 +543,7 @@ app.get('/api/projects/list', (req, res) => {
       .filter((root) => fs.existsSync(root))
       .map((root) => {
         const owner = auth.findUserById(ownerIdOf(root));
-        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?' };
+        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?', lastModified: fs.statSync(root).mtimeMs };
       }),
     trashedProjects: projects.listTrash(projectsDir),
     archivedProjects: projects.listArchived(projectsDir),
@@ -582,7 +672,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return res.status(404).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
-  const pdfAbs = path.join(root, OUT_DIR, main.replace(/\.tex$/i, '.pdf'));
+  const pdfAbs = path.join(root, outRelFor(root, req.user.id), main.replace(/\.tex$/i, '.pdf'));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.pdf"`);
@@ -659,7 +749,7 @@ app.put('/api/file', (req, res) => {
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
     history.snapshot(root, { trigger: 'autosave' });
-    maybeAutocompile(root);
+    maybeAutocompile(root, req.user.id);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -758,30 +848,34 @@ app.post('/api/main-file', (req, res) => {
 // project while it is still waiting shares the queued run.
 // ponytail: one global queue - per-core workers if the server gets stronger.
 let compileChain = Promise.resolve();
-const queuedCompile = new Map(); // root -> promise of a not-yet-started run
+const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
 
-function runCompile(root, main) {
-  if (queuedCompile.has(root)) return queuedCompile.get(root);
-  broadcast(root, { type: 'compileStatus', status: 'running' });
+function runCompile(root, main, userId) {
+  const outRel = outRelFor(root, userId);
+  const key = path.join(root, outRel);
+  // Group mode: everyone on the project sees the run; individual: only the compiling user.
+  const to = outRel === OUT_DIR ? undefined : userId;
+  if (queuedCompile.has(key)) return queuedCompile.get(key);
+  broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain.then(() => {
-    queuedCompile.delete(root);
-    return doCompile(root, main);
+    queuedCompile.delete(key);
+    return doCompile(root, main, outRel, to);
   });
-  queuedCompile.set(root, run);
+  queuedCompile.set(key, run);
   compileChain = run.catch(() => {});
   return run;
 }
 
-async function doCompile(root, main) {
+async function doCompile(root, main, outRel, to) {
   collab.flushRoot(root);
-  const result = await compile(root, main, state.getProjectSettings(root));
+  const result = await compile(root, main, state.getProjectSettings(root), outRel);
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
-  broadcast(root, { type: 'compileStatus', status, log: result.log });
-  if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath });
+  broadcast(root, { type: 'compileStatus', status, log: result.log }, to);
+  if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath }, to);
   history.snapshot(root, { trigger: 'compile' });
   if (result.pdfPath) {
     try {
-      wordCountByRoot.set(root, wordcount.countWords(root, main));
+      wordCountByOut.set(path.join(root, outRel), wordcount.countWords(root, main));
     } catch (e) {
       // best-effort - word count just stays unavailable for this root
     }
@@ -794,15 +888,16 @@ app.post('/api/compile', async (req, res) => {
   if (!root) return;
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return res.status(400).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
-  const result = await runCompile(root, main);
+  const result = await runCompile(root, main, req.user.id);
   res.json(result);
 });
 
 // "Clear cached files" im Log: Ausgabeordner (aux, PDF, synctex …) löschen.
+// Group mode clears the shared folder incl. the per-user ones (just caches).
 app.post('/api/compile/clear-cache', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true });
+  fs.rmSync(path.join(root, outRelFor(root, req.user.id)), { recursive: true, force: true });
   res.json({ ok: true });
 });
 
@@ -811,7 +906,7 @@ app.post('/api/compile/clear-cache', (req, res) => {
 app.get('/api/wordcount', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const stats = wordCountByRoot.get(root);
+  const stats = wordCountByOut.get(path.join(root, outRelFor(root, req.user.id)));
   if (!stats) return res.status(404).json({ error: 'File not found or not readable.' });
   res.json(stats);
 });
@@ -825,9 +920,10 @@ app.get('/api/settings', (req, res) => {
 app.post('/api/settings', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const { compiler, stopOnFirstError, autocompile } = req.body;
+  const { compiler, stopOnFirstError, autocompile, compileMode } = req.body;
   const patch = {};
   if (compiler !== undefined) patch.compiler = compiler;
+  if (compileMode !== undefined) patch.compileMode = compileMode === 'group' ? 'group' : 'individual';
   if (stopOnFirstError !== undefined) patch.stopOnFirstError = !!stopOnFirstError;
   if (autocompile !== undefined) patch.autocompile = !!autocompile;
   res.json({ settings: state.setProjectSettings(root, patch) });
@@ -850,7 +946,7 @@ app.get('/api/pdf', (req, res) => {
 // PDFs) in a tab - unlike /api/file (base64 JSON), this is a direct stream
 // so <img>/<iframe> can point straight at the URL.
 app.get('/api/raw', (req, res) => {
-  const root = requireRoot(req, res);
+  const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
     const abs = safeResolve(root, req.query.path);
@@ -890,7 +986,7 @@ app.get('/api/synctex/forward', async (req, res) => {
   if (!root) return;
   const { file, line } = req.query;
   if (!file || !line) return res.status(400).json({ error: 'file und line sind erforderlich.' });
-  const pdfAbs = activeMainPdfAbs(root);
+  const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
   }
@@ -910,7 +1006,7 @@ app.get('/api/synctex/inverse', async (req, res) => {
   if (!page || x === undefined || y === undefined) {
     return res.status(400).json({ error: 'page, x und y sind erforderlich.' });
   }
-  const pdfAbs = activeMainPdfAbs(root);
+  const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
   }
@@ -1039,7 +1135,7 @@ collab.setHooks({
   markSelfWrite: (root, rel, text) => state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(text).digest('hex')),
   onPersist: (root) => {
     history.snapshot(root, { trigger: 'autosave' });
-    maybeAutocompile(root);
+    maybeAutocompile(root, null);
   },
 });
 

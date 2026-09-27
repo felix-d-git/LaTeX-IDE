@@ -105,6 +105,22 @@ function moveRoot(oldRoot, newRoot) {
   saveWorkspace(workspace);
 }
 
+// Account deleted: drop the user's own state, their memberships, and every
+// per-root entry for projects below ownDir (the deleted projects folder).
+function purgeUser(userId, ownDir) {
+  delete workspace.activeRootByUser[userId];
+  delete workspace.recentRootsByUser[userId];
+  const own = (r) => r === ownDir || r.startsWith(ownDir + require('path').sep);
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot']) {
+    for (const r of Object.keys(workspace[k])) if (own(r)) delete workspace[k][r];
+  }
+  for (const r of Object.keys(workspace.sharesByRoot)) {
+    workspace.sharesByRoot[r] = workspace.sharesByRoot[r].filter((id) => id !== userId);
+    if (!workspace.sharesByRoot[r].length) delete workspace.sharesByRoot[r];
+  }
+  saveWorkspace(workspace);
+}
+
 // Tracks hashes of content this server itself just wrote, so the
 // file watcher can tell "external edit" (e.g. Claude Code) apart from
 // our own save round-trip and only flash-highlight real external changes.
@@ -125,4 +141,5 @@ module.exports = {
   setShares,
   sharedRootsFor,
   moveRoot,
+  purgeUser,
 };

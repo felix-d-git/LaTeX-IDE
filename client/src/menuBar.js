@@ -151,7 +151,7 @@ export function setupMenuBar(ctx) {
       label: 'Help',
       items: () => [
         { label: 'Keyboard shortcuts', onClick: () => ctx.onShowShortcuts() },
-        { label: 'Customize shortcuts', onClick: () => ctx.onShowHotkeys() },
+        { label: 'Hilfe & Einführung', onClick: () => ctx.onShowHelp() },
         { type: 'divider' },
         // Neutrale LaTeX-Doku (kein Bezug auf fremde Marken im veröffentlichten Tool).
         { label: 'Documentation', onClick: () => window.open('https://en.wikibooks.org/wiki/LaTeX', '_blank', 'noopener') },

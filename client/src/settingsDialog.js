@@ -1,4 +1,4 @@
-import { api, adminApi, authApi } from './api.js';
+import { api } from './api.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
 const SPELLING_KEY = 'latex-ide-spelling-v1';
@@ -22,7 +22,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
 }
 
-export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onLogout } = {}) {
+export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
   const modal = document.getElementById('settings-dialog');
   const btnClose = document.getElementById('btn-close-settings');
   const tabsBar = document.getElementById('settings-tabs');
@@ -43,10 +43,11 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
 
   function show() {
     modal.classList.remove('hidden');
+    // No active project (dashboard) -> project tabs keep their defaults.
     api.getSettings().then(({ settings }) => {
       serverSettings = settings;
       render();
-    });
+    }).catch(() => {});
     render();
   }
 
@@ -163,6 +164,19 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
       )
     );
     wrap.appendChild(
+      selectField(
+        'Kompilieren im geteilten Projekt',
+        [
+          { value: 'individual', label: 'Jeder kompiliert für sich (eigenes PDF)' },
+          { value: 'group', label: 'Gruppen-Kompilieren (ein PDF für alle)' },
+        ],
+        serverSettings.compileMode || 'individual',
+        async (value) => {
+          serverSettings = (await api.saveSettings({ compileMode: value })).settings;
+        }
+      )
+    );
+    wrap.appendChild(
       checkboxField('Stop on first error', serverSettings.stopOnFirstError, async (checked) => {
         serverSettings = (await api.saveSettings({ stopOnFirstError: checked })).settings;
       })
@@ -216,213 +230,6 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
     return wrap;
   }
 
-  function stubButton(label) {
-    const btn = document.createElement('button');
-    btn.textContent = label;
-    btn.disabled = true;
-    return btn;
-  }
-
-  function stubRow(label, btn) {
-    const row = document.createElement('div');
-    row.className = 'settings-field settings-stub-row';
-    const span = document.createElement('span');
-    span.textContent = label;
-    row.appendChild(span);
-    row.appendChild(btn);
-    return row;
-  }
-
-  function formatDate(iso) {
-    return new Date(iso).toLocaleString('de-DE');
-  }
-
-  function renderInviteList(container, invites, baseUrl, onRevoke) {
-    container.innerHTML = '';
-    if (invites.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'settings-inert-note';
-      empty.textContent = 'Noch keine Einladungen erstellt.';
-      container.appendChild(empty);
-      return;
-    }
-    for (const invite of invites) {
-      const row = document.createElement('div');
-      row.className = 'invite-row' + (invite.usedByEmail ? ' used' : invite.expired ? ' expired' : '');
-      const status = document.createElement('span');
-      status.className = 'invite-status';
-      if (invite.usedByEmail) status.textContent = `Verwendet von ${invite.usedByEmail} am ${formatDate(invite.usedAt || invite.createdAt)}`;
-      else if (invite.expired) status.textContent = `Abgelaufen (erstellt ${formatDate(invite.createdAt)})`;
-      else status.textContent = `Offen, gültig bis ${formatDate(invite.expiresAt)}`;
-      row.appendChild(status);
-      if (!invite.usedByEmail && !invite.expired) {
-        const copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Link kopieren';
-        copyBtn.addEventListener('click', () => navigator.clipboard.writeText(`${baseUrl}/?invite=${invite.token}`));
-        row.appendChild(copyBtn);
-        const revokeBtn = document.createElement('button');
-        revokeBtn.className = 'danger';
-        revokeBtn.textContent = 'Widerrufen';
-        revokeBtn.addEventListener('click', () => onRevoke(invite.token));
-        row.appendChild(revokeBtn);
-      }
-      container.appendChild(row);
-    }
-  }
-
-  function renderPasswordSection() {
-    const box = document.createElement('div');
-    const h = document.createElement('h4');
-    h.textContent = 'Passwort ändern';
-    const pw = (placeholder, autocomplete) => {
-      const el = document.createElement('input');
-      el.type = 'password';
-      el.placeholder = placeholder;
-      el.autocomplete = autocomplete;
-      el.className = 'settings-pw-input';
-      return el;
-    };
-    const current = pw('Aktuelles Passwort', 'current-password');
-    const next = pw('Neues Passwort (mind. 8 Zeichen)', 'new-password');
-    const repeat = pw('Neues Passwort wiederholen', 'new-password');
-    const msg = document.createElement('p');
-    msg.className = 'settings-inert-note';
-    const btn = document.createElement('button');
-    btn.className = 'primary';
-    btn.textContent = 'Passwort ändern';
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (next.value !== repeat.value) return (msg.textContent = 'Neue Passwörter stimmen nicht überein.');
-      try {
-        await authApi.changePassword(current.value, next.value);
-        current.value = next.value = repeat.value = '';
-        msg.textContent = 'Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.';
-      } catch (e) {
-        msg.textContent = e.message;
-      }
-    });
-    box.append(h, current, next, repeat, btn, msg);
-    return box;
-  }
-
-  // Desktop-app logins (API tokens). Revoking logs that app out immediately.
-  function renderDesktopSection() {
-    const box = document.createElement('div');
-    const h = document.createElement('h4');
-    h.textContent = 'Verbundene Desktop-Apps';
-    const list = document.createElement('div');
-    box.append(h, list);
-    async function refresh() {
-      list.innerHTML = '';
-      try {
-        const { tokens } = await authApi.listDesktopTokens();
-        if (!tokens.length) {
-          list.appendChild(inertNote('Keine Desktop-App verbunden.'));
-          return;
-        }
-        for (const t of tokens) {
-          const row = document.createElement('div');
-          row.className = 'invite-row';
-          const status = document.createElement('span');
-          status.className = 'invite-status';
-          status.textContent = `${t.label} – verbunden ${formatDate(t.createdAt)}${t.lastUsedAt ? `, zuletzt aktiv ${formatDate(t.lastUsedAt)}` : ''}`;
-          const revoke = document.createElement('button');
-          revoke.className = 'danger';
-          revoke.textContent = 'Trennen';
-          revoke.addEventListener('click', async () => {
-            await authApi.revokeDesktopToken(t.id);
-            refresh();
-          });
-          row.append(status, revoke);
-          list.appendChild(row);
-        }
-      } catch (e) {
-        list.appendChild(inertNote(e.message));
-      }
-    }
-    refresh();
-    return box;
-  }
-
-  function renderAccountTab() {
-    const wrap = document.createElement('div');
-    const p = document.createElement('p');
-    p.textContent = `Angemeldet als ${currentUser.username} (${currentUser.email})${currentUser.isAdmin ? ' – Admin' : ''}.`;
-    wrap.appendChild(p);
-
-    const logoutBtn = document.createElement('button');
-    logoutBtn.className = 'danger';
-    logoutBtn.textContent = 'Abmelden';
-    logoutBtn.addEventListener('click', () => onLogout && onLogout());
-    wrap.appendChild(logoutBtn);
-
-    wrap.appendChild(renderPasswordSection());
-    wrap.appendChild(renderDesktopSection());
-
-    if (currentUser.isAdmin) {
-      const inviteHeading = document.createElement('h4');
-      inviteHeading.textContent = 'Einladungen (selbst registrieren lassen)';
-      wrap.appendChild(inviteHeading);
-
-      const inviteHint = document.createElement('p');
-      inviteHint.className = 'settings-inert-note';
-      inviteHint.textContent =
-        'Neuer Link erzeugt eine Registrierungs-URL (7 Tage gültig, einmal verwendbar) - manuell an die Person schicken (WhatsApp/Mail/…), es wird nichts automatisch versendet.';
-      wrap.appendChild(inviteHint);
-
-      const createBtn = document.createElement('button');
-      createBtn.className = 'primary';
-      createBtn.textContent = '+ Neue Einladung erstellen';
-      wrap.appendChild(createBtn);
-
-      const list = document.createElement('div');
-      list.id = 'invite-list';
-      wrap.appendChild(list);
-
-      async function refreshInvites() {
-        const { invites, baseUrl } = await adminApi.listInvites();
-        renderInviteList(list, invites, baseUrl, async (token) => {
-          await adminApi.revokeInvite(token);
-          refreshInvites();
-        });
-      }
-
-      createBtn.addEventListener('click', async () => {
-        const { url } = await adminApi.createInvite();
-        await navigator.clipboard.writeText(url);
-        alert('Einladungslink wurde in die Zwischenablage kopiert:\n' + url);
-        refreshInvites();
-      });
-
-      refreshInvites();
-    }
-
-    const heading = document.createElement('h4');
-    heading.textContent = 'Project synchronisation';
-    wrap.appendChild(heading);
-    wrap.appendChild(stubRow('Dropbox Sync', stubButton('Link')));
-    wrap.appendChild(stubRow('GitHub Sync', stubButton('Link')));
-    wrap.appendChild(stubRow('Git authentication token', stubButton('Generate token')));
-
-    const heading2 = document.createElement('h4');
-    heading2.textContent = 'Reference managers';
-    wrap.appendChild(heading2);
-    wrap.appendChild(stubRow('Zotero', stubButton('Link')));
-    wrap.appendChild(stubRow('Mendeley', stubButton('Link')));
-
-    const heading3 = document.createElement('h4');
-    heading3.textContent = 'Linked accounts';
-    wrap.appendChild(heading3);
-    wrap.appendChild(stubRow('Google', stubButton('Log in with Google')));
-    wrap.appendChild(stubRow('ORCID', stubButton('Link')));
-
-    wrap.appendChild(
-      inertNote(
-        'Dropbox/GitHub/Zotero/Mendeley/ORCID sind weiterhin reine Vorschau-Platzhalter. Google-Login ist bewusst zurückgestellt, bis der Pi-Deploy mit Portweiterleitung/echter Domain steht (Google OAuth verlangt eine öffentlich erreichbare HTTPS-Redirect-URI) - siehe STATUS.md.'
-      )
-    );
-    return wrap;
-  }
 
   const TAB_RENDERERS = {
     editor: renderEditorTab,
@@ -430,7 +237,6 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, currentUser, onL
     compiler: renderCompilerTab,
     references: renderReferencesTab,
     appearance: renderAppearanceTab,
-    account: renderAccountTab,
   };
 
   function render() {
