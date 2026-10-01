@@ -1,0 +1,29 @@
+# LatexIDE-Server selbst hosten (Linux oder Docker Desktop unter Windows/macOS).
+# Einrichtung: siehe README.md, Abschnitt "Selbst hosten".
+#   cp .env.example .env   # ausfuellen
+#   mkdir -p data          # vorher anlegen, sonst gehoert er root
+#   docker compose up -d --build
+# Eigene Anpassungen (Ports, Limits, Reverse-Proxy-Netz) in docker-compose.override.yml,
+# dann bleiben sie bei Updates erhalten.
+services:
+  app:
+    build:
+      context: .
+      args:
+        # apt = TeX Live im Image (Debian, ~5 GB); host = eigenes TeX Live einhaengen (siehe unten)
+        TEXLIVE: ${TEXLIVE:-apt}
+    image: latex-ide
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ${LATEX_DATA_DIR:-./data}:/app/data
+      # Nur bei TEXLIVE=host: TeX Live 2025, installiert nach /data/texlive (dieser Pfad ist fest).
+      # - /pfad/zu/texlive:/data/texlive:ro
+    ports:
+      - "${HOST_PORT:-3077}:3077"

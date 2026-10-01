@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Auto-update of the server (Pi): if GitHub has a newer release than the one
+# Auto-update of a Docker-hosted server: if GitHub has a newer release than the one
 # installed, back up the data dir (keeps the newest 3 backups), unpack the
-# release over APP_DIR and rebuild the container. Meant for cron, e.g.
-#   17 4 * * * /home/pi/container/latex/scripts/server-update.sh >> /home/pi/latex-update.log 2>&1
+# release over APP_DIR and rebuild the container. Meant for cron; which line
+# depends on UPDATE_MODE in .env (the web UI shows admins a banner either way):
+#   auto:   17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
+#   button: */5 * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
+#   notify: no cron, run the script by hand
 # Env (or APP_DIR/.update.env):
 #   APP_DIR      default: the folder this script lives in, one up
-#   DATA_DIR     the mounted data dir (LATEX_DATA_DIR from .env)
+#   DATA_DIR     the mounted data dir; default LATEX_DATA_DIR from .env, else ./data
+#   COMPOSE      compose file; default docker-compose.yml (Pi: docker-compose.pi.yml)
 #   BACKUP_DIR   default: $DATA_DIR/../backups
 #   GITHUB_TOKEN only while the repo is private (read-only "Contents" token)
 #   UPDATE_REPO  default: felix-d-git/latex-web-ide
@@ -17,7 +21,14 @@ APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 if [ -z "${DATA_DIR:-}" ] && [ -f "$APP_DIR/.env" ]; then
   DATA_DIR="$(sed -n 's/^LATEX_DATA_DIR=//p' "$APP_DIR/.env" | tail -1)"
 fi
-: "${DATA_DIR:?DATA_DIR bzw. LATEX_DATA_DIR fehlt}"
+DATA_DIR="${DATA_DIR:-./data}"
+case "$DATA_DIR" in /*) ;; *) DATA_DIR="$APP_DIR/${DATA_DIR#./}" ;; esac
+# --if-requested: only run when an admin pressed "Jetzt aktualisieren" (file written by the app).
+REQUEST="$DATA_DIR/.update-request"
+if [ "${1:-}" = "--if-requested" ]; then
+  [ -f "$REQUEST" ] || exit 0
+  rm -f "$REQUEST"
+fi
 BACKUP_DIR="${BACKUP_DIR:-$(dirname "$DATA_DIR")/backups}"
 REPO="${UPDATE_REPO:-felix-d-git/latex-web-ide}"
 AUTH=()
@@ -35,7 +46,7 @@ echo "$(date -Is) Update $installed -> $tag"
 
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
+tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$(basename "$DATA_DIR")/desktop" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
 ls -1t "$BACKUP_DIR"/data-*.tar.gz | tail -n +4 | xargs -r rm -f --
 
 # 2. Unpack the release source over APP_DIR.
@@ -47,6 +58,6 @@ tar -xzf "$tmp/src.tar.gz" -C "$APP_DIR" --strip-components=1
 
 # 3. Rebuild + restart.
 cd "$APP_DIR"
-docker compose -f docker-compose.pi.yml up -d --build
+docker compose ${COMPOSE:+-f "$COMPOSE"} up -d --build
 printf '%s\n' "$tag" > "$APP_DIR/.release"
 echo "$(date -Is) fertig ($tag)"

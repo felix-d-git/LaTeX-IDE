@@ -1,0 +1,48 @@
+# Baut bei jedem veroeffentlichten GitHub-Release die Desktop-Pakete und haengt sie
+# als Assets an (LatexIDE-Setup.exe, LatexIDE-macOS.zip). Desktop-Apps und das
+# Server-Update-Skript holen sich daraus die neue Version.
+#
+# Ablauf: Version in package.json hochzaehlen + committen -> Release mit Tag vX.Y.Z
+# veroeffentlichen. Die Pakete enthalten keine Zugangsdaten: Desktop-Apps laden
+# Updates von ihrem Server, der Server holt sie aus diesem Release.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Tag passt zu package.json
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:TAG) { throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Release." }
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+
+      - name: Pakete bauen
+        shell: pwsh
+        run: ./installer/build-release.ps1
+
+      - name: An Release haengen
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:TAG installer/out/LatexIDE-Setup.exe installer/out/LatexIDE-macOS.zip --clobber

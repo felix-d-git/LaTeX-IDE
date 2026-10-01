@@ -1,27 +1,140 @@
 # LaTeX Web IDE
 
-Lokale, Overleaf-artige Web-Oberfläche für LaTeX-Projekte. Nutzt eine **lokal
-installierte TeX-Distribution** (hier: TeX Live 2025, `latexmk`/`pdflatex`
-müssen im `PATH` sein) statt eines Cloud-Compilers, damit alle installierten
-Pakete und Makros exakt wie beim finalen Kompilieren zur Verfügung stehen.
+Overleaf-artige LaTeX-Umgebung zum Selbsthosten: Mehrbenutzer-Server mit
+Weboberfläche und Desktop-App (Windows/macOS) mit lokaler Kopie und
+Offline-Kompilieren. Kompiliert mit einer echten TeX-Live-Installation
+(`latexmk`) statt eines Cloud-Compilers.
 
-## Start
+## Installation
+
+Jeder kann einen eigenen LatexIDE-Server betreiben. Der Server liefert die
+Weboberfläche aus und bietet nach der Anmeldung die Desktop-App zum Download an
+(Profil → „Desktop-App herunterladen") – mit der Adresse dieses Servers schon
+eingebaut. Desktop-Apps holen ihre Updates von ihrem Server, der Server holt sie
+aus den GitHub-Releases.
+
+Drei Wege, den Server zu betreiben:
+
+| Weg | Für | TeX Live |
+|---|---|---|
+| Docker unter Linux | Heimserver, VPS, Raspberry Pi | im Image (Debian) oder eigenes einhängen |
+| Docker Desktop unter Windows/macOS | Rechner, der ohnehin läuft | im Image (Debian) |
+| Windows-Installer, Option „Eigener Server" | ein einzelner Windows-PC, ohne Docker | TeX Live 2025, lädt der Installer |
+
+### Docker unter Linux
+
+Voraussetzungen: Docker mit Compose-Plugin (`docker compose version`), git, ~8 GB
+freier Speicher (TeX Live im Image ist ~5 GB).
+
+```bash
+git clone https://github.com/felix-d-git/latex-web-ide.git
+cd latex-web-ide
+git checkout "$(git describe --tags --abbrev=0)"   # neuestes Release statt Entwicklungsstand
+cp .env.example .env
+nano .env                                          # PUBLIC_URL, ADMIN_EMAIL, ADMIN_PASSWORD
+mkdir -p data                                      # vorher anlegen, sonst gehört er root
+docker compose up -d --build                       # erster Build dauert (TeX Live)
+```
+
+Danach unter `http://<server>:3077` mit `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen).
+
+- **Von außen erreichbar machen:** Reverse Proxy mit HTTPS (Caddy, nginx,
+  Traefik, Tailscale Funnel …) auf Port 3077, Websockets durchreichen. Dann in
+  `.env` `PUBLIC_URL=https://…` und `COOKIE_SECURE=true` setzen und
+  `docker compose up -d` erneut ausführen. `PUBLIC_URL` ist auch die Adresse,
+  die in die heruntergeladene Desktop-App eingebaut wird.
+- **Daten** liegen in `./data` (Konten, Projekte, Sitzungen). Diesen Ordner sichern.
+- **Eigenes TeX Live statt Debian-Paket** (aktueller als TeX Live 2022 aus
+  Debian, oder auf einer anderen Platte): TeX Live 2025 nach `/data/texlive`
+  installieren (bzw. dort hin einhängen), in `.env` `TEXLIVE=host` setzen und in
+  `docker-compose.override.yml` einhängen:
+
+  ```yaml
+  services:
+    app:
+      volumes:
+        - /pfad/zu/texlive:/data/texlive:ro
+  ```
+
+- **Eigene Anpassungen** (anderer Port, Speicherlimit, Proxy-Netz) gehören in
+  `docker-compose.override.yml` – die Datei wird von Updates nicht angefasst.
+
+### Docker Desktop unter Windows (oder macOS)
+
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installieren
+   (unter Windows mit WSL 2) und starten.
+2. Release-Quellcode herunterladen: GitHub → Releases → neuestes Release →
+   „Source code (zip)", entpacken (oder per `git clone` wie oben).
+3. Im entpackten Ordner `.env.example` nach `.env` kopieren und ausfüllen,
+   Ordner `data` anlegen.
+4. Im Ordner ein Terminal öffnen (PowerShell) und `docker compose up -d --build`
+   ausführen.
+5. `http://localhost:3077` öffnen.
+
+Docker Desktop startet den Container nach einem Neustart automatisch wieder,
+sofern „Start Docker Desktop when you sign in" aktiv ist.
+
+### Windows ohne Docker (Installer)
+
+1. GitHub → Releases → neuestes Release → `LatexIDE-Setup.exe` herunterladen.
+2. Setup starten, Betriebsart **„Eigener Server auf diesem Rechner"** wählen,
+   Admin-E-Mail und -Passwort festlegen.
+3. Der Installer bringt Node mit und installiert TeX Live 2025 (kann je nach
+   Leitung mehrere Stunden dauern).
+4. Start über das Startmenü („LatexIDE") → öffnet `http://localhost:3077`.
+
+Einstellungen stehen danach in `%LOCALAPPDATA%\Programs\LatexIDE\.env`, die Daten
+in `%LOCALAPPDATA%\LatexIDE\server-data`. Andere Rechner im Netz erreichen den
+Server unter `http://<rechnername>:3077` (Windows-Firewall freigeben; dann
+`PUBLIC_URL` in `.env` setzen). Update: neues Setup aus dem Release darüber
+installieren – `.env` und Daten bleiben erhalten.
+
+### Desktop-App
+
+Nach der Anmeldung in der Weboberfläche: Profil → „Desktop-App herunterladen"
+(Windows oder macOS). Das Paket kennt die Server-Adresse bereits; beim ersten
+Start meldet man sich einmal im Browser an. Die App hält eine lokale Kopie der
+eigenen Projekte und kompiliert lokal (TeX Live installiert der
+Windows-Installer bzw. `install.command` unter macOS).
+
+Ein Setup direkt aus den GitHub-Releases fragt stattdessen nach der
+Server-Adresse.
+
+### Updates
+
+- **Server:** Admins sehen ein Banner, sobald es ein neues Release gibt.
+  Verhalten per `UPDATE_MODE` in `.env`:
+  `notify` (Standard, nur Hinweis) · `button` (Admin stößt das Update im
+  Web-UI an) · `auto` (nachts) · `off`.
+  Installiert wird immer durch `scripts/server-update.sh` auf dem Host: Backup
+  von `data/` (die letzten 3 bleiben), neues Release entpacken, Container neu
+  bauen. Cron-Zeilen (`crontab -e`):
+
+  ```
+  # auto:
+  17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
+  # button:
+  */5 * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
+  ```
+
+  Bei `notify` das Skript von Hand starten. Unter Windows mit Docker Desktop
+  läuft es in Git Bash oder WSL. Zusätzliche Einstellungen für das Skript
+  (`COMPOSE`, `BACKUP_DIR`, `GITHUB_TOKEN`) in `.update.env` im Repo-Ordner.
+- **Desktop-Apps** fragen ihren Server und bieten ein Update an, sobald der
+  Server auf einer neueren Version läuft.
+- Solange das GitHub-Repo privat ist, braucht der Server einen Lese-Token
+  (`UPDATE_TOKEN` in `.env`, `GITHUB_TOKEN` in `.update.env`).
+
+### Entwicklung (ohne Docker)
 
 ```
 start.bat        (Windows)
-./start.sh       (Linux/macOS/Raspberry Pi)
+./start.sh       (Linux/macOS)
 ```
 
-Öffnet danach `http://localhost:3077` im Browser. Beim allerersten Start wird
-automatisch ein Admin-Konto angelegt (siehe "Accounts / Login" unten) - danach
-über "Projekt öffnen…" den Pfad zu einem lokalen LaTeX-Projektordner angeben
-(z.B. `projects/Bachelor_Arbeit_4`, testweise bereits enthalten).
-
-`projects/_ide_test` ist ein minimales, garantiert sauber kompilierendes
-Testdokument (Umlaute, Formel, Liste) — damit lässt sich nach Änderungen an
-der IDE schnell prüfen, ob Dateibaum/Editor/Compile/PDF-Vorschau noch
-funktionieren, ohne von Fehlern im echten Thesis-Projekt abzulenken. Siehe
-[STATUS.md](STATUS.md) für den aktuellen Test-/Reparaturstand.
+Braucht Node 24 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
+`http://localhost:3077`.
 
 ## Funktionen
 
@@ -48,10 +161,10 @@ Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD`/`SESSION_SECRET` setzen (ohne `.env` wird ein Fallback-Admin
+  `ADMIN_PASSWORD` setzen (ohne `.env` wird ein Fallback-Admin
   `admin@local.host` / `bitte-sofort-aendern` angelegt - Passwort direkt danach über
-  "Passwort vergessen" ändern). `SESSION_SECRET` unbedingt dauerhaft setzen,
-  sonst gehen bei jedem Neustart alle Logins verloren.
+  "Passwort vergessen" ändern). Der Sitzungs-Schlüssel wird beim ersten Start
+  erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
   (inkl. `Bachelor_Arbeit_4`) unverändert. Jeder eingeladene Nutzer bekommt
   eine eigene, isolierte Projektsammlung unter `projects/users/<id>/` - Konten

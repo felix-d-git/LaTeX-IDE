@@ -17,10 +17,9 @@ const wordcount = require('./lib/wordcount');
 const { buildTree, isTextFile } = require('./lib/fsTree');
 const { syncFolder } = require('./lib/localSync');
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 3178;
-const REMOTE = (process.env.REMOTE_URL || 'https://latex.example.org').replace(/\/+$/, '');
 const DATA = process.env.LATEX_IDE_DATA || path.join(__dirname, '..', 'desktop-data');
 const CONFIG_PATH = path.join(DATA, 'config.json');
 const CACHE_DIR = path.join(DATA, 'cache');
@@ -60,6 +59,13 @@ const readInstallJson = (name) => {
   }
 };
 const install = readInstallJson('install.json');
+// Server address: built into the installer by the server it was downloaded from
+// (server.json, written by LatexIDE.iss / shipped in the macOS zip).
+const REMOTE = String(process.env.REMOTE_URL || readInstallJson('server.json').remoteUrl || '').replace(/\/+$/, '');
+if (!REMOTE) {
+  console.error('Keine Server-Adresse: REMOTE_URL setzen oder die App über die Weboberfläche des Servers neu herunterladen.');
+  process.exit(1);
+}
 const LOCAL_DIR = path.resolve(process.env.LATEX_IDE_LOCAL || install.localDir || config.localDir || path.join(os.homedir(), 'Documents', 'LatexIDE'));
 fs.mkdirSync(LOCAL_DIR, { recursive: true });
 function setToken(token) {
@@ -159,13 +165,9 @@ app.get('/api/desktop/info', (req, res) => {
   res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
 });
 
-// --- auto-update from GitHub releases ---
-// Repo is private for now: the token (read-only, contents) comes from the
-// build (update-config.json, gitignored) or env GITHUB_TOKEN; once the repo is
-// public it simply works without one.
-const updateCfg = readInstallJson('update-config.json');
-const UPDATE_REPO = process.env.UPDATE_REPO || updateCfg.repo || 'felix-d-git/latex-web-ide';
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || updateCfg.token || '';
+// --- auto-update from the server ---
+// The server offers the desktop build of its own version (fetched from GitHub,
+// see server/lib/desktopAssets.js), so app and server always match.
 
 // '0.2.0' > '0.1.9'; ignores a leading v.
 function newer(a, b) {
@@ -175,34 +177,51 @@ function newer(a, b) {
   return false;
 }
 
-async function github(url, accept = 'application/vnd.github+json') {
-  const headers = { Accept: accept, 'User-Agent': 'LatexIDE-Desktop' };
-  if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
-  const r = await fetch(url, { headers, signal: AbortSignal.timeout(accept.includes('octet') ? 600000 : 10000) });
-  if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
-  return r;
-}
+const UPDATE_OS = { win32: 'windows', darwin: 'macos' }[process.platform];
 
-let latest = null; // { version, assetUrl }
+let latest = null; // version offered by the server
 app.get('/api/desktop/update', async (req, res) => {
   try {
-    const rel = await (await github(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)).json();
-    const asset = (rel.assets || []).find((a) => /setup.*\.exe$/i.test(a.name));
-    const version = String(rel.tag_name || '').replace(/^v/, '');
-    latest = asset ? { version, assetUrl: asset.url } : null;
-    res.json({ available: !!asset && process.platform === 'win32' && newer(version, APP_VERSION), version, current: APP_VERSION });
+    if (!config.token) throw new Error('nicht angemeldet');
+    const rel = await remoteJson('/api/desktop/release');
+    latest = UPDATE_OS && rel[UPDATE_OS] ? rel.version : null;
+    res.json({ available: !!latest && newer(latest, APP_VERSION), version: rel.version, current: APP_VERSION });
   } catch (e) {
     res.json({ available: false, current: APP_VERSION, error: e.message }); // offline / no release yet: stay quiet
   }
 });
 
-// Downloads the setup to Temp, starts it silently (keeps the chosen dirs, restarts the app) and exits,
-// so the installer can replace node.exe and the server files.
+// Windows: downloads the setup to Temp, starts it silently (keeps the chosen dirs, restarts the app)
+// and exits, so the installer can replace node.exe and the server files.
+// macOS: unpacks the ZIP over ~/Applications/LatexIDE/app (node/ and install.json stay) and
+// restarts via the LatexIDE.command starter that install.command created one level up.
 app.post('/api/desktop/update/install', async (req, res) => {
   if (!latest) return res.status(400).json({ error: 'Kein Update bekannt.' });
   try {
-    const buf = Buffer.from(await (await github(latest.assetUrl, 'application/octet-stream')).arrayBuffer());
-    const exe = path.join(os.tmpdir(), `LatexIDE-Setup-${latest.version}.exe`);
+    const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
+      headers: { Authorization: `Bearer ${config.token}` },
+      signal: AbortSignal.timeout(900000),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (process.platform === 'darwin') {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'latexide-update-'));
+      const zip = path.join(tmp, 'update.zip');
+      fs.writeFileSync(zip, buf);
+      execFileSync('ditto', ['-x', '-k', zip, path.join(tmp, 'x')]);
+      const appDir = path.join(__dirname, '..');
+      for (const name of fs.readdirSync(path.join(tmp, 'x'))) {
+        if (name === 'install.command') continue;
+        fs.rmSync(path.join(appDir, name), { recursive: true, force: true });
+        fs.cpSync(path.join(tmp, 'x', name), path.join(appDir, name), { recursive: true });
+      }
+      fs.rmSync(tmp, { recursive: true, force: true });
+      const starter = path.join(appDir, '..', 'LatexIDE.command');
+      spawn('/bin/bash', ['-c', 'sleep 2; exec /bin/bash "$0"', starter], { detached: true, stdio: 'ignore' }).unref();
+      res.json({ ok: true });
+      return setTimeout(() => process.exit(0), 500);
+    }
+    const exe = path.join(os.tmpdir(), `LatexIDE-Setup-${latest}.exe`);
     fs.writeFileSync(exe, buf);
     spawn(exe, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { detached: true, stdio: 'ignore' }).unref();
     res.json({ ok: true });

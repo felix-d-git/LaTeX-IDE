@@ -79,15 +79,7 @@ Copy-ToStaging 'LICENSE' 'LICENSE'
 Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE.cmd') 'LatexIDE.cmd'
-
-# Update-Quelle fuer die Desktop-App. Solange das Repo privat ist, kommt ein
-# (fine-grained, nur Lesen "Contents") Token aus $env:GITHUB_TOKEN in die App -
-# nie ins Repo (update-config.json ist gitignored und entsteht nur im Staging).
-if (-not $WhatIf) {
-    $UpdateCfg = @{ repo = 'felix-d-git/latex-web-ide' }
-    if ($env:GITHUB_TOKEN) { $UpdateCfg.token = $env:GITHUB_TOKEN } else { Write-Warning "GITHUB_TOKEN nicht gesetzt - Auto-Update funktioniert erst, wenn das Repo oeffentlich ist." }
-    [IO.File]::WriteAllText((Join-Path $StagingDir 'update-config.json'), ($UpdateCfg | ConvertTo-Json))
-}
+Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE-Server.cmd') 'LatexIDE-Server.cmd'
 
 if ($WhatIf) {
     Write-Host "[WhatIf] Trockenlauf beendet - kein npm ci / build / prune ausgefuehrt."
@@ -167,13 +159,17 @@ Write-Step "Windows-Installer bauen (Inno Setup)"
 
 $IsccCandidates = @(
     $env:ISCC,
+    "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 )
 $Iscc = $IsccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
 if ($Iscc) {
-    & $Iscc (Join-Path $InstallerDir 'windows\LatexIDE.iss')
+    $AppVersion = (Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).version
+    & $Iscc "/DMyAppVersion=$AppVersion" (Join-Path $InstallerDir 'windows\LatexIDE.iss')
     if ($LASTEXITCODE -ne 0) { throw "ISCC.exe fehlgeschlagen (Exit $LASTEXITCODE)" }
     Write-Host "Installer erzeugt unter installer\out\LatexIDE-Setup.exe"
 } else {
@@ -193,7 +189,7 @@ if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 
 Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
-    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd')) { return }
+    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd')) { return }
     $dst = Join-Path $MacStagingDir $_.Name
     if ($_.PSIsContainer) {
         Copy-Item -Path $_.FullName -Destination $dst -Recurse -Force

@@ -21,6 +21,7 @@ const comments = require('./lib/comments');
 const history = require('./lib/history');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
+const { createDesktopAssets } = require('./lib/desktopAssets');
 const state = require('./state');
 const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
@@ -339,8 +340,78 @@ app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin,
   res.json({ ok: true });
 });
 
+// --- Admin: server updates (like Nextcloud/Immich: banner for admins) ---
+// UPDATE_MODE per host: off | notify (banner only, default) | button (admin can request
+// the update) | auto (host cron installs nightly). Installing is always done by
+// scripts/server-update.sh on the host; "button" only drops a request file it picks up.
+const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
+const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/latex-web-ide';
+const UPDATE_REQUEST = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
+const APP_VERSION = require('../package.json').version;
+let releaseCache = { at: 0, version: null, url: null };
+
+async function latestRelease() {
+  if (Date.now() - releaseCache.at < 6 * 3600e3) return releaseCache;
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'LatexIDE-Server' };
+  if (process.env.UPDATE_TOKEN) headers.Authorization = `Bearer ${process.env.UPDATE_TOKEN}`;
+  const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, { headers, signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
+  const rel = await r.json();
+  releaseCache = { at: Date.now(), version: String(rel.tag_name || '').replace(/^v/, ''), url: rel.html_url };
+  return releaseCache;
+}
+
+function isNewer(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
+
+app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, async (req, res) => {
+  const base = { current: APP_VERSION, mode: UPDATE_MODE, requested: fs.existsSync(UPDATE_REQUEST) };
+  if (UPDATE_MODE === 'off') return res.json({ ...base, available: false });
+  try {
+    const rel = await latestRelease();
+    res.json({ ...base, available: !!rel.version && isNewer(rel.version, APP_VERSION), version: rel.version, url: rel.url });
+  } catch (e) {
+    res.json({ ...base, available: false, error: e.message });
+  }
+});
+
+app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  if (UPDATE_MODE !== 'button') return res.status(400).json({ error: 'Update per Button ist auf diesem Server nicht aktiviert (UPDATE_MODE).' });
+  fs.writeFileSync(UPDATE_REQUEST, new Date().toISOString());
+  res.json({ ok: true });
+});
+
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
+
+// --- Desktop installers with this server's address built in (also the desktop apps' update source) ---
+const desktopAssets = createDesktopAssets({
+  dataDir: process.env.DATA_DIR || path.join(__dirname, '..'),
+  repo: UPDATE_REPO,
+  token: process.env.UPDATE_TOKEN,
+  version: APP_VERSION,
+});
+
+app.get('/api/desktop/release', async (req, res) => {
+  try {
+    res.json({ version: APP_VERSION, ...(await desktopAssets.available()) });
+  } catch (e) {
+    res.json({ version: APP_VERSION, windows: false, macos: false, error: e.message });
+  }
+});
+
+app.get('/api/desktop/download/:os', async (req, res) => {
+  try {
+    await desktopAssets.send(req.params.os, baseUrl(req).replace(/\/+$/, ''), res);
+  } catch (e) {
+    if (res.headersSent) return res.destroy(e);
+    res.status(502).json({ error: e.message });
+  }
+});
 
 // --- Account (logged in) ---
 
@@ -1237,6 +1308,8 @@ bootstrapAdmin()
     restoreWatchers();
     server.listen(PORT, () => {
       console.log(`LaTeX Web IDE laeuft auf http://localhost:${PORT}`);
+      // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
+      if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});
     });
   })
   .catch((e) => {

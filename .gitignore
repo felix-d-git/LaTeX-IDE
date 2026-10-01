@@ -19,8 +19,13 @@ graphify-out/
 
 # Installer-Build
 installer/out/
-update-config.json
+server.json
 install.json
 .release
 .update.env
 desktop-data/
+
+# Selbst gehosteter Server
+data/
+backups/
+.session-secret

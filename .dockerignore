@@ -17,6 +17,10 @@ Backup1_03_08_2026
 projects
 data
 desktop-data
+backups
+.session-secret
+.update.env
+.release
 installer
 graphify-out
 scripts

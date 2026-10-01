@@ -37,6 +37,7 @@ export const authApi = {
   listDesktopTokens: () => req('GET', '/api/auth/desktop-tokens'),
   revokeDesktopToken: (id) => req('DELETE', `/api/auth/desktop-tokens/${encodeURIComponent(id)}`),
   deleteAccount: (password) => req('POST', '/api/auth/delete-account', { password }),
+  desktopRelease: () => req('GET', '/api/desktop/release'),
 };
 
 export const shareApi = {
@@ -49,6 +50,8 @@ export const adminApi = {
   createInvite: () => req('POST', '/api/admin/invites'),
   listInvites: () => req('GET', '/api/admin/invites'),
   revokeInvite: (token) => req('DELETE', `/api/admin/invites/${encodeURIComponent(token)}`),
+  updateStatus: () => req('GET', '/api/admin/update'),
+  requestUpdate: () => req('POST', '/api/admin/update'),
 };
 
 export const api = {

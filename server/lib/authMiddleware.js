@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cookie = require('cookie');
@@ -12,13 +13,24 @@ const SESSION_COOKIE_NAME = 'latex_ide_sid';
 const CSRF_COOKIE_NAME = 'csrfToken';
 const REMEMBER_ME_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 Tage
 
-// Falls kein SESSION_SECRET gesetzt ist (Testsetup), generieren wir einen
-// Zufallswert fuer die Laufzeit - Logins ueberleben dann keinen Neustart.
-// Fuer den Pi-Deploy zwingend SESSION_SECRET in der Umgebung setzen.
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-if (!process.env.SESSION_SECRET) {
-  console.warn('[auth] SESSION_SECRET nicht gesetzt - Sessions ueberleben keinen Server-Neustart. Fuer Produktivbetrieb einen festen Wert in der Umgebung setzen.');
+// Ohne SESSION_SECRET wird einmalig ein Zufallswert erzeugt und im Datenordner
+// gespeichert - Logins ueberleben so auch Neustarts (Selbsthoster muessen nichts setzen).
+const DATA_ROOT = process.env.DATA_DIR || path.join(__dirname, '..', '..');
+function loadSessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  const file = path.join(DATA_ROOT, '.session-secret');
+  try {
+    const secret = fs.readFileSync(file, 'utf8').trim();
+    if (secret) return secret;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(DATA_ROOT, { recursive: true });
+  fs.writeFileSync(file, secret, { mode: 0o600 });
+  return secret;
 }
+const SESSION_SECRET = loadSessionSecret();
 
 const sessionStore = new FileStore({
   path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),

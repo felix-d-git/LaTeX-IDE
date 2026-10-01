@@ -4,7 +4,10 @@
 # Daten + TeX Live liegen auf der SSD (nicht SD-Karte).
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        TEXLIVE: host
     image: latex-collab
     container_name: latex-collab
     restart: unless-stopped
@@ -33,6 +36,9 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       TZ: ${TZ:-Europe/Berlin}
+      # Update-Banner fuer Admins: off | notify | button | auto (siehe scripts/server-update.sh)
+      UPDATE_MODE: ${UPDATE_MODE:-notify}
+      UPDATE_TOKEN: ${UPDATE_TOKEN:-}
       NODE_OPTIONS: --max-old-space-size=${LATEX_HEAP_MB:-384}
     volumes:
       - ${LATEX_DATA_DIR:?LATEX_DATA_DIR fehlt - muss auf die SSD zeigen}:/app/data

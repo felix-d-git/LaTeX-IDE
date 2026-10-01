@@ -72,7 +72,7 @@ fi
 
 echo "Kopiere App-Dateien nach $APP_DIR..."
 mkdir -p "$APP_DIR"
-for item in client server package.json package-lock.json build.js LICENSE THIRD_PARTY_NOTICES.md LICENSES-INSTALLER.txt; do
+for item in client server server.json package.json package-lock.json build.js LICENSE THIRD_PARTY_NOTICES.md LICENSES-INSTALLER.txt; do
     if [ -e "$SCRIPT_DIR/$item" ]; then
         rm -rf "$APP_DIR/$item"
         cp -R "$SCRIPT_DIR/$item" "$APP_DIR/$item"
@@ -109,10 +109,10 @@ cat > "$STARTER" <<'EOF'
 set -euo pipefail
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="$APP_ROOT/node/bin:/Library/TeX/texbin:$PATH"
-: "${REMOTE_URL:=https://latex.example.org}"
+# Server-Adresse kommt aus app/server.json (vom Server ins ZIP eingebaut)
 : "${PORT:=3178}"
 : "${LATEX_IDE_DATA:=$HOME/Library/Application Support/LatexIDE}"
-export REMOTE_URL PORT LATEX_IDE_DATA
+export PORT LATEX_IDE_DATA
 cd "$APP_ROOT/app"
 "$APP_ROOT/node/bin/node" server/desktop.js &
 SERVER_PID=$!

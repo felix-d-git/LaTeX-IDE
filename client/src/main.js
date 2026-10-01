@@ -1,4 +1,4 @@
-import { api, authApi } from './api.js';
+import { api, authApi, adminApi } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
 import { renderTree } from './fileTree.js';
@@ -781,6 +781,32 @@ fetch('/api/desktop/info')
     if (isDesktop) checkDesktopUpdate();
   })
   .catch(() => {});
+
+// Admins: banner when GitHub has a newer server release (text/button depend on UPDATE_MODE).
+async function checkServerUpdate() {
+  const u = await adminApi.updateStatus().catch(() => null);
+  if (!u || !u.available) return;
+  const bar = document.createElement('div');
+  bar.id = 'update-banner';
+  const text = document.createElement('span');
+  text.textContent = `Server-Update verfügbar: Version ${u.version} (installiert: ${u.current}). ` +
+    (u.requested ? 'Update angefordert, wird in Kürze installiert.' : u.mode === 'auto' ? 'Wird nachts automatisch installiert (mit Backup).' : u.mode === 'button' ? '' : 'Installation auf dem Server per scripts/server-update.sh.');
+  bar.appendChild(text);
+  if (u.url) bar.appendChild(Object.assign(document.createElement('a'), { href: u.url, target: '_blank', rel: 'noopener', textContent: 'Release-Notizen' }));
+  if (u.mode === 'button' && !u.requested) {
+    const btn = Object.assign(document.createElement('button'), { textContent: 'Jetzt aktualisieren' });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      await adminApi.requestUpdate().then(() => { text.textContent = 'Update angefordert – Backup und Installation laufen gleich auf dem Server, danach neu laden.'; btn.remove(); }).catch((e) => { btn.disabled = false; alert(e.message); });
+    });
+    bar.appendChild(btn);
+  }
+  const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
+  close.addEventListener('click', () => bar.remove());
+  bar.appendChild(close);
+  document.body.appendChild(bar);
+}
+if (currentUser.isAdmin) checkServerUpdate();
 
 // Desktop app: the local server asks GitHub for a newer release.
 async function checkDesktopUpdate() {

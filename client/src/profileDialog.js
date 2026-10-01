@@ -73,6 +73,27 @@ export function setupProfileDialog({ currentUser, onLogout }) {
     return box;
   }
 
+  // Installers from this server's release, with this server's address built in.
+  function renderDownloadSection() {
+    const box = el('div');
+    const list = el('div');
+    box.append(el('h4', null, 'Desktop-App herunterladen'), list);
+    authApi.desktopRelease().then(
+      (rel) => {
+        const links = [['windows', 'Windows'], ['macos', 'macOS']].filter(([os]) => rel[os]);
+        if (!links.length) return list.appendChild(note(`Für Version ${rel.version} ist noch kein Installationspaket verfügbar${rel.error ? ` (${rel.error})` : ''}.`));
+        list.appendChild(note(`Version ${rel.version}, mit der Adresse dieses Servers. Der erste Download kann etwas dauern.`));
+        for (const [os, label] of links) {
+          const btn = el('button', 'primary', `${label} herunterladen`);
+          btn.addEventListener('click', () => (location.href = `/api/desktop/download/${os}`));
+          list.appendChild(btn);
+        }
+      },
+      (e) => list.appendChild(note(e.message))
+    );
+    return box;
+  }
+
   function renderInviteSection() {
     const box = el('div');
     const createBtn = el('button', 'primary', '+ Neue Einladung erstellen');
@@ -151,6 +172,7 @@ export function setupProfileDialog({ currentUser, onLogout }) {
     logoutBtn.addEventListener('click', () => onLogout && onLogout());
     body.appendChild(logoutBtn);
     body.appendChild(renderPasswordSection());
+    body.appendChild(renderDownloadSection());
     body.appendChild(renderDesktopSection());
     if (currentUser.isAdmin) body.appendChild(renderInviteSection());
     body.appendChild(renderDeleteSection());
