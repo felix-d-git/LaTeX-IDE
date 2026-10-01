@@ -126,6 +126,19 @@ Server-Adresse.
 - Solange das GitHub-Repo privat ist, braucht der Server einen Lese-Token
   (`UPDATE_TOKEN` in `.env`, `GITHUB_TOKEN` in `.update.env`).
 
+### Optionale Dienste (`.env`)
+
+- `LANGUAGETOOL_URL` — eigener [LanguageTool](https://languagetool.org)-Server
+  (LGPL, z. B. Docker-Image `erikvl87/languagetool`), etwa
+  `http://languagetool:8010`. Dann bietet Einstellungen ▸ Spelling die
+  Grammatikprüfung an; ohne Eintrag ist sie aus. Texte gehen nur an diesen
+  Server.
+- `PANDOC` — Pfad zu Pandoc (GPL, läuft als externer Prozess) für
+  File ▸ Download ▸ Markdown/HTML. Im Docker-Image enthalten; ohne Pandoc
+  meldet der Export einen Fehler.
+- Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
+  doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
+
 ### Entwicklung (ohne Docker)
 
 ```
@@ -140,7 +153,7 @@ Braucht Node 24 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
 
 - Dateibaum (links), Editor mit Tabs (Mitte, CodeMirror 6 + LaTeX-Highlighting),
   PDF-Vorschau (rechts, PDF.js)
-- Autosave beim Tippen (debounced)
+- Live-Sync beim Tippen (Yjs), Speichern auf Platte nach 0,5 s
 - Kompilieren-Button → ruft `latexmk -pdf` im Projektordner auf, Log-Panel
   unten zeigt Fehler/Warnungen
 - Haupt-Datei umschaltbar (Doppelklick auf eine `.tex`-Datei im Baum)
@@ -166,7 +179,7 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
   "Passwort vergessen" ändern). Der Sitzungs-Schlüssel wird beim ersten Start
   erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
-  (inkl. `Bachelor_Arbeit_4`) unverändert. Jeder eingeladene Nutzer bekommt
+  unverändert. Jeder eingeladene Nutzer bekommt
   eine eigene, isolierte Projektsammlung unter `projects/users/<id>/` - Konten
   sehen sich gegenseitig nicht.
 - **Passwort vergessen:** Reset-Link läuft über `/api/auth/forgot-password`.

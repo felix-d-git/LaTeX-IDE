@@ -43,8 +43,12 @@ export function configureCollab(h) {
 export function setCollabUser(user) {
   let hash = 0;
   for (const c of user.id || user.username || '') hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-  me = { name: user.username || user.email, color: COLORS[hash % COLORS.length] };
+  me = { id: user.id, name: user.username || user.email, color: COLORS[hash % COLORS.length] };
   for (const s of sessions.values()) s.provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
+}
+
+export function getMe() {
+  return me;
 }
 
 export function setCollabProject(id) {

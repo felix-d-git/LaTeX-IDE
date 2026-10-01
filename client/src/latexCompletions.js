@@ -108,7 +108,16 @@ export async function getRefs() {
   return refsCache;
 }
 
-const REF_RE = /\\(ref|eqref|pageref|autoref|cref|Cref|nameref|vref)\{[^}]*/;
+export const REFERENCES_KEY = 'latex-ide-references-v1';
+export function referencePrefs() {
+  let p = {};
+  try {
+    p = JSON.parse(localStorage.getItem(REFERENCES_KEY)) || {};
+  } catch {}
+  return { search: 'advanced', format: 'bibtex', bibFiles: [], ...p };
+}
+
+const REF_RE =/\\(ref|eqref|pageref|autoref|cref|Cref|nameref|vref)\{[^}]*/;
 const CITE_RE = /\\(cite|citep|citet|parencite|textcite|autocite|footcite|nocite)(\[[^\]]*\])*\{[^}]*/;
 
 // Die von closeBrackets eingefügte "}" erst beim Übernehmen mitersetzen, sonst
@@ -154,10 +163,15 @@ async function argumentSource(context) {
   // Bei \cite{a,b nur den letzten Key ersetzen.
   const from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
   const { labels, bibKeys } = await getRefs();
-  const options = ref
-    ? labels.map((l) => ({ label: l, type: 'variable', detail: 'label' }))
-    : bibKeys.map((b) => ({ label: b.key, type: 'variable', detail: 'bib', info: b.title || undefined }));
-  return { from, to: m.to, options, validFor: /^[^},]*$/ };
+  if (ref) return { from, to: m.to, options: labels.map((l) => ({ label: l, type: 'variable', detail: 'label' })), validFor: /^[^},]*$/ };
+  // Einstellungen ▸ Literatur: nur gewählte .bib-Dateien; "erweitert" sucht auch in Titel/Autor.
+  const prefs = referencePrefs();
+  const keys = bibKeys.filter((b) => !prefs.bibFiles.length || prefs.bibFiles.includes(b.file));
+  const option = (b) => ({ label: b.key, type: 'variable', detail: (b.author || 'bib').split(/\s+and\s+/)[0], info: b.title || undefined });
+  if (prefs.search !== 'advanced') return { from, to: m.to, options: keys.map(option), validFor: /^[^},]*$/ };
+  const q = context.state.sliceDoc(from, m.to).toLowerCase();
+  const hits = keys.filter((b) => `${b.key} ${b.title} ${b.author}`.toLowerCase().includes(q));
+  return { from, to: m.to, options: hits.map(option), filter: false };
 }
 
 export function latexCompletionSource(context) {

@@ -1,4 +1,5 @@
 import { yUndo as undo, yRedo as redo } from './collab.js';
+import { openDropdown, closeDropdown, isDropdownOpenFor } from './dropdown.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';
 
 // R5: 32px-Formatierungsleiste über dem Text, Buttons 24x24 mit 4px Radius,
@@ -50,6 +51,27 @@ export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComm
     button('image', 'Abbildung einfügen', withView((v) => insertAtCursor(v, SNIPPETS.figure))),
     button('table', 'Tabelle einfügen', withView((v) => insertAtCursor(v, SNIPPETS.table)))
   );
+
+  // Zu schmal → Formatierungs-Buttons von rechts in ein "…"-Popover (wie Overleaf).
+  const items = [...left.children];
+  let overflowed = [];
+  const more = button('dots', 'Weitere Werkzeuge', (e) => {
+    e.stopPropagation();
+    if (isDropdownOpenFor(more)) return closeDropdown();
+    openDropdown(more, overflowed.map((b) => ({ label: b.title, onClick: () => b.click() })));
+  });
+  left.append(more);
+  const fit = () => {
+    items.forEach((el) => el.classList.remove('hidden'));
+    more.classList.add('hidden');
+    overflowed = [];
+    for (let i = items.length - 1; i >= 0 && bar.scrollWidth > bar.clientWidth; i--) {
+      more.classList.remove('hidden');
+      items[i].classList.add('hidden');
+      if (items[i].tagName === 'BUTTON') overflowed.unshift(items[i]);
+    }
+  };
+  new ResizeObserver(fit).observe(bar);
 
   const codeBtn = document.createElement('button');
   codeBtn.type = 'button';

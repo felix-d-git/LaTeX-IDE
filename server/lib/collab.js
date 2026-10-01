@@ -197,7 +197,31 @@ function getEpoch(root, rel) {
   return epoch;
 }
 
-function handleConnection(ws, root, rel, epoch) {
+// Reviewers may only add comment anchors: an update is applied to a scratch
+// copy first and dropped if it touches the text or the tracked changes.
+function reviewerMayApply(ydoc, update) {
+  const tmp = new Y.Doc();
+  Y.applyUpdate(tmp, Y.encodeStateAsUpdate(ydoc));
+  const snap = () => tmp.getText('content').toString() + '\0' + JSON.stringify(tmp.getMap('review').toJSON());
+  const before = snap();
+  Y.applyUpdate(tmp, update);
+  const ok = snap() === before;
+  tmp.destroy();
+  return ok;
+}
+
+function readSyncReadOnly(dec, enc, ydoc, ws) {
+  const kind = decoding.readVarUint(dec);
+  if (kind === syncProtocol.messageYjsSyncStep1) {
+    syncProtocol.writeSyncStep2(enc, ydoc, decoding.readVarUint8Array(dec));
+    return;
+  }
+  const update = decoding.readVarUint8Array(dec);
+  if (reviewerMayApply(ydoc, update)) Y.applyUpdate(ydoc, update, ws);
+  else console.warn('[collab] Änderung eines Kommentierenden verworfen.');
+}
+
+function handleConnection(ws, root, rel, epoch, readOnly = false) {
   let entry;
   try {
     entry = getDoc(root, rel);
@@ -219,7 +243,8 @@ function handleConnection(ws, root, rel, epoch) {
       if (type === MSG_SYNC) {
         const enc = encoding.createEncoder();
         encoding.writeVarUint(enc, MSG_SYNC);
-        syncProtocol.readSyncMessage(dec, enc, entry.ydoc, ws);
+        if (readOnly) readSyncReadOnly(dec, enc, entry.ydoc, ws);
+        else syncProtocol.readSyncMessage(dec, enc, entry.ydoc, ws);
         if (encoding.length(enc) > 1) send(entry, ws, encoding.toUint8Array(enc));
       } else if (type === MSG_AWARENESS) {
         awarenessProtocol.applyAwarenessUpdate(entry.awareness, decoding.readVarUint8Array(dec), ws);

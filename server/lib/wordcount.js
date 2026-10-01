@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { safeResolve } = require('./fsTree');
 
 function stripComments(text) {
   return text.replace(/(^|[^\\])%.*$/gm, '$1');
@@ -13,9 +14,10 @@ function expandInputs(root, text, depth = 0) {
   return text.replace(/\\(?:input|include)\{([^}]+)\}/g, (match, file) => {
     let relPath = file.trim();
     if (!relPath.endsWith('.tex')) relPath += '.tex';
-    const abs = path.join(root, relPath);
-    if (!fs.existsSync(abs)) return '';
     try {
+      // \input{../../other-user/x} must not read outside the project.
+      const abs = safeResolve(root, relPath);
+      if (!fs.existsSync(abs)) return '';
       return expandInputs(root, fs.readFileSync(abs, 'utf8'), depth + 1);
     } catch (e) {
       return '';
@@ -33,7 +35,7 @@ const MATH_INLINE_RE = /\$(?:[^$\\]|\\.)+\$|\\\((?:[^\\]|\\.)*?\\\)/g;
 // headers/math regions separately, then strips remaining commands/braces
 // before counting words in what's left.
 function countWords(root, mainRelPath) {
-  const mainAbs = path.join(root, mainRelPath);
+  const mainAbs = safeResolve(root, mainRelPath);
   let text = fs.readFileSync(mainAbs, 'utf8');
   text = stripComments(expandInputs(root, text));
 
@@ -50,4 +52,4 @@ function countWords(root, mainRelPath) {
   return { words, headers, mathInline, mathDisplay };
 }
 
-module.exports = { countWords };
+module.exports = { countWords, expandInputs, stripComments };

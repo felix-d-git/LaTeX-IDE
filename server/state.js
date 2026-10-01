@@ -25,6 +25,8 @@ if (!workspace.mainFileByRoot) workspace.mainFileByRoot = {};
 if (!workspace.activeRootByUser) workspace.activeRootByUser = {};
 if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
 if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
+if (!workspace.rolesByRoot) workspace.rolesByRoot = {}; // root -> { userId: 'reviewer' }, absent = editor
+if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { editor?: link, reviewer?: link }, siehe getShareLinks
 
 // One-time migration: pre-auth workspace.json had a single global
 // activeRoot/recentRoots (single-user tool). Once the admin account exists,
@@ -91,13 +93,62 @@ function setShares(root, userIds) {
   saveWorkspace(workspace);
 }
 
+function getRole(root, userId) {
+  return (workspace.rolesByRoot[root] || {})[userId] || 'editor';
+}
+
+function setRole(root, userId, role) {
+  const m = { ...(workspace.rolesByRoot[root] || {}) };
+  if (role === 'reviewer') m[userId] = role;
+  else delete m[userId];
+  if (Object.keys(m).length) workspace.rolesByRoot[root] = m;
+  else delete workspace.rolesByRoot[root];
+  saveWorkspace(workspace);
+}
+
+// Link je Rolle: { token, maxUses (0 = unbegrenzt), uses }. Alte Einträge waren nur der Token-String.
+function getShareLinks(root) {
+  const m = {};
+  for (const [role, l] of Object.entries(workspace.shareLinksByRoot[root] || {})) {
+    m[role] = typeof l === 'string' ? { token: l, maxUses: 0, uses: 0 } : l;
+  }
+  return m;
+}
+
+function setShareLink(root, role, link) {
+  const m = { ...getShareLinks(root) };
+  if (link) m[role] = link;
+  else delete m[role];
+  if (Object.keys(m).length) workspace.shareLinksByRoot[root] = m;
+  else delete workspace.shareLinksByRoot[root];
+  saveWorkspace(workspace);
+}
+
+function findShareLink(token) {
+  for (const [root, m] of Object.entries(workspace.shareLinksByRoot)) {
+    for (const role of ['editor', 'reviewer']) {
+      const l = getShareLinks(root)[role];
+      if (l && l.token === token) return { root, role, ...l };
+    }
+  }
+  return null;
+}
+
+// Nach einem Beitritt hochzählen; Limit erreicht → Link ungültig.
+function useShareLink(root, role) {
+  const l = getShareLinks(root)[role];
+  if (!l) return;
+  const uses = l.uses + 1;
+  setShareLink(root, role, l.maxUses && uses >= l.maxUses ? null : { ...l, uses });
+}
+
 function sharedRootsFor(userId) {
   return Object.keys(workspace.sharesByRoot).filter((r) => workspace.sharesByRoot[r].includes(userId));
 }
 
 // Project renamed: carry its per-root settings/main file/shares over.
 function moveRoot(oldRoot, newRoot) {
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot']) {
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot']) {
     if (workspace[k][oldRoot] === undefined) continue;
     workspace[k][newRoot] = workspace[k][oldRoot];
     delete workspace[k][oldRoot];
@@ -111,9 +162,10 @@ function purgeUser(userId, ownDir) {
   delete workspace.activeRootByUser[userId];
   delete workspace.recentRootsByUser[userId];
   const own = (r) => r === ownDir || r.startsWith(ownDir + require('path').sep);
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot']) {
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot']) {
     for (const r of Object.keys(workspace[k])) if (own(r)) delete workspace[k][r];
   }
+  for (const m of Object.values(workspace.rolesByRoot)) delete m[userId];
   for (const r of Object.keys(workspace.sharesByRoot)) {
     workspace.sharesByRoot[r] = workspace.sharesByRoot[r].filter((id) => id !== userId);
     if (!workspace.sharesByRoot[r].length) delete workspace.sharesByRoot[r];
@@ -140,6 +192,12 @@ module.exports = {
   getShares,
   setShares,
   sharedRootsFor,
+  getRole,
+  setRole,
+  getShareLinks,
+  setShareLink,
+  findShareLink,
+  useShareLink,
   moveRoot,
   purgeUser,
 };

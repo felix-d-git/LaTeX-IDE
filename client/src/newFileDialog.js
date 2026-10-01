@@ -1,10 +1,6 @@
 import { api } from './api.js';
 
-const STUB_TABS = {
-  'other-project': 'Datei aus einem anderen Projekt übernehmen (bräuchte projektübergreifende Auswahl-UI) ist noch nicht umgesetzt.',
-  'external-url': 'Datei von einer externen URL laden ist noch nicht umgesetzt.',
-  zotero: 'Zotero/Mendeley/ReadCube-Anbindung ist noch nicht umgesetzt (siehe Account-Tab in den Einstellungen).',
-};
+import { referencePrefs } from './latexCompletions.js';
 
 export function setupNewFileDialog({ onCreated, onUpload }) {
   const modal = document.getElementById('new-file-dialog');
@@ -113,11 +109,112 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     return wrap;
   }
 
-  function renderStubTab(key) {
-    const wrap = document.createElement('div');
+  function field(text, el) {
+    const label = document.createElement('label');
+    label.textContent = text;
+    label.appendChild(el);
+    return label;
+  }
+
+  function input(value = '', placeholder = '') {
+    const el = document.createElement('input');
+    el.value = value;
+    el.placeholder = placeholder;
+    return el;
+  }
+
+  function note(text) {
     const p = document.createElement('p');
-    p.textContent = '🚧 ' + STUB_TABS[key];
-    wrap.appendChild(p);
+    p.className = 'settings-note';
+    p.textContent = text;
+    return p;
+  }
+
+  // Button, der fn() ausführt, danach Dialog schließt und die neue Datei öffnet.
+  function actionButton(text, fn) {
+    const btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = text;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const { path } = await fn();
+        hide();
+        onCreated && onCreated(path);
+      } catch (e) {
+        alert('Fehler: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    const row = document.createElement('div');
+    row.className = 'dialog-buttons';
+    row.appendChild(btn);
+    return row;
+  }
+
+  function renderOtherProjectTab() {
+    const wrap = document.createElement('div');
+    const project = document.createElement('select');
+    const file = document.createElement('select');
+    const name = input('', 'Dateiname (leer = wie Original)');
+    wrap.append(field('Projekt', project), field('Datei', file), field('Name im Projekt', name));
+    wrap.appendChild(actionButton('Übernehmen', () => api.importProjectFile(project.value, file.value, targetDir, name.value.trim() || undefined)));
+    const loadFiles = async () => {
+      file.innerHTML = '';
+      if (!project.value) return;
+      const { files } = await api.importFiles(project.value);
+      for (const f of files) file.add(new Option(f, f));
+    };
+    project.addEventListener('change', () => loadFiles().catch((e) => alert(e.message)));
+    api.importProjects().then(({ projects }) => {
+      if (!projects.length) wrap.prepend(note('Keine anderen Projekte, auf die du Zugriff hast.'));
+      for (const p of projects) project.add(new Option(p.name, p.id));
+      return loadFiles();
+    }).catch((e) => alert(e.message));
+    return wrap;
+  }
+
+  function renderUrlTab() {
+    const wrap = document.createElement('div');
+    const url = input('', 'https://…');
+    const name = input('', 'Dateiname (leer = aus der URL)');
+    wrap.append(field('URL', url), field('Name im Projekt', name));
+    wrap.appendChild(note('Einmalige Kopie: spätere Änderungen an der Quelle werden nicht nachgeladen.'));
+    wrap.appendChild(actionButton('Laden', () => api.importUrl(url.value.trim(), targetDir, name.value.trim())));
+    setTimeout(() => url.focus(), 0);
+    return wrap;
+  }
+
+  function renderReferencesTab() {
+    const wrap = document.createElement('div');
+    const h = (text) => {
+      const el = document.createElement('h4');
+      el.textContent = text;
+      return el;
+    };
+
+    const zName = input('zotero.bib');
+    wrap.append(h('Zotero'), field('Dateiname', zName));
+    wrap.appendChild(note('Lädt die ganze Bibliothek (Zugang unter Einstellungen ▸ Literatur, Format dort wählbar).'));
+    wrap.appendChild(actionButton('Aus Zotero importieren', () => api.importZotero(targetDir, zName.value.trim(), referencePrefs().format)));
+
+    const bibUrl = input('', 'https://…/literatur.bib');
+    wrap.append(h('.bib-Datei'), field('URL', bibUrl));
+    wrap.appendChild(actionButton('Von URL laden', () => api.importUrl(bibUrl.value.trim(), targetDir, '')));
+    const upload = document.createElement('button');
+    upload.textContent = '.bib hochladen';
+    upload.onclick = () => {
+      activeTab = 'upload';
+      render();
+    };
+    wrap.appendChild(upload);
+    wrap.appendChild(note('Mendeley / ReadCube Papers: Bibliothek dort als BibTeX (.bib) exportieren und hier hochladen.'));
+
+    const doi = input('', '10.1000/xyz123');
+    const dName = input('references.bib');
+    wrap.append(h('DOI'), field('DOI', doi), field('An Datei anhängen', dName));
+    wrap.appendChild(actionButton('BibTeX holen', () => api.importDoi(doi.value.trim(), targetDir, dName.value.trim())));
     return wrap;
   }
 
@@ -125,7 +222,9 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     body.innerHTML = '';
     if (activeTab === 'new') body.appendChild(renderNewTab());
     else if (activeTab === 'upload') body.appendChild(renderUploadTab());
-    else body.appendChild(renderStubTab(activeTab));
+    else if (activeTab === 'other-project') body.appendChild(renderOtherProjectTab());
+    else if (activeTab === 'external-url') body.appendChild(renderUrlTab());
+    else body.appendChild(renderReferencesTab());
     for (const btn of tabsBar.querySelectorAll('.tab-btn')) {
       btn.classList.toggle('active', btn.dataset.nfTab === activeTab);
     }

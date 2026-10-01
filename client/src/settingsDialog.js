@@ -1,10 +1,13 @@
 import { api } from './api.js';
+import { REFERENCES_KEY, referencePrefs } from './latexCompletions.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
 const SPELLING_KEY = 'latex-ide-spelling-v1';
+const EDITOR_KEY = 'latex-ide-editor-v1';
 
 const DEFAULT_APPEARANCE = { theme: 'light', fontSize: '14.5px', fontFamily: '"Cascadia Code", Consolas, monospace', lineHeight: '1.5' };
-const DEFAULT_SPELLING = { enabled: true, lang: 'de' };
+const DEFAULT_SPELLING = { enabled: true, lang: 'de', grammar: false, dictionary: [] };
+const DEFAULT_EDITOR = { keybindings: 'none', autocomplete: true, closeBrackets: true, codeCheck: true, pdfViewer: 'builtin', breadcrumbs: true };
 
 function loadJson(key, fallback) {
   try {
@@ -22,7 +25,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
 }
 
-export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
+export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onBreadcrumbs, onShowAccount } = {}) {
   const modal = document.getElementById('settings-dialog');
   const btnClose = document.getElementById('btn-close-settings');
   const tabsBar = document.getElementById('settings-tabs');
@@ -30,7 +33,12 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
 
   let appearance = loadJson(APPEARANCE_KEY, DEFAULT_APPEARANCE);
   let spelling = loadJson(SPELLING_KEY, DEFAULT_SPELLING);
+  let editorPrefs = loadJson(EDITOR_KEY, DEFAULT_EDITOR);
+  let references = referencePrefs();
   let serverSettings = { compiler: 'pdflatex', stopOnFirstError: false, autocompile: false };
+  let ltEnabled = null; // LANGUAGETOOL_URL auf dem Server gesetzt?
+  let zotero = {};
+  let bibFiles = [];
   let activeTab = 'editor';
 
   // Restore persisted, genuinely-applied preferences on startup, not just
@@ -40,12 +48,50 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
     editorMgr.setFontSettings(appearance);
     editorMgr.setSpellcheck(spelling);
   }
+  applyEditorPrefs();
+  onPdfViewer && onPdfViewer(editorPrefs.pdfViewer);
+  onBreadcrumbs && onBreadcrumbs(editorPrefs.breadcrumbs);
+
+  function applyEditorPrefs() {
+    if (!editorMgr) return;
+    editorMgr.setPrefs(
+      { ...editorPrefs, dark: appearance.theme === 'dark', grammar: !!spelling.grammar, lang: spelling.lang, dictionary: spelling.dictionary || [] },
+      {
+        onAddWord: (word) => {
+          spelling = { ...spelling, dictionary: [...new Set([...(spelling.dictionary || []), word])].sort() };
+          saveJson(SPELLING_KEY, spelling);
+          applyEditorPrefs();
+          if (isOpen() && activeTab === 'spelling') render();
+        },
+      }
+    );
+  }
+
+  function setEditorPref(key, value) {
+    editorPrefs = { ...editorPrefs, [key]: value };
+    saveJson(EDITOR_KEY, editorPrefs);
+    applyEditorPrefs();
+  }
 
   function show() {
     modal.classList.remove('hidden');
     // No active project (dashboard) -> project tabs keep their defaults.
     api.getSettings().then(({ settings }) => {
       serverSettings = settings;
+      render();
+    }).catch(() => {});
+    api.languageToolStatus().then(({ enabled }) => {
+      ltEnabled = enabled;
+      render();
+    }).catch(() => {});
+    api.getZotero().then((z) => {
+      zotero = z;
+      render();
+    }).catch(() => {});
+    api.getTree().then(({ tree }) => {
+      bibFiles = [];
+      const walk = (nodes) => (nodes || []).forEach((n) => (n.type === 'dir' ? walk(n.children) : /\.bib$/i.test(n.path) && bibFiles.push(n.path)));
+      walk(tree);
       render();
     }).catch(() => {});
     render();
@@ -108,42 +154,78 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
     return field(labelText, input);
   }
 
-  function inertNote(text) {
+  function note(text) {
     const p = document.createElement('p');
-    p.className = 'settings-inert-note';
-    p.textContent = '🚧 ' + text;
+    p.className = 'settings-note';
+    p.textContent = text;
     return p;
   }
 
   function renderEditorTab() {
     const wrap = document.createElement('div');
+    wrap.appendChild(
+      selectField(
+        'Keybindings',
+        [
+          { value: 'none', label: 'Standard' },
+          { value: 'vim', label: 'Vim' },
+          { value: 'emacs', label: 'Emacs' },
+        ],
+        editorPrefs.keybindings,
+        (v) => setEditorPref('keybindings', v)
+      )
+    );
+    wrap.appendChild(
+      selectField(
+        'PDF-Viewer',
+        [
+          { value: 'builtin', label: 'Eingebaut (PDF.js, SyncTeX)' },
+          { value: 'browser', label: 'Browser' },
+        ],
+        editorPrefs.pdfViewer,
+        (v) => {
+          setEditorPref('pdfViewer', v);
+          onPdfViewer && onPdfViewer(v);
+        }
+      )
+    );
+    wrap.appendChild(checkboxField('Code-Check (Compile-Fehler im Gutter)', editorPrefs.codeCheck, (c) => setEditorPref('codeCheck', c)));
+    wrap.appendChild(checkboxField('Auto-Vervollständigung', editorPrefs.autocomplete, (c) => setEditorPref('autocomplete', c)));
+    wrap.appendChild(checkboxField('Klammern automatisch schließen', editorPrefs.closeBrackets, (c) => setEditorPref('closeBrackets', c)));
+    wrap.appendChild(
+      checkboxField('Breadcrumbs (Datei › Abschnitt)', editorPrefs.breadcrumbs, (c) => {
+        setEditorPref('breadcrumbs', c);
+        onBreadcrumbs && onBreadcrumbs(c);
+      })
+    );
     const hotkeysBtn = document.createElement('button');
     hotkeysBtn.textContent = 'Tastenkürzel bearbeiten…';
     hotkeysBtn.addEventListener('click', () => onShowHotkeys && onShowHotkeys());
     wrap.appendChild(hotkeysBtn);
-    wrap.appendChild(inertNote('Keybindings-Preset (Vim/Emacs), PDF-Viewer-Wahl, Code-Check, Breadcrumbs und die restlichen Editor-Toggles aus der Overleaf-Analyse sind noch nicht verdrahtet.'));
     return wrap;
   }
 
   function renderSpellingTab() {
     const wrap = document.createElement('div');
+    const saveSpelling = (patch) => {
+      spelling = { ...spelling, ...patch };
+      saveJson(SPELLING_KEY, spelling);
+      editorMgr && editorMgr.setSpellcheck(spelling);
+      applyEditorPrefs();
+    };
     wrap.appendChild(
-      selectField(
-        'Spellcheck language',
-        [
-          { value: 'de', label: 'German' },
-          { value: 'en', label: 'English' },
-          { value: 'off', label: 'Aus' },
-        ],
-        spelling.lang === 'off' ? 'off' : spelling.lang,
-        (value) => {
-          spelling = { ...spelling, lang: value === 'off' ? 'de' : value, enabled: value !== 'off' };
-          saveJson(SPELLING_KEY, spelling);
-          editorMgr && editorMgr.setSpellcheck(spelling);
-        }
-      )
+      selectField('Sprache', [{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'Englisch' }], spelling.lang, (v) => saveSpelling({ lang: v }))
     );
-    wrap.appendChild(inertNote('Eigenes Wörterbuch bearbeiten und "AI language suggestions" sind nicht umgesetzt - Rechtschreibprüfung läuft über die Browser-eigene Prüfung.'));
+    wrap.appendChild(checkboxField('Rechtschreibprüfung des Browsers', spelling.enabled, (c) => saveSpelling({ enabled: c })));
+    const lt = checkboxField('Grammatik & Rechtschreibung (LanguageTool)', !!spelling.grammar && ltEnabled !== false, (c) => saveSpelling({ grammar: c }));
+    if (ltEnabled === false) lt.querySelector('input').disabled = true;
+    wrap.appendChild(lt);
+    if (ltEnabled === false) wrap.appendChild(note('Auf diesem Server ist kein LanguageTool eingerichtet (LANGUAGETOOL_URL in der .env).'));
+    const dict = document.createElement('textarea');
+    dict.rows = 6;
+    dict.value = (spelling.dictionary || []).join('\n');
+    dict.addEventListener('change', () => saveSpelling({ dictionary: [...new Set(dict.value.split(/\s+/).filter(Boolean))].sort() }));
+    wrap.appendChild(field('Eigenes Wörterbuch (ein Wort pro Zeile; gilt für LanguageTool, die Browser-Prüfung führt ihr eigenes über das Kontextmenü)', dict));
     return wrap;
   }
 
@@ -186,13 +268,63 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
         serverSettings = (await api.saveSettings({ autocompile: checked })).settings;
       })
     );
-    wrap.appendChild(inertNote('TeX-Live-Version ist informativ (lokal installierte Distribution wird verwendet, keine Versionsauswahl).'));
     return wrap;
   }
 
   function renderReferencesTab() {
     const wrap = document.createElement('div');
-    wrap.appendChild(inertNote('Bibliography-Datei-Auswahl, Reference-Format (BibTeX/BibLaTeX) und Reference-Suche sind noch nicht umgesetzt (Backlog, siehe STATUS.md) - dafür müsste .bib-Parsing eingebaut werden.'));
+    const saveRefs = (patch) => {
+      references = { ...references, ...patch };
+      saveJson(REFERENCES_KEY, references);
+    };
+    wrap.appendChild(
+      selectField(
+        'Literatursuche bei \\cite',
+        [
+          { value: 'advanced', label: 'Erweitert (Key, Titel, Autor)' },
+          { value: 'simple', label: 'Einfach (nur Key)' },
+        ],
+        references.search,
+        (v) => saveRefs({ search: v })
+      )
+    );
+    wrap.appendChild(
+      selectField('Format beim Zotero-Import', [{ value: 'bibtex', label: 'BibTeX' }, { value: 'biblatex', label: 'BibLaTeX' }], references.format, (v) => saveRefs({ format: v }))
+    );
+    if (bibFiles.length) {
+      const box = document.createElement('div');
+      box.className = 'settings-field';
+      box.appendChild(Object.assign(document.createElement('span'), { textContent: 'Literaturdateien für \\cite (keine Auswahl = alle)' }));
+      for (const f of bibFiles) {
+        box.appendChild(
+          checkboxField(f, references.bibFiles.includes(f), (c) =>
+            saveRefs({ bibFiles: c ? [...references.bibFiles, f] : references.bibFiles.filter((x) => x !== f) })
+          )
+        );
+      }
+      wrap.appendChild(box);
+    }
+    const zType = document.createElement('select');
+    for (const [v, l] of [['user', 'Eigene Bibliothek'], ['group', 'Gruppe']]) zType.appendChild(new Option(l, v, false, zotero.libraryType === v));
+    const zId = Object.assign(document.createElement('input'), { type: 'text', value: zotero.libraryId || '', placeholder: 'Zahl, siehe zotero.org/settings/keys' });
+    const zKey = Object.assign(document.createElement('input'), { type: 'password', placeholder: zotero.hasKey ? '•••• gespeichert' : 'nur für private Bibliotheken' });
+    const zSave = Object.assign(document.createElement('button'), { textContent: 'Zotero-Zugang speichern' });
+    const zMsg = note('');
+    zSave.addEventListener('click', async () => {
+      try {
+        await api.saveZotero({ libraryType: zType.value, libraryId: zId.value.trim(), apiKey: zKey.value.trim() });
+        zotero = await api.getZotero();
+        zMsg.textContent = zotero.libraryId ? 'Gespeichert.' : 'Zotero-Zugang entfernt.';
+        zKey.value = '';
+      } catch (e) {
+        zMsg.textContent = e.message;
+      }
+    });
+    wrap.appendChild(field('Zotero-Bibliothek', zType));
+    wrap.appendChild(field('Zotero User-/Gruppen-ID (leer = Zugang löschen)', zId));
+    wrap.appendChild(field('Zotero API-Key', zKey));
+    wrap.appendChild(zSave);
+    wrap.appendChild(zMsg);
     return wrap;
   }
 
@@ -203,6 +335,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
         appearance = { ...appearance, theme: value };
         saveJson(APPEARANCE_KEY, appearance);
         applyTheme(value);
+        applyEditorPrefs();
       })
     );
     wrap.appendChild(
@@ -226,10 +359,8 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
         editorMgr && editorMgr.setFontSettings(appearance);
       })
     );
-    wrap.appendChild(inertNote('"Editor-Theme" (Syntax-Farbschema) bleibt hell, unabhängig vom Overall-Theme - nur die umgebende Oberfläche wechselt auf Dark.'));
     return wrap;
   }
-
 
   const TAB_RENDERERS = {
     editor: renderEditorTab,
@@ -248,6 +379,11 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
   }
 
   tabsBar.addEventListener('click', (e) => {
+    if (e.target.closest('[data-settings-link="account"]')) {
+      hide();
+      onShowAccount && onShowAccount();
+      return;
+    }
     const btn = e.target.closest('[data-settings-tab]');
     if (!btn) return;
     activeTab = btn.dataset.settingsTab;

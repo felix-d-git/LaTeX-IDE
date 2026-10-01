@@ -8,7 +8,7 @@ FROM node:24-bookworm-slim
 ARG TEXLIVE=apt
 # latexmk and several TeX Live scripts are Perl.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends perl ca-certificates \
+    && apt-get install -y --no-install-recommends perl ca-certificates pandoc \
     && if [ "$TEXLIVE" = "apt" ]; then apt-get install -y --no-install-recommends texlive-full latexmk; fi \
     && rm -rf /var/lib/apt/lists/*
 

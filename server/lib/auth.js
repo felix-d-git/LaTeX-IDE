@@ -227,6 +227,15 @@ function revokeApiToken(userId, id) {
 }
 
 // Removes the account and everything keyed to it (tokens, invites it used stay as history).
+// Zotero-Zugang je Nutzer (Literatur importieren); nie über toPublicUser ausgeliefert.
+function setZotero(userId, zotero) {
+  const user = findUserById(userId);
+  if (!user) return;
+  if (zotero) user.zotero = zotero;
+  else delete user.zotero;
+  save(data);
+}
+
 function deleteUser(id) {
   data.users = data.users.filter((u) => u.id !== id);
   for (const k of ['apiTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
@@ -235,6 +244,7 @@ function deleteUser(id) {
 
 module.exports = {
   deleteUser,
+  setZotero,
   findUserByEmail,
   findUserByUsername,
   findUserByLogin,

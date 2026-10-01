@@ -1,4 +1,4 @@
-import { api, authApi, adminApi } from './api.js';
+import { api, authApi, adminApi, shareApi } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
 import { renderTree } from './fileTree.js';
@@ -57,6 +57,15 @@ const authView = setupAuthView({ onAuthenticated: () => location.reload() });
 // /api/auth/me confirms a live session - showing the login/register screen
 // otherwise instead of letting the rest of this file run against a
 // logged-out session (every API call would just 401).
+// Share link (?join=<token>) must survive login/registration.
+const joinToken = new URLSearchParams(location.search).get('join');
+if (joinToken) {
+  try {
+    sessionStorage.setItem('latex-ide-join', joinToken);
+  } catch {}
+  history.replaceState({}, '', location.pathname);
+}
+
 (async function boot() {
   let currentUser;
   try {
@@ -89,7 +98,7 @@ const commentsManager = createCommentsManager();
 const editorMgr = createEditorManager(els.editorContainer, {
   getInitialComments: (path) => commentsManager.getForFile(path),
   onCommentClick: (id) => commentsPanel && commentsPanel.highlightComment(id),
-  onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(Number(id)),
+  onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(id),
   onDocChanged: () => {
     if (reviewPanel && reviewPanel.isOpen()) reviewPanel.render();
     scheduleOutlineRefresh();
@@ -482,7 +491,18 @@ async function loadProject(root) {
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
   els.projectButton.title = root;
-  await Promise.all([loadTree(), commentsManager.loadAll()]);
+  await Promise.all([loadTree(), commentsManager.loadAll(), applyRole()]);
+}
+
+async function applyRole() {
+  let role = 'owner';
+  try {
+    role = (await shareApi.get()).myRole;
+  } catch {}
+  const reviewer = role === 'reviewer';
+  editorMgr.setReadOnly(reviewer);
+  document.body.classList.toggle('role-reviewer', reviewer);
+  els.activeProjectLabel.title = reviewer ? 'Nur kommentieren' : '';
 }
 
 async function openProjectByRoot(root) {
@@ -548,6 +568,7 @@ els.compileBtn.addEventListener('click', async () => {
     const result = await api.compile(isDesktop ? openTexts() : undefined);
     els.pdfLogView.textContent = result.log;
     errorPanel.setLog(result);
+    editorMgr.setCompileDiagnostics(result);
     if (result.success) {
       errorPanel.hide();
     } else if (!result.pdfPath) {
@@ -626,6 +647,9 @@ const historyView = setupHistoryView();
 const settingsDialog = setupSettingsDialog({
   editorMgr,
   onShowHotkeys: () => hotkeySettings.show(),
+  onPdfViewer: (mode) => pdfViewer.setNative(mode === 'browser'),
+  onBreadcrumbs: (on) => document.getElementById('editor-breadcrumbs').classList.toggle('hidden', !on),
+  onShowAccount: () => profileDialog.show(),
 });
 const profileDialog = setupProfileDialog({
   currentUser,
@@ -706,8 +730,7 @@ setupLayoutMenu(menuCtx);
 setupProjectMenu(menuCtx);
 
 // Arbitrary local-folder access only makes sense for the admin (who runs the
-// server and owns the pre-existing outside-of-projects/ Bachelorarbeit
-// folder) - non-admin accounts are restricted server-side to their own
+// server and may open folders outside projects/) - non-admin accounts are restricted server-side to their own
 // isolated projects/users/<id>/ folder anyway, so the dialog would just
 // produce confusing 403s for them.
 if (!currentUser.isAdmin) document.getElementById('btn-open-project').classList.add('hidden');
@@ -841,6 +864,19 @@ connectWs({
 });
 
 (async function init() {
+  let join = null;
+  try {
+    join = sessionStorage.getItem('latex-ide-join');
+    sessionStorage.removeItem('latex-ide-join');
+  } catch {}
+  if (join) {
+    try {
+      const { root } = await shareApi.join(join);
+      return openProjectByRoot(root);
+    } catch (e) {
+      alert(e.message);
+    }
+  }
   const { activeRoot } = await api.listProjects();
   if (activeRoot) {
     await loadProject(activeRoot);

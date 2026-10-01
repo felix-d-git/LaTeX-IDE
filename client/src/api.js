@@ -42,8 +42,12 @@ export const authApi = {
 
 export const shareApi = {
   get: () => req('GET', '/api/share'),
-  add: (login) => req('POST', '/api/share', { login }),
+  add: (login, role) => req('POST', '/api/share', { login, role }),
   remove: (userId) => req('DELETE', `/api/share/${encodeURIComponent(userId)}`),
+  setRole: (userId, role) => req('POST', '/api/share/role', { userId, role }),
+  createLink: (role, maxUses) => req('POST', '/api/share/link', { role, maxUses }),
+  revokeLink: (role) => req('DELETE', `/api/share/link/${encodeURIComponent(role)}`),
+  join: (token) => req('POST', '/api/share/join', { token }),
 };
 
 export const adminApi = {
@@ -108,6 +112,16 @@ export const api = {
   getHistoryDiff: (id, to, file) =>
     req('GET', `/api/history/diff?id=${encodeURIComponent(id)}&to=${encodeURIComponent(to)}&file=${encodeURIComponent(file)}`),
   refs: () => req('GET', '/api/refs'),
+  languageToolStatus: () => req('GET', '/api/languagetool'),
+  languageTool: (data, language) => req('POST', '/api/languagetool', { data, language }),
+  importProjects: () => req('GET', '/api/import/projects'),
+  importFiles: (project) => req('GET', `/api/import/files?project=${encodeURIComponent(project)}`),
+  importProjectFile: (project, filePath, dir, name) => req('POST', '/api/import/project-file', { project, path: filePath, dir, name }),
+  importUrl: (url, dir, name) => req('POST', '/api/import/url', { url, dir, name }),
+  importDoi: (doi, dir, name) => req('POST', '/api/import/doi', { doi, dir, name }),
+  importZotero: (dir, name, format) => req('POST', '/api/import/zotero', { dir, name, format }),
+  getZotero: () => req('GET', '/api/zotero'),
+  saveZotero: (cfg) => req('POST', '/api/zotero', cfg),
   search: (q, opts) => {
     const params = new URLSearchParams({
       q,

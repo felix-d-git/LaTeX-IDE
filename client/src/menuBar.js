@@ -6,8 +6,17 @@ import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './ed
 
 const SYMBOLS = ['α', 'β', 'π', '×', '±', '≈', '°', '§', '∞', '√'];
 
-function alertStub(feature) {
-  alert(`"${feature}" ist noch nicht umgesetzt (Backlog, siehe STATUS.md).`);
+// Pandoc export runs server-side; fetch instead of navigating so errors
+// (e.g. Pandoc missing) show as a message, not as a JSON page.
+async function exportAs(format) {
+  const res = await fetch(`/api/export?format=${format}`);
+  if (!res.ok) return alert('Export fehlgeschlagen: ' + ((await res.json().catch(() => ({}))).error || res.status));
+  const name = decodeURIComponent((res.headers.get('Content-Disposition') || '').split("''")[1] || `export.${format}`);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // R2: eine Toolbar-Zeile — Home-Button (32x32, rund) plus sechs Menü-Toggles
@@ -55,9 +64,9 @@ export function setupMenuBar(ctx) {
           submenu: [
             { label: 'Download as source (.zip)', onClick: () => window.location.assign('/api/download/zip') },
             { label: 'Download as PDF', onClick: () => downloadPdf(ctx) },
-            { label: 'Export as Word (.docx)', onClick: () => alertStub('Export als Word (.docx)') },
-            { label: 'Export as Markdown (.md)', onClick: () => alertStub('Export als Markdown (.md)') },
-            { label: 'Export as HTML (.html)', onClick: () => alertStub('Export als HTML (.html)') },
+            { label: 'Export as Word (.docx)', onClick: () => exportAs('docx') },
+            { label: 'Export as Markdown (.md)', onClick: () => exportAs('md') },
+            { label: 'Export as HTML (.html)', onClick: () => exportAs('html') },
           ],
         },
         { type: 'divider' },

@@ -1,18 +1,15 @@
-import { EditorView, Decoration, WidgetType } from '@codemirror/view';
-import { StateField, StateEffect, Annotation } from '@codemirror/state';
+import { Decoration, WidgetType, ViewPlugin } from '@codemirror/view';
+import { StateEffect } from '@codemirror/state';
+import * as Y from 'yjs';
 import { ySyncAnnotation } from 'y-codemirror.next';
+import { getSession, getMe } from './collab.js';
 
-// Scoped-down "Reviewing" mode: real Overleaf keeps deleted text visible
-// (struck through) in place until a change is resolved, which needs a
-// transaction filter rewriting every delete - too risky to get 100% right
-// here. Instead: deletions really happen (safe, standard editor behavior),
-// and are recorded as a small inline marker + Review-panel entry that can
-// restore the exact removed text on "Reject". Insertions ARE tracked in
-// place (colored/underlined) like the real thing. Both are in-memory only
-// (lost on reload) - not persisted to disk like comments are.
-
-const skipTracking = Annotation.define();
-const removeChangeEffect = StateEffect.define(); // value: change id to stop tracking
+// Tracked changes live in the file's Y.Doc (map "review"), next to the text:
+// persisted with the Yjs state, synced live to collaborators, and anchored
+// with Yjs relative positions so they survive anyone's edits.
+// Insertions stay in the text (marked); deletions really happen (the .tex on
+// disk never contains suggested-away text) but stay visible struck through
+// until accepted (forget) or rejected (text restored).
 
 let reviewing = false;
 export function setReviewingMode(on) {
@@ -22,132 +19,151 @@ export function isReviewingMode() {
   return reviewing;
 }
 
-let nextId = 1;
+const refresh = StateEffect.define();
+let onRemoteChange = null; // review panel re-render when only the map changed
+export function onReviewChanged(fn) {
+  onRemoteChange = fn;
+}
+const relOf = (ytext, i, assoc = 0) => Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(ytext, i, assoc));
+const absOf = (ydoc, j) => {
+  const a = j && Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(j), ydoc);
+  return a ? a.index : null;
+};
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 class DeletionWidget extends WidgetType {
-  constructor(id, text) {
+  constructor(id, text, color) {
     super();
     this.id = id;
     this.text = text;
+    this.color = color;
   }
   toDOM() {
-    const span = document.createElement('span');
-    span.className = 'cm-tracked-delete-marker';
-    span.textContent = '⌫';
-    const preview = this.text.length > 40 ? this.text.slice(0, 40) + '…' : this.text;
-    span.title = `Gelöscht: "${preview}" (im Review-Panel ansehen)`;
-    span.dataset.tcId = String(this.id);
+    const span = document.createElement('del');
+    span.className = 'cm-tracked-delete';
+    span.textContent = this.text;
+    if (this.color) span.style.color = this.color;
+    span.dataset.tcId = this.id;
     span.dataset.tcType = 'delete';
     return span;
   }
   eq(other) {
-    return other.id === this.id;
+    return other.id === this.id && other.text === this.text;
   }
 }
 
-function insertMark(id) {
-  return Decoration.mark({ class: 'cm-tracked-insert', attributes: { 'data-tc-id': String(id), 'data-tc-type': 'insert' } });
+// All changes of a file with absolute positions in the current text.
+export function listChanges(path) {
+  const s = getSession(path);
+  if (!s || !s.ydoc.getMap('review').size) return [];
+  const text = s.ytext.toString();
+  const out = [];
+  s.ydoc.getMap('review').forEach((c, id) => {
+    const from = absOf(s.ydoc, c.f);
+    const to = c.type === 'insert' ? absOf(s.ydoc, c.t) : from;
+    if (from === null || to === null || to < from || (c.type === 'insert' && to === from)) return;
+    out.push({ ...c, id, from, to, text: c.type === 'insert' ? text.slice(from, to) : c.text });
+  });
+  return out.sort((a, b) => a.from - b.from);
 }
 
-function idOf(decoration) {
-  const spec = decoration.spec;
-  if (spec.widget instanceof DeletionWidget) return spec.widget.id;
-  if (spec.attributes) return Number(spec.attributes['data-tc-id']);
-  return null;
+// Accept: forget the change, text stays as it is.
+export function acceptChange(path, id) {
+  const s = getSession(path);
+  if (s) s.ydoc.getMap('review').delete(id);
 }
 
-// Single module-level field definition, shared across every file's editor
-// state (like `flashField` in editor.js) - each EditorState keeps its own
-// independent value for it, so per-file isolation still holds.
-export const trackChangesField = StateField.define({
-  create() {
-    return Decoration.none;
-  },
-  update(deco, tr) {
-    deco = deco.map(tr.changes);
+// Reject: remove the suggested insertion / restore the deleted text.
+export function rejectChange(path, id) {
+  const s = getSession(path);
+  const item = s && listChanges(path).find((c) => c.id === id);
+  if (!item) return;
+  s.ydoc.transact(() => {
+    if (item.type === 'insert') s.ytext.delete(item.from, item.to - item.from);
+    else s.ytext.insert(item.from, item.text);
+    s.ydoc.getMap('review').delete(id);
+  });
+}
 
-    // Edits arriving from collaborators (ySync) are theirs, not tracked as mine.
-    if (reviewing && tr.docChanged && !tr.annotation(skipTracking) && !tr.annotation(ySyncAnnotation)) {
-      const adds = [];
-      tr.changes.iterChanges((fromA, toA, fromB, toB) => {
-        if (toB > fromB) {
-          adds.push(insertMark(nextId++).range(fromB, toB));
-        }
-        if (toA > fromA) {
-          const text = tr.startState.doc.sliceString(fromA, toA);
-          adds.push(Decoration.widget({ widget: new DeletionWidget(nextId++, text), side: 1 }).range(fromB));
-        }
-      });
-      if (adds.length) deco = deco.update({ add: adds, sort: true });
-    }
-
-    for (const e of tr.effects) {
-      if (e.is(removeChangeEffect)) {
-        const kept = [];
-        const cur = deco.iter();
-        while (cur.value) {
-          if (idOf(cur.value) !== e.value) kept.push(cur.value.range(cur.from, cur.to));
-          cur.next();
-        }
-        deco = Decoration.set(kept, true);
+export function trackChanges(path) {
+  return ViewPlugin.fromClass(
+    class {
+      constructor(view) {
+        this.session = getSession(path);
+        this.map = this.session.ydoc.getMap('review');
+        this.items = listChanges(path);
+        this.decorations = this.build(view);
+        this.onMap = () =>
+          queueMicrotask(() => {
+            view.dispatch({ effects: refresh.of(null) });
+            if (onRemoteChange) onRemoteChange(path);
+          });
+        this.map.observe(this.onMap);
       }
-    }
-
-    return deco;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-export function listChanges(view) {
-  const deco = view.state.field(trackChangesField);
-  const items = [];
-  const cur = deco.iter();
-  while (cur.value) {
-    const spec = cur.value.spec;
-    if (spec.widget instanceof DeletionWidget) {
-      items.push({ id: spec.widget.id, type: 'delete', from: cur.from, to: cur.from, text: spec.widget.text });
-    } else {
-      items.push({ id: Number(spec.attributes['data-tc-id']), type: 'insert', from: cur.from, to: cur.to, text: view.state.sliceDoc(cur.from, cur.to) });
-    }
-    cur.next();
-  }
-  items.sort((a, b) => a.from - b.from);
-  return items;
-}
-
-function findRange(view, id) {
-  const deco = view.state.field(trackChangesField);
-  const cur = deco.iter();
-  while (cur.value) {
-    if (idOf(cur.value) === id) return { from: cur.from, to: cur.to, decoration: cur.value };
-    cur.next();
-  }
-  return null;
-}
-
-// Accept: stop tracking the change, text stays exactly as it currently is
-// (insertion becomes normal committed text; deletion was already applied for real).
-export function acceptChange(view, id) {
-  view.dispatch({ effects: removeChangeEffect.of(id), annotations: skipTracking.of(true) });
-}
-
-// Reject: undo the change's effect (remove the tracked insertion's text, or
-// restore a tracked deletion's text) and stop tracking it.
-export function rejectChange(view, id) {
-  const found = findRange(view, id);
-  if (!found) return;
-  const isDelete = found.decoration.spec.widget instanceof DeletionWidget;
-  if (isDelete) {
-    view.dispatch({
-      changes: { from: found.from, to: found.from, insert: found.decoration.spec.widget.text },
-      effects: removeChangeEffect.of(id),
-      annotations: skipTracking.of(true),
-    });
-  } else {
-    view.dispatch({
-      changes: { from: found.from, to: found.to, insert: '' },
-      effects: removeChangeEffect.of(id),
-      annotations: skipTracking.of(true),
-    });
-  }
+      update(u) {
+        const local = u.docChanged && !u.transactions.some((tr) => tr.annotation(ySyncAnnotation));
+        if (reviewing && local) this.record(u);
+        if (u.docChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)))) {
+          this.items = listChanges(path);
+          this.decorations = this.build(u.view);
+        }
+      }
+      // Positions of this.items are still in the old document here.
+      record(u) {
+        const me = getMe();
+        const { ytext, ydoc } = this.session;
+        const mine = this.items.filter((c) => c.user && c.user.id === me.id);
+        ydoc.transact(() => {
+          u.changes.iterChanges((fromA, toA, fromB, toB) => {
+            if (toA > fromA) {
+              const deleted = u.startState.doc.sliceString(fromA, toA);
+              // Deleting inside your own suggestion just shortens it.
+              if (!mine.some((c) => c.type === 'insert' && c.from <= fromA && toA <= c.to)) {
+                const back = mine.find((c) => c.type === 'delete' && c.from === toA); // Backspace burst
+                const fwd = mine.find((c) => c.type === 'delete' && c.from === fromA); // Delete burst
+                if (back) this.map.set(back.id, { ...this.raw(back), text: deleted + back.text, f: relOf(ytext, fromB) });
+                else if (fwd) this.map.set(fwd.id, { ...this.raw(fwd), text: fwd.text + deleted });
+                else this.map.set(newId(), { type: 'delete', f: relOf(ytext, fromB), text: deleted, user: me, at: Date.now() });
+              }
+            }
+            if (toB > fromB) {
+              const inside = mine.some((c) => c.type === 'insert' && c.from < fromA && fromA < c.to);
+              const after = mine.find((c) => c.type === 'insert' && c.to === fromA);
+              const before = mine.find((c) => c.type === 'insert' && c.from === toA);
+              if (inside) return;
+              if (after) this.map.set(after.id, { ...this.raw(after), t: relOf(ytext, toB, -1) });
+              else if (before) this.map.set(before.id, { ...this.raw(before), f: relOf(ytext, fromB) });
+              else this.map.set(newId(), { type: 'insert', f: relOf(ytext, fromB), t: relOf(ytext, toB, -1), user: me, at: Date.now() });
+            }
+          });
+        });
+      }
+      raw(c) {
+        return this.map.get(c.id);
+      }
+      build(view) {
+        const len = view.state.doc.length;
+        const ranges = [];
+        for (const c of this.items) {
+          if (c.to > len) continue;
+          const color = c.user && c.user.color;
+          if (c.type === 'insert') {
+            ranges.push(
+              Decoration.mark({
+                class: 'cm-tracked-insert',
+                attributes: { 'data-tc-id': c.id, 'data-tc-type': 'insert', style: color ? `--tc-color:${color}` : '' },
+              }).range(c.from, c.to)
+            );
+          } else {
+            ranges.push(Decoration.widget({ widget: new DeletionWidget(c.id, c.text, color), side: -1 }).range(c.from));
+          }
+        }
+        return Decoration.set(ranges, true);
+      }
+      destroy() {
+        this.map.unobserve(this.onMap);
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
 }

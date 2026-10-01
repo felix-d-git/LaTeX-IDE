@@ -79,13 +79,14 @@ function collectRefs(root) {
         if (/^(comment|string|preamble)$/i.test(m[1])) continue;
         // Titel mit einer Ebene verschachtelter Klammern ("{JEDEC} Standard"), Klammern danach entfernen.
         const title = (m[3].match(/\btitle\s*=\s*[{"]((?:[^{}"]|\{[^{}]*\})*)/i) || [])[1] || '';
-        bibKeys.set(m[2], title.replace(/[{}]/g, '').trim());
+        const author = (m[3].match(/\bauthor\s*=\s*[{"]((?:[^{}"]|\{[^{}]*\})*)/i) || [])[1] || '';
+        bibKeys.set(m[2], { title: title.replace(/[{}]/g, '').trim(), author: author.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim(), file: relPath });
       }
     }
   }
   return {
     labels: [...labels].sort(),
-    bibKeys: [...bibKeys].map(([key, title]) => ({ key, title })).sort((a, b) => a.key.localeCompare(b.key)),
+    bibKeys: [...bibKeys].map(([key, v]) => ({ key, ...v })).sort((a, b) => a.key.localeCompare(b.key)),
   };
 }
 

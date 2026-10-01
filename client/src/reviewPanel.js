@@ -1,4 +1,4 @@
-import { listChanges, acceptChange, rejectChange } from './trackChanges.js';
+import { listChanges, acceptChange, rejectChange, onReviewChanged } from './trackChanges.js';
 import { listConflicts, resolveConflict } from './collab.js';
 
 function snippetOf(text, max = 80) {
@@ -73,7 +73,7 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
       list.appendChild(el);
     }
 
-    const items = listChanges(editorMgr.view);
+    const items = listChanges(path);
     emptyEl.classList.toggle('hidden', items.length + conflicts.length > 0);
     if (items.length === 0) {
       emptyEl.textContent = 'Keine nachverfolgten Änderungen in dieser Datei.';
@@ -87,7 +87,7 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
 
       const type = document.createElement('div');
       type.className = 'review-item-type';
-      type.textContent = item.type === 'insert' ? '+ Einfügung' : '– Löschung';
+      type.textContent = `${item.type === 'insert' ? '+ Einfügung' : '– Löschung'}${item.user ? ' · ' + item.user.name : ''}`;
       el.appendChild(type);
 
       const text = document.createElement('div');
@@ -102,16 +102,14 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
       acceptBtn.className = 'primary';
       acceptBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        acceptChange(editorMgr.view, item.id);
-        render();
+        acceptChange(path, item.id);
       });
       const rejectBtn = document.createElement('button');
       rejectBtn.textContent = 'Reject';
       rejectBtn.className = 'danger';
       rejectBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        rejectChange(editorMgr.view, item.id);
-        render();
+        rejectChange(path, item.id);
       });
       actions.appendChild(acceptBtn);
       actions.appendChild(rejectBtn);
@@ -134,6 +132,9 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
     setTimeout(() => node.classList.remove('highlighted'), 1500);
   }
 
+  onReviewChanged((p) => {
+    if (isOpen() && p === getActivePath()) render();
+  });
   btnToggle.addEventListener('click', toggle);
   btnClose.addEventListener('click', hide);
 

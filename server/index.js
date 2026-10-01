@@ -21,6 +21,8 @@ const comments = require('./lib/comments');
 const history = require('./lib/history');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
+const exporter = require('./lib/export');
+const { fetchUrl } = require('./lib/fetchUrl');
 const { createDesktopAssets } = require('./lib/desktopAssets');
 const state = require('./state');
 const auth = require('./lib/auth');
@@ -167,6 +169,14 @@ function canAccessRoot(user, root) {
   return state.getShares(path.resolve(root)).includes(user.id);
 }
 
+// 'owner' | 'editor' | 'reviewer' (read + comment only) | null
+function roleOf(user, root) {
+  if (!user || !root) return null;
+  if (canManageRoot(user, root)) return 'owner';
+  const key = path.resolve(root);
+  return state.getShares(key).includes(user.id) ? state.getRole(key, user.id) : null;
+}
+
 // Stable id of a project for collab rooms / client caches: path below projects/.
 function projectIdOf(root) {
   return path.relative(PROJECTS_DIR, path.resolve(root)).split(path.sep).join('/');
@@ -199,8 +209,7 @@ function releaseWatcher(root) {
   }
 }
 
-// Admin keeps using the pre-existing top-level projects/ folder as-is (so the
-// real Bachelorarbeit project doesn't need to move); every other, newly
+// Admin keeps using the pre-existing top-level projects/ folder as-is; every other, newly
 // invited user gets their own isolated subfolder so accounts can't see each
 // other's files.
 function userProjectsDir(user) {
@@ -388,6 +397,16 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
 
+// Reviewers may read, compile and comment, but not change the project.
+const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
+app.use((req, res, next) => {
+  if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
+  if (roleOf(req.user, state.getActiveRoot(req.user.id)) === 'reviewer') {
+    return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
+  }
+  next();
+});
+
 // --- Desktop installers with this server's address built in (also the desktop apps' update source) ---
 const desktopAssets = createDesktopAssets({
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..'),
@@ -479,11 +498,30 @@ function shareInfo(root, user) {
     const u = auth.findUserById(id);
     return u ? { id: u.id, username: auth.toPublicUser(u).username, email: u.email } : null;
   };
+  const key = path.resolve(root);
+  const canManage = canManageRoot(user, root);
   return {
-    canManage: canManageRoot(user, root),
+    canManage,
+    myRole: roleOf(user, root),
     owner: toMember(ownerIdOf(root)),
-    members: state.getShares(path.resolve(root)).map(toMember).filter(Boolean),
+    members: state
+      .getShares(key)
+      .map((id) => toMember(id) && { ...toMember(id), role: state.getRole(key, id) })
+      .filter(Boolean),
+    links: canManage ? state.getShareLinks(key) : {},
   };
+}
+
+const SHARE_ROLES = ['editor', 'reviewer'];
+
+function requireManagedRoot(req, res) {
+  const root = requireRoot(req, res);
+  if (!root) return null;
+  if (!canManageRoot(req.user, root)) {
+    res.status(403).json({ error: 'Nur der Eigentümer kann das Projekt teilen.' });
+    return null;
+  }
+  return root;
 }
 
 app.get('/api/share', (req, res) => {
@@ -496,13 +534,61 @@ app.post('/api/share', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   if (!canManageRoot(req.user, root)) return res.status(403).json({ error: 'Nur der Eigentümer kann das Projekt teilen.' });
+  const role = req.body.role || 'editor';
+  if (!SHARE_ROLES.includes(role)) return res.status(400).json({ error: 'Ungültige Rolle.' });
   const target = auth.findUserByLogin(req.body.login || '');
   if (!target || !auth.isVerified(target)) return res.status(404).json({ error: 'Kein bestätigtes Konto mit diesem Benutzernamen / dieser E-Mail.' });
   if (canManageRoot(target, root)) return res.status(400).json({ error: 'Diese Person hat bereits Zugriff.' });
   const key = path.resolve(root);
   const ids = state.getShares(key);
   if (!ids.includes(target.id)) state.setShares(key, [...ids, target.id]);
+  state.setRole(key, target.id, role);
   res.json(shareInfo(root, req.user));
+});
+
+app.post('/api/share/role', (req, res) => {
+  const root = requireManagedRoot(req, res);
+  if (!root) return;
+  const key = path.resolve(root);
+  if (!SHARE_ROLES.includes(req.body.role) || !state.getShares(key).includes(req.body.userId)) {
+    return res.status(400).json({ error: 'Ungültige Rolle oder kein Mitglied.' });
+  }
+  state.setRole(key, req.body.userId, req.body.role);
+  res.json(shareInfo(root, req.user));
+});
+
+// Share link per role (like Overleaf's edit/view links). Whoever opens it
+// while logged in becomes a member; the owner can revoke it any time.
+app.post('/api/share/link', (req, res) => {
+  const root = requireManagedRoot(req, res);
+  if (!root) return;
+  if (!SHARE_ROLES.includes(req.body.role)) return res.status(400).json({ error: 'Ungültige Rolle.' });
+  const maxUses = Math.max(0, Math.min(1000, parseInt(req.body.maxUses, 10) || 0));
+  state.setShareLink(path.resolve(root), req.body.role, { token: crypto.randomBytes(24).toString('base64url'), maxUses, uses: 0 });
+  res.json(shareInfo(root, req.user));
+});
+
+app.delete('/api/share/link/:role', (req, res) => {
+  const root = requireManagedRoot(req, res);
+  if (!root) return;
+  state.setShareLink(path.resolve(root), req.params.role, null);
+  res.json(shareInfo(root, req.user));
+});
+
+app.post('/api/share/join', limitToken, (req, res) => {
+  const link = typeof req.body.token === 'string' && state.findShareLink(req.body.token);
+  if (!link || !fs.existsSync(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  if (!auth.isVerified(req.user)) return res.status(403).json({ error: 'Bitte zuerst die E-Mail-Adresse bestätigen.' });
+  if (!canManageRoot(req.user, link.root)) {
+    const ids = state.getShares(link.root);
+    // An existing member keeps the role they have; the link only adds new people.
+    if (!ids.includes(req.user.id)) {
+      state.setShares(link.root, [...ids, req.user.id]);
+      state.setRole(link.root, req.user.id, link.role);
+      state.useShareLink(link.root, link.role);
+    }
+  }
+  res.json({ root: link.root });
 });
 
 // Owner removes a member, or a member leaves (userId = self).
@@ -514,6 +600,8 @@ app.delete('/api/share/:userId', (req, res) => {
   }
   const key = path.resolve(root);
   state.setShares(key, state.getShares(key).filter((id) => id !== req.params.userId));
+  state.setRole(key, req.params.userId, 'editor');
+  if (req.params.userId === req.user.id) return res.json({ ok: true });
   res.json(shareInfo(root, req.user));
 });
 
@@ -601,6 +689,160 @@ app.delete('/api/collab/raw', (req, res) => {
   }
 });
 
+// --- Add files: from another project / from an external URL ---
+
+// Other projects this user may read, addressed by projectIdOf().
+function importSourceRoot(req, id) {
+  const r = path.resolve(PROJECTS_DIR, String(id || ''));
+  if (!isInside(PROJECTS_DIR, r) || r === path.resolve(PROJECTS_DIR) || !fs.existsSync(r) || !canAccessRoot(req.user, r)) return null;
+  return r;
+}
+
+app.get('/api/import/projects', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const own = projects.listProjects(userProjectsDir(req.user)).filter((p) => !(req.user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const roots = [...own, ...state.sharedRootsFor(req.user.id)]
+    .map((r) => path.resolve(r))
+    .filter((r) => r !== path.resolve(root) && importSourceRoot(req, projectIdOf(r)));
+  res.json({ projects: roots.map((r) => ({ id: projectIdOf(r), name: path.basename(r) })) });
+});
+
+app.get('/api/import/files', (req, res) => {
+  const src = importSourceRoot(req, req.query.project);
+  if (!src) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  const files = [];
+  const walk = (nodes) => nodes.forEach((n) => (n.type === 'dir' ? walk(n.children) : files.push(n.path)));
+  walk(buildTree(src));
+  res.json({ files });
+});
+
+app.post('/api/import/project-file', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const src = importSourceRoot(req, req.body.project);
+  if (!src) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  try {
+    collab.flushRoot(src);
+    const data = fs.readFileSync(safeResolve(src, req.body.path));
+    const name = req.body.name || path.posix.basename(req.body.path);
+    res.json({ path: treeOps.uploadFile(root, req.body.dir, name, data.toString('base64')) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/import/url', limitToken, async (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  try {
+    const { data, finalUrl } = await fetchUrl(req.body.url);
+    const fromUrl = decodeURIComponent(new URL(finalUrl).pathname.split('/').pop() || '');
+    const name = String(req.body.name || '').trim() || fromUrl || 'download';
+    res.json({ path: treeOps.uploadFile(root, req.body.dir, name, data.toString('base64')) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Literatur: DOI → BibTeX (doi.org Content-Negotiation) und Zotero-Bibliothek als .bib.
+function appendOrUpload(root, dir, name, text) {
+  if (!/\.bib$/i.test(name)) throw new Error('Zieldatei muss auf .bib enden.');
+  const rel = path.posix.join(String(dir || ''), name);
+  const abs = safeResolve(root, rel);
+  if (fs.existsSync(abs)) {
+    // Bestehende .bib ergänzen, auch wenn sie gerade live bearbeitet wird.
+    collab.flushRoot(root);
+    const relPath = path.relative(root, abs).split(path.sep).join('/');
+    const content = fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
+    state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
+    fs.writeFileSync(abs, content, 'utf8');
+    collab.applyExternalText(root, relPath, content);
+    return relPath;
+  }
+  return treeOps.uploadFile(root, dir, name, Buffer.from(text).toString('base64'));
+}
+
+app.post('/api/import/doi', limitToken, async (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const doi = String(req.body.doi || '').trim().replace(/^(https?:\/\/(dx\.)?doi\.org\/|doi:)/i, '');
+  if (!/^10\.\d{4,9}\/\S+$/.test(doi)) return res.status(400).json({ error: 'Keine gültige DOI (Form 10.xxxx/…).' });
+  try {
+    const { data } = await fetchUrl('https://doi.org/' + encodeURI(doi), { Accept: 'application/x-bibtex; charset=utf-8' });
+    const bib = data.toString('utf8').trim();
+    if (!bib.startsWith('@')) throw new Error('doi.org lieferte kein BibTeX.');
+    res.json({ path: appendOrUpload(root, req.body.dir, req.body.name || 'references.bib', bib + '\n') });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/zotero', (req, res) => {
+  const z = req.user.zotero;
+  res.json(z ? { libraryType: z.libraryType, libraryId: z.libraryId, hasKey: !!z.apiKey } : {});
+});
+
+app.post('/api/zotero', (req, res) => {
+  const { libraryType, libraryId, apiKey } = req.body || {};
+  if (!libraryId) {
+    auth.setZotero(req.user.id, null);
+    return res.json({});
+  }
+  if (!/^\d+$/.test(String(libraryId))) return res.status(400).json({ error: 'Library-ID muss eine Zahl sein.' });
+  const key = apiKey || (req.user.zotero && req.user.zotero.apiKey) || '';
+  if (key && !/^[A-Za-z0-9]{8,64}$/.test(key)) return res.status(400).json({ error: 'API-Key hat ein ungültiges Format.' });
+  auth.setZotero(req.user.id, { libraryType: libraryType === 'group' ? 'group' : 'user', libraryId: String(libraryId), apiKey: key });
+  res.json({ ok: true });
+});
+
+app.post('/api/import/zotero', limitToken, async (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const z = req.user.zotero;
+  if (!z) return res.status(400).json({ error: 'Zuerst unter Einstellungen ▸ Literatur den Zotero-Zugang eintragen.' });
+  const format = req.body.format === 'biblatex' ? 'biblatex' : 'bibtex';
+  const base = `https://api.zotero.org/${z.libraryType === 'group' ? 'groups' : 'users'}/${z.libraryId}/items/top?format=${format}&limit=100`;
+  const headers = { 'Zotero-API-Version': '3', ...(z.apiKey ? { 'Zotero-API-Key': z.apiKey } : {}) };
+  try {
+    const parts = [];
+    // ponytail: max. 50 Seiten à 100 Einträge; größere Bibliotheken über Collections aufteilen.
+    for (let start = 0, total = 1; start < total && start < 5000; start += 100) {
+      const { data, headers: h } = await fetchUrl(`${base}&start=${start}`, headers);
+      total = Number(h['total-results']) || 0;
+      parts.push(data.toString('utf8').trim());
+    }
+    const name = String(req.body.name || 'zotero.bib').trim();
+    if (!/\.bib$/i.test(name)) return res.status(400).json({ error: 'Dateiname muss auf .bib enden.' });
+    res.json({ path: treeOps.uploadFile(root, req.body.dir, name, Buffer.from(parts.filter(Boolean).join('\n\n') + '\n').toString('base64')) });
+  } catch (e) {
+    res.status(400).json({ error: 'Zotero: ' + e.message });
+  }
+});
+
+// Grammatik über einen selbst betriebenen LanguageTool-Server (LANGUAGETOOL_URL).
+app.get('/api/languagetool', (req, res) => res.json({ enabled: !!process.env.LANGUAGETOOL_URL }));
+
+app.post('/api/languagetool', async (req, res) => {
+  const ltUrl = process.env.LANGUAGETOOL_URL;
+  if (!ltUrl) return res.status(501).json({ error: 'LanguageTool ist auf diesem Server nicht eingerichtet.' });
+  const data = String(req.body.data || '');
+  if (data.length > 1_000_000) return res.status(413).json({ error: 'Text zu lang.' });
+  const language = /^[a-z]{2}(-[A-Z]{2})?$/.test(req.body.language) ? req.body.language : 'auto';
+  try {
+    const r = await fetch(ltUrl.replace(/\/+$/, '') + '/v2/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ data, language }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
+    res.json({ matches: (await r.json()).matches || [] });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // --- Projects ---
 
 app.get('/api/projects/list', (req, res) => {
@@ -649,7 +891,7 @@ app.post('/api/projects/open', (req, res) => {
   if (previousRoot !== root) ensureWatcher(root);
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (main) state.setMainFile(root, main);
-  res.json({ activeRoot: root, mainFile: main, projectId: projectIdOf(root) });
+  res.json({ activeRoot: root, mainFile: main, projectId: projectIdOf(root), role: roleOf(req.user, root) });
 });
 
 app.post('/api/projects/create', (req, res) => {
@@ -1033,6 +1275,23 @@ app.get('/api/raw', (req, res) => {
 // Download the whole project as a .zip (File -> Download -> Source in the
 // Overleaf-style menu bar), skipping the same generated/hidden dirs the file
 // tree already hides (fsTree.isIgnored).
+app.get('/api/export', async (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const main = state.getMainFile(root);
+  if (!main) return res.status(400).json({ error: 'Keine Hauptdatei festgelegt.' });
+  collab.flushRoot(root);
+  try {
+    const { data, fmt } = await exporter.exportProject(root, main, String(req.query.format));
+    const name = `${path.basename(root) || 'dokument'}.${fmt.ext}`;
+    res.setHeader('Content-Type', fmt.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="export.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.send(data);
+  } catch (e) {
+    res.status(e.code === 'ENOENT' ? 501 : 400).json({ error: e.message.slice(0, 500) });
+  }
+});
+
 app.get('/api/download/zip', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
@@ -1251,7 +1510,8 @@ server.on('upgrade', async (req, socket, head) => {
   const user = userId && auth.findUserById(userId);
   if (!user) return rejectUpgrade(socket, 401, 'Unauthorized');
   if (!canAccessRoot(user, root) || !isTextFile(rel) || !fs.existsSync(root)) return rejectUpgrade(socket, 403, 'Forbidden');
-  yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch')));
+  const readOnly = roleOf(user, root) === 'reviewer';
+  yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly));
 });
 
 wss.on('connection', async (ws, req) => {

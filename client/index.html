@@ -239,6 +239,7 @@
             <div class="ol-toolbar-right"></div>
           </div>
 
+          <div id="editor-breadcrumbs" class="hidden"></div>
           <div id="editor-container"></div>
           <div id="preview-container" class="hidden"></div>
         </section>
@@ -468,11 +469,16 @@
           </button>
         </div>
         <div class="dialog-body-pad">
-          <p class="share-hint">Mitglieder bearbeiten das Projekt live mit dir. Sie brauchen ein bestätigtes Konto.</p>
+          <p class="share-hint">Mitglieder arbeiten live mit dir – „Kann kommentieren" heißt lesen, kompilieren und kommentieren, aber nichts ändern. Alle brauchen ein bestätigtes Konto.</p>
           <div id="share-invite-row">
             <input id="share-login-input" placeholder="Benutzername oder E-Mail" />
+            <select id="share-role-select">
+              <option value="editor">Kann bearbeiten</option>
+              <option value="reviewer">Kann kommentieren</option>
+            </select>
             <button id="btn-share-invite" class="primary">Hinzufügen</button>
           </div>
+          <div id="share-links"></div>
           <p id="share-error" class="hidden"></p>
           <div id="share-members-list"></div>
         </div>
@@ -496,6 +502,7 @@
             <button class="tab-btn" data-settings-tab="compiler">Compiler</button>
             <button class="tab-btn" data-settings-tab="references">References</button>
             <button class="tab-btn" data-settings-tab="appearance">Appearance</button>
+            <button class="tab-btn" data-settings-link="account">Konto ↗</button>
           </div>
           <div id="settings-tab-body"></div>
         </div>
@@ -565,7 +572,7 @@
             <button class="tab-btn" data-nf-tab="upload">Upload</button>
             <button class="tab-btn" data-nf-tab="other-project">From another project</button>
             <button class="tab-btn" data-nf-tab="external-url">From external URL</button>
-            <button class="tab-btn" data-nf-tab="zotero">From Zotero</button>
+            <button class="tab-btn" data-nf-tab="references">References (Zotero, .bib, DOI)</button>
           </div>
           <div id="new-file-tab-body"></div>
         </div>

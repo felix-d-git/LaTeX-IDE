@@ -826,8 +826,8 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
   border-bottom: 2px solid #f2b84b;
   cursor: pointer;
 }
-.cm-tracked-insert{ background: rgba(9,136,66,.14); text-decoration: underline; text-decoration-color: var(--ol-primary); }
-.cm-tracked-delete-marker{ color: var(--ol-danger); cursor: pointer; font-weight: 700; padding: 0 1px; }
+.cm-tracked-insert{ background: color-mix(in srgb, var(--tc-color, var(--ol-primary)) 16%, transparent); text-decoration: underline; text-decoration-color: var(--tc-color, var(--ol-primary)); }
+.cm-tracked-delete{ color: var(--ol-danger); text-decoration: line-through; cursor: pointer; opacity: .8; }
 
 /* ---------------------------------------------------------------
    Basis-Buttons (außerhalb der oben spezifizierten Sonderfälle)
@@ -991,6 +991,11 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 .share-member{ display: flex; justify-content: space-between; padding: 5px 0; font-size: var(--ol-fs-sm); }
 .share-member-role{ color: var(--ol-text-muted); }
 .share-hint{ font-size: var(--ol-fs-xs); color: var(--ol-text-muted); margin: 0 0 10px; }
+#share-links{ margin-bottom: 10px; }
+.share-link{ display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: var(--ol-fs-sm); }
+.share-link > span{ min-width: 130px; }
+.share-link input{ flex: 1; margin: 0; font-family: var(--ol-font-mono, monospace); font-size: var(--ol-fs-xs); }
+.role-reviewer #active-project-label .project-name::after{ content: " · Nur kommentieren"; color: var(--ol-text-muted); }
 #share-error{ background: #fbe4e2; color: #932a22; border-radius: var(--ol-r-sm); padding: 6px 10px; font-size: var(--ol-fs-sm); margin: 0 0 10px; }
 .share-member{ align-items: center; }
 .share-member button{ padding: 2px 8px; font-size: var(--ol-fs-xs); }
@@ -1004,7 +1009,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 #settings-tab-body h4{ font-size: var(--ol-fs-sm); margin: 16px 0 6px; color: var(--ol-text-muted); }
 .settings-stub-row{ flex-direction: row; align-items: center; justify-content: space-between; }
 .settings-stub-row button:disabled{ opacity: .55; cursor: not-allowed; }
-.settings-inert-note{
+.settings-note{
   font-size: var(--ol-fs-xs); color: var(--ol-text-muted);
   background: var(--ol-surface-alt); border-left: 3px solid var(--ol-border);
   padding: 8px 10px; line-height: 1.5; margin-top: 14px;
@@ -1290,3 +1295,23 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 #update-banner{ position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: var(--z-modal); display: flex; align-items: center; gap: 12px; padding: 8px 40px 8px 14px; background: #e8f3ec; color: #1e5631; border: 1px solid #b5d8c0; border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 #update-banner a{ color: inherit; }
 #update-banner .update-banner-close{ position: absolute; right: 8px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+
+/* Einstellungen ▸ PDF-Viewer "Browser" */
+.pdf-native-frame{ width: 100%; height: 100%; border: 0; display: block; }
+body.pdf-native #pdf-container{ overflow: hidden; padding: 0; }
+body.pdf-native #pdf-toolbar .ol-pdf-nav,
+body.pdf-native #pdf-zoom-out, body.pdf-native #pdf-zoom-in, body.pdf-native #pdf-zoom-level,
+body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-input, body.pdf-native #pdf-page-label{ display: none; }
+
+/* Breadcrumbs über dem Editor */
+#editor-breadcrumbs{
+  display: flex; gap: 4px; align-items: center; min-height: 22px; padding: 0 8px;
+  font-size: var(--ol-fs-xs); color: var(--ol-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 1px solid var(--ol-border);
+}
+#editor-breadcrumbs .crumb-sep{ opacity: .6; }
+.share-link input.share-link-max{ flex: 0 0 170px; font-family: inherit; }
+/* PDF only: Bearbeiten-Menüs haben keinen Editor (wie Overleaf) */
+#app.layout-pdf-only #menu-edit,
+#app.layout-pdf-only #menu-insert,
+#app.layout-pdf-only #menu-format{ display: none; }

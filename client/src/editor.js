@@ -7,7 +7,11 @@ import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, b
 import { defaultKeymap } from '@codemirror/commands';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { lintKeymap } from '@codemirror/lint';
+import { lintKeymap, linter, lintGutter, forceLinting } from '@codemirror/lint';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { vim } from '@replit/codemirror-vim';
+import { emacs } from '@replit/codemirror-emacs';
+import { grammarDiagnostics } from './languageTool.js';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { getSession, closeSession, listConflicts, conflictField, setConflictsEffect } from './collab.js';
 import { EditorState, StateField, StateEffect, Prec, Compartment } from '@codemirror/state';
@@ -19,7 +23,7 @@ import { indentWithTab } from '@codemirror/commands';
 import { acceptCompletion, nextSnippetField, hasNextSnippetField } from '@codemirror/autocomplete';
 import { search, openSearchPanel } from '@codemirror/search';
 import { commentField, setCommentsEffect } from './comments.js';
-import { trackChangesField } from './trackChanges.js';
+import { trackChanges } from './trackChanges.js';
 import { tryHandleEditorKey, isGlobalAction } from './keybindings.js';
 import { latexCompletionSource } from './latexCompletions.js';
 
@@ -56,8 +60,6 @@ const basicSetup = [
   indentOnInput(),
   syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
   bracketMatching(),
-  closeBrackets(),
-  autocompletion(),
   rectangularSelection(),
   crosshairCursor(),
   highlightActiveLine(),
@@ -117,6 +119,20 @@ const overleafTheme = EditorView.theme(
 export function createEditorManager(container, { onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage }) {
   const tabs = new Map(); // path -> { state }
   const visualComp = new Compartment();
+  const readOnlyComp = new Compartment();
+  // Settings ▸ Editor/Appearance/Spelling (settingsDialog.js).
+  const prefsComp = new Compartment();
+  let prefs = { keybindings: 'none', autocomplete: true, closeBrackets: true, codeCheck: true, dark: false, grammar: false, lang: 'de', dictionary: [] };
+  let compileEntries = []; // last compile: [{ file, line, message, level }]
+  const prefsExt = () => [
+    prefs.keybindings === 'vim' ? Prec.high(vim()) : prefs.keybindings === 'emacs' ? Prec.high(emacs()) : [],
+    prefs.autocomplete ? autocompletion() : [],
+    prefs.closeBrackets ? closeBrackets() : [],
+    prefs.dark ? Prec.high(oneDark) : [],
+    prefs.codeCheck || prefs.grammar ? [lintGutter(), linter(lintSource, { delay: 1500 })] : [],
+  ];
+  let readOnly = false; // reviewer role: read + comment only
+  const readOnlyExt = () => (readOnly ? EditorState.readOnly.of(true) : []);
   let visualOn = false;
   try {
     visualOn = localStorage.getItem('editorMode') === 'visual';
@@ -173,7 +189,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
         stexLanguage.data.of({ autocomplete: latexCompletionSource }),
         flashField,
         commentField(initialComments),
-        trackChangesField,
+        trackChanges(path),
         EditorView.domEventHandlers({
           mousedown(event) {
             const commentTarget = event.target.closest && event.target.closest('[data-comment-id]');
@@ -198,6 +214,8 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
           },
         }),
         visualComp.of(visualExt()),
+        readOnlyComp.of(readOnlyExt()),
+        prefsComp.of(prefsExt()),
         // Highest precedence so user-configured editor hotkeys win over
         // basicSetup's bundled default bindings (e.g. lintKeymap's own
         // Mod-Shift-m, defaultKeymap's Mod-Shift-k) when the two collide.
@@ -344,9 +362,54 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     try {
       localStorage.setItem('editorMode', visualOn ? 'visual' : 'code');
     } catch {}
-    const effects = visualComp.reconfigure(visualExt());
+    reconfigureAll(visualComp.reconfigure(visualExt()));
+  }
+
+  // Active view + every cached tab state.
+  function reconfigureAll(effects) {
     if (activePath) view.dispatch({ effects });
     for (const [p, t] of tabs) if (p !== activePath) t.state = t.state.update({ effects }).state;
+  }
+
+  // Code-Check: Fehler/Warnungen des letzten Compiles als Gutter-Marken der
+  // aktiven Datei (Zeile aus -file-line-error); dazu LanguageTool-Treffer.
+  async function lintSource(v) {
+    const path = activePath;
+    const doc = v.state.doc;
+    const out = [];
+    if (prefs.codeCheck) {
+      for (const e of compileEntries) {
+        if (e.file !== path || !e.line) continue;
+        const line = doc.line(Math.min(e.line, doc.lines));
+        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message, source: 'LaTeX' });
+      }
+    }
+    if (prefs.grammar && path && /\.(tex|ltx|bib|md|txt)$/i.test(path)) {
+      out.push(...(await grammarDiagnostics(doc.toString(), prefs, (word) => addDictionaryWord && addDictionaryWord(word))));
+    }
+    // Doc may have moved on while LanguageTool answered.
+    return v.state.doc === doc ? out : out.filter((d) => d.to <= v.state.doc.length);
+  }
+
+  let addDictionaryWord = null;
+  function setPrefs(next, { onAddWord } = {}) {
+    prefs = { ...prefs, ...next };
+    if (onAddWord) addDictionaryWord = onAddWord;
+    reconfigureAll(prefsComp.reconfigure(prefsExt()));
+  }
+
+  function setCompileDiagnostics({ errors = [], warnings = [], infos = [] }) {
+    compileEntries = [
+      ...errors.map((e) => ({ ...e, level: 'error' })),
+      ...warnings.map((e) => ({ ...e, level: 'warning' })),
+      ...infos.map((e) => ({ ...e, level: 'info' })),
+    ];
+    if (activePath && (prefs.codeCheck || prefs.grammar)) forceLinting(view);
+  }
+
+  function setReadOnly(on) {
+    readOnly = !!on;
+    reconfigureAll(readOnlyComp.reconfigure(readOnlyExt()));
   }
 
   function isVisual() {
@@ -369,6 +432,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
 
   return {
     openFile,
+    setReadOnly,
     refreshConflicts,
     closeTab,
     getActivePath,
@@ -384,6 +448,8 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     setSpellcheck,
     setVisual,
     isVisual,
+    setPrefs,
+    setCompileDiagnostics,
     view,
   };
 }

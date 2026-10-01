@@ -18,7 +18,33 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   // Nach einem Compile wird dasselbe Dokument neu geladen - dann soll die
   // Ansicht exakt dort stehen bleiben, wo sie war (Seite + Position auf der
   // Seite). Nur bei einem *anderen* PDF fängt die Spalte wieder oben an.
+  // Einstellungen ▸ PDF-Viewer "Browser": eingebauter Viewer des Browsers im
+  // iframe (ohne SyncTeX/Zoom-Leiste der IDE).
+  let native = false;
+  function setNative(on) {
+    native = !!on;
+    document.body.classList.toggle('pdf-native', native);
+    container.querySelectorAll('.pdf-native-frame').forEach((f) => f.remove());
+    if (!native) pdfDoc = null; // nächster load() rendert wieder per PDF.js
+    if (currentPath) load(currentPath);
+  }
+
   async function load(path, attempt = 0) {
+    if (native) {
+      currentPath = path;
+      if (emptyEl && emptyEl.parentNode) emptyEl.remove();
+      container.querySelectorAll('.pdf-page').forEach((c) => c.remove());
+      pageWrappers.clear();
+      let frame = container.querySelector('.pdf-native-frame');
+      if (!frame) {
+        frame = document.createElement('iframe');
+        frame.className = 'pdf-native-frame';
+        frame.title = 'PDF';
+        container.appendChild(frame);
+      }
+      frame.src = `/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+      return;
+    }
     const samePdf = path === currentPath;
     const keep = samePdf ? captureScroll() : null;
     currentPath = path;
@@ -218,6 +244,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
 
   return {
     load,
+    setNative,
     zoom,
     setZoom,
     getZoomMode,

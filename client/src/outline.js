@@ -34,7 +34,30 @@ function extractBraces(text, openIdx) {
 
 export function setupOutline({ editorMgr, getActivePath }) {
   const body = document.getElementById('outline-body');
+  const crumbsEl = document.getElementById('editor-breadcrumbs');
   let items = [];
+
+  // Breadcrumbs: Ordner › Datei › übergeordnete Abschnitte › aktueller Abschnitt.
+  function renderCrumbs(path, activeIdx) {
+    const parts = path ? path.split('/') : [];
+    if (activeIdx >= 0) {
+      const chain = [];
+      let level = Infinity;
+      for (let i = activeIdx; i >= 0; i--) {
+        if (items[i].level < level) {
+          chain.unshift(items[i].title);
+          level = items[i].level;
+        }
+      }
+      parts.push(...chain);
+    }
+    crumbsEl.replaceChildren(
+      ...parts.flatMap((p, i) => [
+        ...(i ? [Object.assign(document.createElement('span'), { className: 'crumb-sep', textContent: '›' })] : []),
+        Object.assign(document.createElement('span'), { textContent: p }),
+      ])
+    );
+  }
 
   function currentLine() {
     const view = editorMgr.view;
@@ -48,11 +71,13 @@ export function setupOutline({ editorMgr, getActivePath }) {
     if (!path || !/\.(tex|ltx|sty|cls)$/i.test(path)) {
       items = [];
       body.innerHTML = '<div class="outline-empty">Keine .tex-Datei geöffnet.</div>';
+      renderCrumbs(path, -1);
       return;
     }
     items = parseOutline(editorMgr.view.state.doc);
     if (items.length === 0) {
       body.innerHTML = '<div class="outline-empty">Keine Gliederungsebenen gefunden.</div>';
+      renderCrumbs(path, -1);
       return;
     }
     const minLevel = Math.min(...items.map((i) => i.level));
@@ -60,6 +85,7 @@ export function setupOutline({ editorMgr, getActivePath }) {
     // Genau eine Zeile ist hervorgehoben: die letzte Sektion vor dem Cursor.
     let activeIdx = 0; // vor der ersten Sektion gilt die erste als aktuell
     for (let i = 0; i < items.length; i++) if (items[i].line <= cur) activeIdx = i;
+    renderCrumbs(path, items[0].line <= cur ? activeIdx : -1);
 
     items.forEach((item, idx) => {
       const link = document.createElement('button');
