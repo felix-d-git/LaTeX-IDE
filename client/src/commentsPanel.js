@@ -73,13 +73,43 @@ export function setupCommentsPanel({ commentsManager, editorMgr, getActivePath }
       body.textContent = c.text;
       item.appendChild(body);
 
+      if (c.suggestion) {
+        // Change proposed by an external AI tool (MCP review token): nothing is applied until accepted here.
+        const diff = document.createElement('div');
+        diff.className = 'comment-text';
+        diff.textContent = `Vorschlag: „${snippetOf(c.suggestion.oldText, 120)}“ → „${snippetOf(c.suggestion.newText, 120)}“`;
+        item.appendChild(diff);
+      }
+
       const meta = document.createElement('div');
       meta.className = 'comment-meta';
       const time = document.createElement('span');
       time.textContent = formatTime(c.createdAt);
       meta.appendChild(time);
+      if (c.author) {
+        const who = document.createElement('span');
+        who.textContent = ` · ${c.author}`;
+        meta.appendChild(who);
+      }
+      if (c.suggestion) {
+        const accept = document.createElement('button');
+        accept.textContent = 'Annehmen';
+        accept.className = 'primary';
+        accept.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const doc = editorMgr.view.state.doc;
+          const old = c.suggestion.oldText;
+          const from = doc.sliceString(c.from, c.to) === old ? c.from : doc.toString().indexOf(old);
+          if (from < 0) return alert('Die Textstelle wurde inzwischen geändert - Vorschlag kann nicht mehr angewendet werden.');
+          editorMgr.view.dispatch({ changes: { from, to: from + old.length, insert: c.suggestion.newText } });
+          await commentsManager.removeComment(path, c.id);
+          editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+          renderList();
+        });
+        meta.appendChild(accept);
+      }
       const del = document.createElement('button');
-      del.textContent = 'Löschen';
+      del.textContent = c.suggestion ? 'Ablehnen' : 'Löschen';
       del.className = 'danger';
       del.addEventListener('click', async (e) => {
         e.stopPropagation();

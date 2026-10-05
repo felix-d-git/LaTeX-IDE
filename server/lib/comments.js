@@ -26,7 +26,8 @@ function listAll(root) {
   return load(root);
 }
 
-function add(root, relPath, { from, to, anchorText, text }) {
+// suggestion {oldText, newText}: a proposed change (from an MCP review token) the user accepts/rejects in the comments panel.
+function add(root, relPath, { from, to, anchorText, text, suggestion, author }) {
   const data = load(root);
   if (!data[relPath]) data[relPath] = [];
   const comment = {
@@ -36,6 +37,8 @@ function add(root, relPath, { from, to, anchorText, text }) {
     anchorText: anchorText || '',
     text,
     createdAt: new Date().toISOString(),
+    ...(suggestion && { suggestion }),
+    ...(author && { author }),
   };
   data[relPath].push(comment);
   save(root, data);
