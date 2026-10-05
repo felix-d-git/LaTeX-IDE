@@ -1,4 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
+const vault = require('./lib/vault');
+vault.start();
 
 const express = require('express');
 const path = require('path');
@@ -1785,6 +1788,7 @@ function restoreWatchers() {
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     collab.flushAll();
+    vault.flush();
     process.exit(0);
   });
 }
