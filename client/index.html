@@ -392,7 +392,7 @@
         </div>
         <div class="dialog-body-pad">
           <p id="comment-compose-snippet"></p>
-          <textarea id="comment-compose-text" placeholder="Kommentar eingeben…" rows="4"></textarea>
+          <textarea id="comment-compose-text" placeholder="Kommentar eingeben… (Enter = neue Zeile, Strg+Enter = Absenden)" rows="4"></textarea>
           <div class="dialog-buttons">
             <button class="btn-secondary" id="btn-cancel-comment-2">Abbrechen</button>
             <button id="btn-confirm-comment" class="primary">Hinzufügen</button>
@@ -544,6 +544,7 @@
         <aside id="history-file-tree"></aside>
         <section id="history-diff-pane">
           <div id="history-diff-empty">Version links auswählen, um einen Diff zu sehen.</div>
+          <div id="history-restore-bar" class="hidden"><button id="btn-history-restore" class="primary">Diese Datei auf die gewählte Version zurücksetzen</button></div>
           <div id="history-diff-content" class="hidden"></div>
         </section>
         <aside id="history-snapshot-list"></aside>

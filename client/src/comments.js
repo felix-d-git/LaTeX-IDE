@@ -63,5 +63,16 @@ export function createCommentsManager() {
     byFile[relPath] = (byFile[relPath] || []).filter((c) => c.id !== id);
   }
 
-  return { loadAll, getForFile, addComment, removeComment };
+  // Server liefert den ganzen aktualisierten Kommentar (inkl. Antworten) zurueck.
+  async function change(relPath, call) {
+    const { comment } = await call;
+    byFile[relPath] = (byFile[relPath] || []).map((c) => (c.id === comment.id ? comment : c));
+  }
+
+  const editComment = (relPath, id, text) => change(relPath, api.editComment(relPath, id, text));
+  const addReply = (relPath, id, text) => change(relPath, api.addReply(relPath, id, text));
+  const editReply = (relPath, id, rid, text) => change(relPath, api.editReply(relPath, id, rid, text));
+  const removeReply = (relPath, id, rid) => change(relPath, api.deleteReply(relPath, id, rid));
+
+  return { loadAll, getForFile, addComment, removeComment, editComment, addReply, editReply, removeReply };
 }

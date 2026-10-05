@@ -98,6 +98,13 @@ export const api = {
   addComment: (relPath, from, to, anchorText, text) =>
     req('POST', '/api/comments', { path: relPath, from, to, anchorText, text }),
   deleteComment: (relPath, id) => req('DELETE', `/api/comments/${encodeURIComponent(id)}?path=${encodeURIComponent(relPath)}`),
+  editComment: (relPath, id, text) => req('PATCH', `/api/comments/${encodeURIComponent(id)}`, { path: relPath, text }),
+  addReply: (relPath, id, text) => req('POST', `/api/comments/${encodeURIComponent(id)}/replies`, { path: relPath, text }),
+  editReply: (relPath, id, rid, text) =>
+    req('PATCH', `/api/comments/${encodeURIComponent(id)}/replies/${encodeURIComponent(rid)}`, { path: relPath, text }),
+  deleteReply: (relPath, id, rid) =>
+    req('DELETE', `/api/comments/${encodeURIComponent(id)}/replies/${encodeURIComponent(rid)}?path=${encodeURIComponent(relPath)}`),
+  restoreHistoryFile: (id, file) => req('POST', '/api/history/restore', { id, file }),
   forwardSync: (relPath, line) => req('GET', `/api/synctex/forward?file=${encodeURIComponent(relPath)}&line=${line}`),
   inverseSync: (page, x, y) => req('GET', `/api/synctex/inverse?page=${page}&x=${x}&y=${y}`),
   getWordCount: () => req('GET', '/api/wordcount'),

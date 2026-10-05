@@ -11,7 +11,35 @@ function formatTime(iso) {
   }
 }
 
-export function setupCommentsPanel({ commentsManager, editorMgr, getActivePath }) {
+// Mehrzeiliges Eingabefeld: Enter = Zeilenumbruch, Strg+Enter / Button = Absenden, Escape = Abbrechen.
+function composer(initial, submitLabel, onSubmit, onCancel) {
+  const box = document.createElement('div');
+  box.className = 'comment-edit';
+  box.addEventListener('click', (e) => e.stopPropagation());
+  const ta = document.createElement('textarea');
+  ta.rows = 3;
+  ta.value = initial;
+  const send = () => ta.value.trim() && onSubmit(ta.value.trim());
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();
+    if (e.key === 'Escape') onCancel();
+  });
+  const row = document.createElement('div');
+  row.className = 'comment-edit-actions';
+  const ok = document.createElement('button');
+  ok.className = 'primary';
+  ok.textContent = submitLabel;
+  ok.addEventListener('click', send);
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Abbrechen';
+  cancel.addEventListener('click', onCancel);
+  row.append(cancel, ok);
+  box.append(ta, row);
+  setTimeout(() => ta.focus(), 0);
+  return box;
+}
+
+export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, getActivePath }) {
   const panel = document.getElementById('comments-panel');
   const fileLabel = document.getElementById('comments-file-label');
   const list = document.getElementById('comments-list');
@@ -68,33 +96,87 @@ export function setupCommentsPanel({ commentsManager, editorMgr, getActivePath }
       quote.textContent = snippetOf(c.anchorText || '');
       item.appendChild(quote);
 
-      const body = document.createElement('div');
-      body.className = 'comment-text';
-      body.textContent = c.text;
-      item.appendChild(body);
+      item.appendChild(entryBlock(c, {
+        edit: (text) => commentsManager.editComment(path, c.id, text),
+        remove: async () => {
+          await commentsManager.removeComment(path, c.id);
+          editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+        },
+      }));
 
-      const meta = document.createElement('div');
-      meta.className = 'comment-meta';
-      const time = document.createElement('span');
-      time.textContent = formatTime(c.createdAt);
-      meta.appendChild(time);
-      const del = document.createElement('button');
-      del.textContent = 'Löschen';
-      del.className = 'danger';
-      del.addEventListener('click', async (e) => {
+      for (const r of c.replies || []) {
+        const rb = entryBlock(r, {
+          edit: (text) => commentsManager.editReply(path, c.id, r.id, text),
+          remove: () => commentsManager.removeReply(path, c.id, r.id),
+        });
+        rb.classList.add('comment-reply');
+        item.appendChild(rb);
+      }
+
+      const replyBtn = document.createElement('button');
+      replyBtn.className = 'comment-reply-btn';
+      replyBtn.textContent = 'Antworten';
+      replyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        await commentsManager.removeComment(path, c.id);
-        editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
-        renderList();
+        const box = composer('', 'Antworten', (text) => run(commentsManager.addReply(path, c.id, text)), renderList);
+        replyBtn.replaceWith(box);
       });
-      meta.appendChild(del);
-      item.appendChild(meta);
+      item.appendChild(replyBtn);
 
       item.addEventListener('click', () => {
         editorMgr.jumpToRange(c.from, c.to);
       });
       list.appendChild(item);
     }
+  }
+
+  // Aenderung ausfuehren, dann neu zeichnen (Fehler per alert, wie sonst im Panel).
+  async function run(promise) {
+    try {
+      await promise;
+    } catch (e) {
+      alert(e.message);
+    }
+    renderList();
+  }
+
+  // Eigener Beitrag, Owner/Admin oder Altbestand ohne Autor (der Server prueft verbindlich).
+  function mayChange(item) {
+    return currentUser.isAdmin || !item.author || item.author.id === currentUser.id;
+  }
+
+  // Autor, Zeit, Text (white-space: pre-wrap, nur textContent) + Bearbeiten/Loeschen.
+  function entryBlock(item, { edit, remove }) {
+    const wrap = document.createElement('div');
+    const meta = document.createElement('div');
+    meta.className = 'comment-meta';
+    const who = document.createElement('span');
+    who.textContent = `${item.author ? item.author.name : 'Unbekannt'} · ${formatTime(item.createdAt)}${item.editedAt ? ' (bearbeitet)' : ''}`;
+    meta.appendChild(who);
+    const body = document.createElement('div');
+    body.className = 'comment-text';
+    body.textContent = item.text;
+    if (mayChange(item)) {
+      const actions = document.createElement('span');
+      const ed = document.createElement('button');
+      ed.textContent = 'Bearbeiten';
+      ed.addEventListener('click', (e) => {
+        e.stopPropagation();
+        body.replaceWith(composer(item.text, 'Speichern', (text) => run(edit(text)), renderList));
+        actions.remove();
+      });
+      const del = document.createElement('button');
+      del.textContent = 'Löschen';
+      del.className = 'danger';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        run(remove());
+      });
+      actions.append(ed, ' ', del);
+      meta.appendChild(actions);
+    }
+    wrap.append(meta, body);
+    return wrap;
   }
 
   function highlightComment(id) {

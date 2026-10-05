@@ -820,6 +820,12 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 .comment-text{ font-size: var(--ol-fs-xs); white-space: pre-wrap; margin-bottom: 6px; }
 .comment-meta{ display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ol-text-muted); }
 .comment-meta button{ font-size: 11px; padding: 2px 7px; }
+.comment-meta{ margin-bottom: 2px; }
+.comment-reply{ margin-left: 10px; padding-left: 8px; border-left: 2px solid var(--ol-border); margin-top: 6px; }
+.comment-reply-btn{ font-size: 11px; padding: 2px 7px; margin-top: 4px; }
+.comment-edit textarea{ width: 100%; box-sizing: border-box; font: inherit; font-size: var(--ol-fs-xs); resize: vertical; }
+.comment-edit-actions{ display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.comment-edit-actions button{ font-size: 11px; padding: 2px 8px; }
 
 .cm-comment-highlight{
   background: rgba(242, 184, 75, 0.35);
@@ -1129,6 +1135,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   font-size: var(--ol-fs-sm);
 }
 #history-diff-pane{ flex: 1; min-width: 0; overflow: auto; background: var(--ol-surface); }
+#history-restore-bar{ padding: 8px 12px; border-bottom: 1px solid var(--ol-border); }
 #history-diff-empty{ color: var(--ol-text-muted); text-align: center; margin-top: 60px; font-size: var(--ol-fs-sm); }
 #history-diff-content{ font-family: var(--ol-font-mono); font-size: var(--ol-fs-code); line-height: var(--ol-lh-code); }
 .diff-line{ display: flex; gap: 8px; padding: 1px 10px; white-space: pre-wrap; word-break: break-word; }

@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { renderTree } from './fileTree.js';
 
-const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren' };
+const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', restore: 'Wiederhergestellt' };
 
 function formatDateHeader(iso) {
   return new Date(iso).toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -21,6 +21,8 @@ export function setupHistoryView() {
   const listEl = document.getElementById('history-snapshot-list');
   const diffEmpty = document.getElementById('history-diff-empty');
   const diffContent = document.getElementById('history-diff-content');
+  const restoreBar = document.getElementById('history-restore-bar');
+  const btnRestore = document.getElementById('btn-history-restore');
 
   let mode = 'all'; // 'all' | 'labels'
   let entries = [];
@@ -136,6 +138,7 @@ export function setupHistoryView() {
   }
 
   async function loadDiff() {
+    restoreBar.classList.toggle('hidden', !selectedFile || !selectedSnapshotId);
     if (!selectedFile || !selectedSnapshotId) {
       diffEmpty.classList.remove('hidden');
       diffContent.classList.add('hidden');
@@ -176,6 +179,18 @@ export function setupHistoryView() {
       }
     }
   }
+
+  btnRestore.addEventListener('click', async () => {
+    if (!selectedFile || !selectedSnapshotId) return;
+    if (!confirm(`"${selectedFile}" auf die gewählte Version zurücksetzen? Der aktuelle Stand bleibt im Verlauf erhalten.`)) return;
+    try {
+      await api.restoreHistoryFile(selectedSnapshotId, selectedFile);
+      await refresh();
+      await loadDiff();
+    } catch (e) {
+      alert('Wiederherstellen fehlgeschlagen: ' + e.message);
+    }
+  });
 
   btnOpen.addEventListener('click', show);
   btnClose.addEventListener('click', hide);
