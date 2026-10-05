@@ -207,6 +207,20 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 - **Noch nicht umgesetzt (bewusst zurückgestellt):** Google-/OAuth-Login -
   siehe "Bekannte Grenzen" unten.
 
+## KI/MCP
+
+Externe KI-Tools (Claude Desktop/Code, Cursor) arbeiten mit ihrem eigenen Abo an deinen Projekten – die IDE ist dafür ein MCP-Server (`POST /mcp`, Streamable HTTP, zustandslos).
+
+1. Profil-Dialog → „KI-Zugriff (MCP)“: Name, Rechte-Stufe und optional ein Projekt wählen → „Token erstellen“. Der Token (`lmcp_…`) wird nur einmal angezeigt, der Server speichert nur den Hash. Widerrufen ebenfalls dort.
+2. Rechte-Stufen: `read` (lesen, suchen, kompilieren), `review` (zusätzlich Kommentare und Änderungsvorschläge), `edit` (zusätzlich Text ändern, Dateien anlegen). Nie mehr als dein eigener Zugriff auf das Projekt.
+3. Claude Code: `claude mcp add --transport http latex https://<server>/mcp --header "Authorization: Bearer <token>"`
+4. Claude Desktop / Cursor (Konfigurationsdatei, ggf. über `npx mcp-remote`):
+   ```json
+   { "mcpServers": { "latex": { "command": "npx", "args": ["-y", "mcp-remote", "https://<server>/mcp", "--header", "Authorization: Bearer <token>"] } } }
+   ```
+
+Werkzeuge: `list_projects`, `project_tree`, `outline`, `read_file` (max. 400 Zeilen), `search`, `compile`, `get_errors`; ab `review` `add_comment`, `suggest_change` (erscheint im Kommentar-Panel mit „Annehmen/Ablehnen“, der Text bleibt bis dahin unverändert); ab `edit` `edit_file`, `create_file` (Änderungen laufen über das Yjs-Dokument, offene Editoren sehen sie live).
+
 ## Architektur
 
 ```

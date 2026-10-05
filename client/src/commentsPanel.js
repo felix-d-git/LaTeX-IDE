@@ -104,6 +104,41 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
         },
       }));
 
+      if (c.suggestion) {
+        // Change proposed by an external AI tool (MCP review token): nothing is applied until accepted here.
+        const diff = document.createElement('div');
+        diff.className = 'comment-text';
+        diff.textContent = `Vorschlag: „${snippetOf(c.suggestion.oldText, 120)}“ → „${snippetOf(c.suggestion.newText, 120)}“`;
+        item.appendChild(diff);
+        const bar = document.createElement('div');
+        bar.className = 'comment-meta';
+        const accept = document.createElement('button');
+        accept.textContent = 'Annehmen';
+        accept.className = 'primary';
+        accept.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const doc = editorMgr.view.state.doc;
+          const old = c.suggestion.oldText;
+          const from = doc.sliceString(c.from, c.to) === old ? c.from : doc.toString().indexOf(old);
+          if (from < 0) return alert('Die Textstelle wurde inzwischen geändert - Vorschlag kann nicht mehr angewendet werden.');
+          editorMgr.view.dispatch({ changes: { from, to: from + old.length, insert: c.suggestion.newText } });
+          await commentsManager.removeComment(path, c.id);
+          editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+          renderList();
+        });
+        const reject = document.createElement('button');
+        reject.textContent = 'Ablehnen';
+        reject.className = 'danger';
+        reject.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await commentsManager.removeComment(path, c.id);
+          editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+          renderList();
+        });
+        bar.append(accept, ' ', reject);
+        item.appendChild(bar);
+      }
+
       for (const r of c.replies || []) {
         const rb = entryBlock(r, {
           edit: (text) => commentsManager.editReply(path, c.id, r.id, text),

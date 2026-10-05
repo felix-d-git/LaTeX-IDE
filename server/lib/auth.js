@@ -13,13 +13,13 @@ function load() {
   if (fs.existsSync(DATA_PATH)) {
     try {
       const data = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-      for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens']) if (!data[k]) data[k] = [];
+      for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!data[k]) data[k] = [];
       return data;
     } catch (e) {
       // fall through to default
     }
   }
-  return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [] };
+  return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [] };
 }
 
 // tmp + rename: a crash mid-write must never leave a truncated auth file behind.
@@ -226,6 +226,49 @@ function revokeApiToken(userId, id) {
   save(data);
 }
 
+// --- MCP tokens (external AI tools): level read|review|edit, optionally one project, stored hashed ---
+
+const MCP_LEVELS = ['read', 'review', 'edit'];
+
+function createMcpToken(userId, { name, level, project }) {
+  if (!MCP_LEVELS.includes(level)) throw new Error('Ungültige Rechte-Stufe.');
+  const token = 'lmcp_' + randomToken();
+  data.mcpTokens.push({
+    id: crypto.randomUUID(),
+    tokenHash: hashToken(token),
+    userId,
+    name: String(name || 'KI-Tool').slice(0, 80),
+    level,
+    project: project || null,
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+  });
+  save(data);
+  return token;
+}
+
+// -> { user, level, project, name } or null
+function findMcpToken(token) {
+  if (!token || !token.startsWith('lmcp_')) return null;
+  const tokenHash = hashToken(token);
+  const entry = data.mcpTokens.find((t) => t.tokenHash === tokenHash);
+  const user = entry && findUserById(entry.userId);
+  if (!user || !isVerified(user)) return null;
+  entry.lastUsedAt = new Date().toISOString(); // in memory; persisted with the next save
+  return { user, level: entry.level, project: entry.project, name: entry.name };
+}
+
+function listMcpTokens(userId) {
+  return data.mcpTokens
+    .filter((t) => t.userId === userId)
+    .map(({ id, name, level, project, createdAt, lastUsedAt }) => ({ id, name, level, project, createdAt, lastUsedAt }));
+}
+
+function revokeMcpToken(userId, id) {
+  data.mcpTokens = data.mcpTokens.filter((t) => !(t.userId === userId && t.id === id));
+  save(data);
+}
+
 // Removes the account and everything keyed to it (tokens, invites it used stay as history).
 // Zotero-Zugang je Nutzer (Literatur importieren); nie über toPublicUser ausgeliefert.
 function setZotero(userId, zotero) {
@@ -238,7 +281,7 @@ function setZotero(userId, zotero) {
 
 function deleteUser(id) {
   data.users = data.users.filter((u) => u.id !== id);
-  for (const k of ['apiTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
+  for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
   save(data);
 }
 
@@ -267,6 +310,11 @@ module.exports = {
   findUserByApiToken,
   listApiTokens,
   revokeApiToken,
+  createMcpToken,
+  findMcpToken,
+  listMcpTokens,
+  revokeMcpToken,
+  MCP_LEVELS,
   USERNAME_RE,
   get users() {
     return data.users;

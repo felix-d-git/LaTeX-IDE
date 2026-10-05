@@ -36,6 +36,9 @@ export const authApi = {
   createDesktopToken: (label) => req('POST', '/api/auth/desktop-token', { label }),
   listDesktopTokens: () => req('GET', '/api/auth/desktop-tokens'),
   revokeDesktopToken: (id) => req('DELETE', `/api/auth/desktop-tokens/${encodeURIComponent(id)}`),
+  createMcpToken: (name, level, root) => req('POST', '/api/auth/mcp-token', { name, level, root }),
+  listMcpTokens: () => req('GET', '/api/auth/mcp-tokens'),
+  revokeMcpToken: (id) => req('DELETE', `/api/auth/mcp-tokens/${encodeURIComponent(id)}`),
   deleteAccount: (password) => req('POST', '/api/auth/delete-account', { password }),
   desktopRelease: () => req('GET', '/api/desktop/release'),
 };

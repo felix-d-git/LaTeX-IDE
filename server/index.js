@@ -29,6 +29,7 @@ const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
+const { createMcp } = require('./lib/mcp');
 
 const RAW_MIME = {
   '.png': 'image/png',
@@ -394,6 +395,10 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
   res.json({ ok: true });
 });
 
+// --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
+app.post('/mcp', createMcp({ PROJECTS_DIR, version: APP_VERSION, state, userProjectsDir, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast }));
+app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
+
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
 
@@ -484,6 +489,32 @@ app.post('/api/auth/desktop-token', (req, res) => {
 
 app.get('/api/auth/desktop-tokens', (req, res) => {
   res.json({ tokens: auth.listApiTokens(req.user.id) });
+});
+
+// MCP tokens (level + optional single project); shown once, only the hash is stored. Browser session only.
+app.post('/api/auth/mcp-token', (req, res) => {
+  if (!req.session || req.session.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Nur aus einer Browser-Anmeldung heraus möglich.' });
+  }
+  try {
+    let project = null;
+    if (req.body.root) {
+      if (!canAccessRoot(req.user, req.body.root)) return res.status(403).json({ error: 'Kein Zugriff auf dieses Projekt.' });
+      project = projectIdOf(req.body.root);
+    }
+    res.json({ token: auth.createMcpToken(req.user.id, { name: req.body.name, level: req.body.level, project }) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/auth/mcp-tokens', (req, res) => {
+  res.json({ tokens: auth.listMcpTokens(req.user.id) });
+});
+
+app.delete('/api/auth/mcp-tokens/:id', (req, res) => {
+  auth.revokeMcpToken(req.user.id, req.params.id);
+  res.json({ ok: true });
 });
 
 app.delete('/api/auth/desktop-tokens/:id', (req, res) => {

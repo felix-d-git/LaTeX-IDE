@@ -27,7 +27,8 @@ function listAll(root) {
 }
 
 // author = { id, name }; aeltere Kommentare haben keinen Autor und kein replies-Feld.
-function add(root, relPath, { from, to, anchorText, text, author }) {
+// suggestion {oldText, newText}: a proposed change (from an MCP review token) the user accepts/rejects in the comments panel.
+function add(root, relPath, { from, to, anchorText, text, suggestion, author }) {
   const data = load(root);
   if (!data[relPath]) data[relPath] = [];
   const comment = {
@@ -39,6 +40,7 @@ function add(root, relPath, { from, to, anchorText, text, author }) {
     author: author || null,
     createdAt: new Date().toISOString(),
     replies: [],
+    ...(suggestion && { suggestion }),
   };
   data[relPath].push(comment);
   save(root, data);

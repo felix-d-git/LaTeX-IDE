@@ -308,6 +308,23 @@ function onPathMoved(root, oldRel, newRel) {
   }
 }
 
+// Programmatic access (MCP): the live doc is the truth, edits reach open editors like any collaborator's.
+function readText(root, rel) {
+  const entry = getDoc(root, rel);
+  const text = entry.ytext.toString();
+  maybeUnload(entry);
+  return text;
+}
+
+// fn(oldText) -> newText; returns newText. A throwing fn leaves the doc untouched.
+function editText(root, rel, fn) {
+  const entry = getDoc(root, rel);
+  const next = fn(entry.ytext.toString());
+  applyText(entry.ytext, next, 'mcp');
+  maybeUnload(entry); // stays loaded while dirty; persist() unloads it
+  return next;
+}
+
 function flushAll() {
   for (const entry of docs.values()) if (entry.timer) persist(entry);
 }
@@ -322,4 +339,6 @@ module.exports = {
   flushRoot,
   flushAll,
   applyText,
+  readText,
+  editText,
 };
