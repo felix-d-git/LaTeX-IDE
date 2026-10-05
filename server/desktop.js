@@ -15,7 +15,7 @@ const { compile, OUT_DIR } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, isTextFile } = require('./lib/fsTree');
-const { syncFolder } = require('./lib/localSync');
+const { syncFolder, moveDir } = require('./lib/localSync');
 const os = require('os');
 const { spawn, execFileSync } = require('child_process');
 
@@ -66,7 +66,8 @@ if (!REMOTE) {
   console.error('Keine Server-Adresse: REMOTE_URL setzen oder die App über die Weboberfläche des Servers neu herunterladen.');
   process.exit(1);
 }
-const LOCAL_DIR = path.resolve(process.env.LATEX_IDE_LOCAL || install.localDir || config.localDir || path.join(os.homedir(), 'Documents', 'LatexIDE'));
+// The setting in the app (config) beats the installer's default; the env var beats both.
+let LOCAL_DIR = path.resolve(process.env.LATEX_IDE_LOCAL || config.localDir || install.localDir || path.join(os.homedir(), 'Documents', 'LatexIDE'));
 fs.mkdirSync(LOCAL_DIR, { recursive: true });
 function setToken(token) {
   config = { ...config, token: token || undefined };
@@ -87,7 +88,10 @@ function cookieValue(req, name) {
 
 class Offline extends Error {}
 
+// Circuit breaker: once offline, requests fail at once (no timeout per request);
+// pingRemote() below flips the state back as soon as the server answers again.
 async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {}) {
+  if (!online) throw new Offline('offline');
   let res;
   try {
     res = await fetch(REMOTE + pathAndQuery, {
@@ -98,22 +102,43 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {})
       redirect: 'manual',
     });
   } catch (e) {
-    online = false;
+    setOnline(false);
     throw new Offline(e.message);
   }
   // Funnel down / Pi off: Tailscale answers with 502/503/504 instead of a refused connection.
   if ([502, 503, 504].includes(res.status)) {
-    online = false;
+    setOnline(false);
     throw new Offline(`HTTP ${res.status}`);
   }
   if (res.status === 401) setToken(null); // revoked or expired - log in again
-  if (!online) {
-    online = true;
-    setImmediate(syncAll); // back online: merge the offline copy
-  }
   return res;
 }
 let online = true;
+const wsSockets = new Set(); // proxied browser sockets - dropped when we go offline so the client notices at once
+
+function setOnline(v) {
+  if (v === online) return;
+  online = v;
+  if (v) setImmediate(syncAll); // back online: merge the offline copy
+  else for (const s of wsSockets) s.destroy();
+}
+
+// Active health check: any HTTP answer except the tunnel's 502-504 = server reachable.
+// Every 2 s with a 2 s limit -> offline shows within ~4 s, recovery within ~2 s.
+let pinging = false;
+async function pingRemote() {
+  if (pinging) return;
+  pinging = true;
+  try {
+    const r = await fetch(REMOTE + '/', { method: 'HEAD', signal: AbortSignal.timeout(2000), redirect: 'manual' });
+    setOnline(![502, 503, 504].includes(r.status));
+  } catch {
+    setOnline(false);
+  } finally {
+    pinging = false;
+  }
+}
+setInterval(pingRemote, 2000).unref();
 
 async function remoteJson(pathAndQuery) {
   const res = await remote(pathAndQuery);
@@ -163,6 +188,43 @@ app.get('/desktop-callback', (req, res) => {
 
 app.get('/api/desktop/info', (req, res) => {
   res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
+});
+
+// --- local copy folder (settings) ---
+// Moves all owned project folders to a new location: copy, verify count + size, only then
+// delete the old ones. Sync is paused meanwhile.
+app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
+  const dir = String((req.body && req.body.dir) || '').trim();
+  if (process.env.LATEX_IDE_LOCAL) return res.status(409).json({ error: 'Ordner ist per Umgebungsvariable LATEX_IDE_LOCAL festgelegt.' });
+  if (!dir || !path.isAbsolute(dir)) return res.status(400).json({ error: 'Bitte einen absoluten Pfad angeben.' });
+  const target = path.resolve(dir);
+  if (target === LOCAL_DIR) return res.json({ ok: true, localDir: LOCAL_DIR, moved: 0 });
+  const rel = (a, b) => b === a || b.startsWith(a + path.sep);
+  if (rel(LOCAL_DIR, target) || rel(target, LOCAL_DIR)) return res.status(400).json({ error: 'Alter und neuer Ordner dürfen sich nicht überschneiden.' });
+  if (fs.existsSync(target) && (!fs.statSync(target).isDirectory() || fs.readdirSync(target).length)) {
+    return res.status(400).json({ error: 'Der Zielordner muss leer oder neu sein.' });
+  }
+  if (moving) return res.status(409).json({ error: 'Verschieben läuft bereits.' });
+  moving = true;
+  try {
+    await syncing; // let a running sync finish, then wait for queued per-project syncs
+    await syncLock;
+    const names = owned.map((p) => path.basename(localDirOf(p)));
+    const moved = moveDir(LOCAL_DIR, target, names);
+    const old = LOCAL_DIR;
+    LOCAL_DIR = target;
+    config = { ...config, localDir: target };
+    writeJson(CONFIG_PATH, config);
+    if (current && current.owned && current.dir.startsWith(old + path.sep)) {
+      current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
+      writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+    }
+    res.json({ ok: true, localDir: target, moved });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    moving = false;
+  }
 });
 
 // --- auto-update from the server ---
@@ -288,8 +350,9 @@ async function refreshOwned() {
 }
 
 let syncing = null;
+let moving = false; // folder move in progress: no sync
 function syncAll() {
-  if (syncing || !config.token) return syncing;
+  if (syncing || moving || !config.token) return syncing;
   syncing = (async () => {
     try {
       await refreshOwned();
@@ -507,6 +570,7 @@ function serveLocal(req, res) {
 // per user, so offline you see the last project's tree/comments; fine as
 // long as offline work stays within one project.
 const cacheFile = (url) => path.join(CACHE_DIR, crypto.createHash('sha1').update(url).digest('hex') + '.json');
+const checkedOwn = new Set();
 const FORWARD_REQ = ['content-type', 'accept'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
 
@@ -528,6 +592,11 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, r
     if (req.method === 'GET' && r.ok && req.path === '/tree') {
       try {
         const { projectId, mainFile } = JSON.parse(buf.toString('utf8'));
+        // first time we see this project: the owned list may predate it (first start, new project)
+        if (!ownedEntry(projectId) && !checkedOwn.has(projectId)) {
+          checkedOwn.add(projectId);
+          await refreshOwned().catch(() => {});
+        }
         const own = ownedEntry(projectId);
         if (own && (!current || current.projectId !== projectId)) {
           current = { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true };
@@ -567,6 +636,9 @@ server.on('upgrade', (req, socket, head) => {
   if (!config.token || !LOCAL_ORIGINS.has(req.headers.origin) || !(p === '/ws' || p.startsWith('/yjs/'))) {
     return socket.destroy();
   }
+  if (!online) return socket.destroy(); // offline: fail fast, the client retries
+  wsSockets.add(socket);
+  socket.on('close', () => wsSockets.delete(socket));
   delete req.headers.cookie;
   proxy.ws(req, socket, head, { headers: { authorization: `Bearer ${config.token}`, origin: new URL(REMOTE).origin } });
 });

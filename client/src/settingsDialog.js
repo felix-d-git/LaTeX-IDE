@@ -41,8 +41,18 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
     editorMgr.setSpellcheck(spelling);
   }
 
+  let desktopInfo = null;
   function show() {
     modal.classList.remove('hidden');
+    if (!desktopInfo) {
+      fetch('/api/desktop/info').then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (!d || !d.desktop || desktopInfo) return;
+        desktopInfo = d;
+        const b = Object.assign(document.createElement('button'), { className: 'tab-btn', textContent: 'Lokale Kopie' });
+        b.dataset.settingsTab = 'local';
+        tabsBar.appendChild(b);
+      }).catch(() => {});
+    }
     // No active project (dashboard) -> project tabs keep their defaults.
     api.getSettings().then(({ settings }) => {
       serverSettings = settings;
@@ -231,6 +241,38 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
   }
 
 
+  // Desktop app only: folder of the local copy; the server moves the projects there.
+  function renderLocalTab(info) {
+    const wrap = document.createElement('div');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = info.localDir;
+    const msg = document.createElement('p');
+    const btn = document.createElement('button');
+    btn.textContent = 'Ordner ändern und Projekte verschieben';
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Alle lokalen Projekte nach
+${input.value}
+verschieben? Der alte Ordner bleibt danach leer. Der Zielordner muss leer oder neu sein.`)) return;
+      btn.disabled = true;
+      msg.textContent = 'Verschiebe…';
+      const csrf = document.cookie.match(/(?:^|; )csrfToken=([^;]*)/);
+      const r = await fetch('/api/desktop/local-dir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+        body: JSON.stringify({ dir: input.value }),
+      }).catch(() => null);
+      const d = r ? await r.json().catch(() => ({})) : {};
+      btn.disabled = false;
+      if (r && r.ok) desktopInfo.localDir = d.localDir;
+      msg.textContent = r && r.ok ?`Fertig: ${d.moved} Projekt(e) nach ${d.localDir} verschoben.` : `Fehler: ${d.error || 'Keine Antwort'}`;
+    });
+    wrap.appendChild(field('Ordner der lokalen Kopie', input));
+    wrap.appendChild(btn);
+    wrap.appendChild(msg);
+    return wrap;
+  }
+
   const TAB_RENDERERS = {
     editor: renderEditorTab,
     spelling: renderSpellingTab,
@@ -241,7 +283,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys } = {}) {
 
   function render() {
     body.innerHTML = '';
-    body.appendChild(TAB_RENDERERS[activeTab]());
+    body.appendChild(activeTab === 'local' ? renderLocalTab(desktopInfo) : TAB_RENDERERS[activeTab]());
     for (const btn of tabsBar.querySelectorAll('.tab-btn')) {
       btn.classList.toggle('active', btn.dataset.settingsTab === activeTab);
     }

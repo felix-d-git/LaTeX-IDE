@@ -44,8 +44,12 @@ export function createCommentsManager() {
   let byFile = {};
 
   async function loadAll() {
-    const { comments } = await api.getComments();
-    byFile = comments || {};
+    try {
+      byFile = (await api.getComments()).comments || {};
+    } catch (e) {
+      if (!(e.data && e.data.offline)) throw e; // offline and never cached: no comments, no error
+      byFile = {};
+    }
   }
 
   function getForFile(relPath) {
