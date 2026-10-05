@@ -102,7 +102,44 @@ function writeJson(file, value) {
   fs.renameSync(`${file}.tmp`, file);
 }
 
-module.exports = { syncFolder, decide, conflictName };
+// Moves the named project folders from src to dst: copy, compare file count + bytes, then delete
+// the originals. A failed check removes the copy and throws - the originals stay untouched.
+function treeStat(dir) {
+  let files = 0;
+  let bytes = 0;
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else {
+        files++;
+        bytes += fs.statSync(p).size;
+      }
+    }
+  };
+  walk(dir);
+  return { files, bytes };
+}
+
+function moveDir(src, dst, names) {
+  const todo = names.filter((n) => fs.existsSync(path.join(src, n)));
+  fs.mkdirSync(dst, { recursive: true });
+  try {
+    for (const n of todo) {
+      fs.cpSync(path.join(src, n), path.join(dst, n), { recursive: true });
+      const a = treeStat(path.join(src, n));
+      const b = treeStat(path.join(dst, n));
+      if (a.files !== b.files || a.bytes !== b.bytes) throw new Error(`Kopie von "${n}" unvollständig (${b.files}/${a.files} Dateien) - nichts gelöscht.`);
+    }
+  } catch (e) {
+    for (const n of todo) fs.rmSync(path.join(dst, n), { recursive: true, force: true });
+    throw e;
+  }
+  for (const n of todo) fs.rmSync(path.join(src, n), { recursive: true, force: true });
+  return todo.length;
+}
+
+module.exports = { syncFolder, decide, conflictName, moveDir };
 
 if (require.main === module) {
   const assert = require('assert');

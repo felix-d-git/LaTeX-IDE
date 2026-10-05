@@ -10,6 +10,7 @@ import { StateField, StateEffect } from '@codemirror/state';
 import { EditorView, Decoration } from '@codemirror/view';
 import { ySyncFacet } from 'y-codemirror.next';
 import { api } from './api.js';
+import { offlineBanner } from './offlineBanner.js';
 
 const COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#e377c2', '#8c564b'];
 
@@ -98,7 +99,9 @@ async function createSession(path) {
   const pid = projectId;
   const epochKey = `lide-epoch:${pid}:${path}`;
   let epoch;
+  const offline = offlineBanner.isOffline(); // known offline: no request, use the stored epoch at once
   try {
+    if (offline && store.get(epochKey, null)) throw Object.assign(new Error('offline'), { data: { offline: true }, status: 503 });
     const r = await api.collabEpoch(path);
     // Server answers for the *active* project - a project switch in between would mix caches.
     if (r.projectId !== pid) throw Object.assign(new Error('Projekt wurde gewechselt.'), { status: 409 });
@@ -195,7 +198,7 @@ async function createSession(path) {
       resolve();
     };
     provider.once('sync', done);
-    const t1 = hasLocal ? setTimeout(done, 2500) : null;
+    const t1 = hasLocal ? setTimeout(done, offline ? 0 : 2500) : null;
     const t2 = hasLocal
       ? null
       : setTimeout(() => {
@@ -203,7 +206,7 @@ async function createSession(path) {
           idb.destroy();
           ydoc.destroy();
           reject(new Error('Server nicht erreichbar und keine lokale Kopie vorhanden.'));
-        }, 15000);
+        }, offline ? 3000 : 15000);
   });
   if (projectId !== pid) {
     provider.destroy();
@@ -273,11 +276,16 @@ export function resolveConflict(path, id) {
 
 // Desktop app: pull every text file's doc into IndexedDB while online, so
 // files never opened on this device can still be edited offline.
-// ponytail: sequential, one WebSocket at a time - fine for thesis-sized projects.
+// 4 files in parallel, one WebSocket each.
 export async function prewarm(paths) {
+  const queue = [...paths];
+  await Promise.all(Array.from({ length: 4 }, () => prewarmWorker(queue)));
+}
+
+async function prewarmWorker(queue) {
   const pid = projectId;
-  for (const path of paths) {
-    if (projectId !== pid || !navigator.onLine) return;
+  for (let path; (path = queue.shift()); ) {
+    if (projectId !== pid || !navigator.onLine || offlineBanner.isOffline()) return;
     if (sessions.has(path) || opening.has(path)) continue;
     try {
       const r = await api.collabEpoch(path);

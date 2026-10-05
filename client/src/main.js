@@ -797,12 +797,36 @@ configureCollab({
     loadTree();
   },
 });
+// Offline = the banner, nothing else: alerts that only say "server unreachable" are dropped.
+const nativeAlert = window.alert.bind(window);
+window.alert = (msg) => {
+  if (offlineBanner.isOffline() && /offline|nicht erreichbar|Failed to fetch/i.test(String(msg))) return;
+  nativeAlert(msg);
+};
+
+// Desktop app: the local proxy pings the server every 2 s; we ask it every 2 s (cheap, localhost)
+// and on the browser's own offline/online events. Back online -> reload the tree (starts prewarm).
+let proxyOnline = true;
+async function pollDesktopState() {
+  const d = await fetch('/api/desktop/info').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!d || !d.desktop) return;
+  isDesktop = true;
+  window.dispatchEvent(new CustomEvent('lide-offline', { detail: d.online === false }));
+  if (d.online && !proxyOnline && currentProjectId) loadTree().catch(() => {});
+  proxyOnline = d.online !== false;
+}
 fetch('/api/desktop/info')
   .then((r) => (r.ok ? r.json() : {}))
   .then((d) => {
     isDesktop = !!d.desktop;
     if (isDesktop && d.online === false) offlineBanner.set(true);
-    if (isDesktop) checkDesktopUpdate();
+    if (isDesktop) {
+      proxyOnline = d.online !== false;
+      setInterval(pollDesktopState, 2000);
+      window.addEventListener('offline', pollDesktopState);
+      window.addEventListener('online', pollDesktopState);
+      checkDesktopUpdate();
+    }
   })
   .catch(() => {});
 
