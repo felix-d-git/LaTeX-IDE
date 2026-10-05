@@ -29,13 +29,36 @@ export function annotate(text) {
 
 let disabled = false; // Server ohne LanguageTool → nicht bei jedem Tastendruck neu fragen
 
-export async function grammarDiagnostics(text, { lang, dictionary = [] }, onAddWord) {
-  if (disabled || !text.trim()) return [];
+let warned = false; // Hinweis „eigener LanguageTool nicht erreichbar“ nur einmal pro Sitzung
+
+function warnOnce(url) {
+  if (warned) return;
+  warned = true;
+  const d = document.createElement('div');
+  d.textContent = `LanguageTool unter ${url} nicht erreichbar (läuft er mit --allow-origin '*'?). Grammatikprüfung pausiert.`;
+  d.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;max-width:80vw;padding:8px 14px;border-radius:6px;background:#333;color:#fff;font-size:13px;opacity:.92;cursor:pointer';
+  d.addEventListener('click', () => d.remove());
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 10000);
+}
+
+export async function grammarDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onAddWord) {
+  const local = (ltUrl || '').trim().replace(/\/+$/, ''); // eigener Rechner: direkt aus dem Browser
+  if ((disabled && !local) || !text.trim()) return [];
+  const language = lang === 'en' ? 'en-US' : 'de-DE';
+  const data = JSON.stringify({ annotation: annotate(text) });
   let matches;
   try {
-    ({ matches } = await api.languageTool(JSON.stringify({ annotation: annotate(text) }), lang === 'en' ? 'en-US' : 'de-DE'));
+    if (local) {
+      const r = await fetch(local + '/v2/check', { method: 'POST', body: new URLSearchParams({ data, language }), signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
+      ({ matches } = await r.json());
+    } else {
+      ({ matches } = await api.languageTool(data, language));
+    }
   } catch (e) {
-    if (e.status === 501) disabled = true;
+    if (local) warnOnce(local);
+    else if (e.status === 501) disabled = true;
     return [];
   }
   const dict = new Set(dictionary);

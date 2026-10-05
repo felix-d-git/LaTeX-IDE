@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { toggleDropdown } from './dropdown.js';
+import { fixHint } from './fixHint.js';
 
 // R1/R6: Die Log-/Fehleransicht ist ein volldeckendes Overlay der PDF-Spalte
 // (z-index 11). Aufbau wie Overleaf: Tabs All/Errors/Warnings/Info mit
@@ -90,6 +91,7 @@ export function setupErrorPanel({ onJumpTo }) {
       go.className = 'log-card-goto';
       go.title = 'Zur Stelle im Code springen';
       go.textContent = '⌖';
+      go.setAttribute('aria-label', 'Zur Stelle im Code springen');
       go.addEventListener('click', () => onJumpTo(e.file, e.line));
       head.appendChild(go);
     }
@@ -113,6 +115,13 @@ export function setupErrorPanel({ onJumpTo }) {
       el.classList.toggle('is-open', open);
     });
     el.append(head, body);
+    const fix = fixHint(e.message, (e.raw || '').match(/^l\.\d+ (.*)$/m)?.[1]);
+    if (fix) {
+      const f = document.createElement('div');
+      f.className = 'log-card-fix';
+      f.textContent = `Vermutlicher Fix: ${fix}`;
+      el.appendChild(f);
+    }
     return el;
   }
 

@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { linkify } from './helpDialog.js';
 import { REFERENCES_KEY, referencePrefs } from './latexCompletions.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
@@ -55,7 +56,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
   function applyEditorPrefs() {
     if (!editorMgr) return;
     editorMgr.setPrefs(
-      { ...editorPrefs, dark: appearance.theme === 'dark', grammar: !!spelling.grammar, lang: spelling.lang, dictionary: spelling.dictionary || [] },
+      { ...editorPrefs, dark: appearance.theme === 'dark', grammar: !!spelling.grammar, ltUrl: spelling.ltUrl || '', lang: spelling.lang, dictionary: spelling.dictionary || [] },
       {
         onAddWord: (word) => {
           spelling = { ...spelling, dictionary: [...new Set([...(spelling.dictionary || []), word])].sort() };
@@ -217,10 +218,16 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
       selectField('Sprache', [{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'Englisch' }], spelling.lang, (v) => saveSpelling({ lang: v }))
     );
     wrap.appendChild(checkboxField('Rechtschreibprüfung des Browsers', spelling.enabled, (c) => saveSpelling({ enabled: c })));
-    const lt = checkboxField('Grammatik & Rechtschreibung (LanguageTool)', !!spelling.grammar && ltEnabled !== false, (c) => saveSpelling({ grammar: c }));
-    if (ltEnabled === false) lt.querySelector('input').disabled = true;
+    const noServerLt = ltEnabled === false && !spelling.ltUrl;
+    const lt = checkboxField('Grammatik & Rechtschreibung (LanguageTool)', !!spelling.grammar && !noServerLt, (c) => saveSpelling({ grammar: c }));
+    if (noServerLt) lt.querySelector('input').disabled = true;
     wrap.appendChild(lt);
-    if (ltEnabled === false) wrap.appendChild(note('Auf diesem Server ist kein LanguageTool eingerichtet (LANGUAGETOOL_URL in der .env).'));
+    if (noServerLt) wrap.appendChild(note('Auf diesem Server ist kein LanguageTool eingerichtet (LANGUAGETOOL_URL in der .env). Alternativ unten die URL eines LanguageTool auf deinem eigenen Rechner eintragen.'));
+    wrap.appendChild(textField('LanguageTool-URL (eigener Rechner)', spelling.ltUrl || '', (v) => {
+      saveSpelling({ ltUrl: v.trim() });
+      render();
+    }));
+    wrap.appendChild(note("Leer = LanguageTool des Servers. Beispiel: http://localhost:8081 – der Browser fragt dann direkt <URL>/v2/check an. Dein LanguageTool muss dafür mit --allow-origin '*' gestartet sein, z. B. java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*'. Gilt auch in der Desktop-App. Die Einstellung wird nur in diesem Browser gespeichert."));
     const dict = document.createElement('textarea');
     dict.rows = 6;
     dict.value = (spelling.dictionary || []).join('\n');
@@ -320,6 +327,15 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
         zMsg.textContent = e.message;
       }
     });
+    const zHelp = document.createElement('ol');
+    zHelp.className = 'settings-note';
+    for (const s of [
+      '[zotero.org/settings/keys](https://www.zotero.org/settings/keys) öffnen ▸ „Create new private key“.',
+      'Unter „Personal Library“ „Allow library access“ (Lesen) aktivieren, speichern, den Schlüssel kopieren und unten als API-Key einfügen.',
+      'Library-ID = „Your userID for use in API calls“ auf der Keys-Seite. Bei Gruppen: Zahl aus der Gruppen-URL (zotero.org/groups/<ID>/…) und Bibliothek „Gruppe“.',
+      'Speichern, dann Neue Datei ▸ References ▸ Zotero.',
+    ]) zHelp.appendChild(linkify(document.createElement('li'), s));
+    wrap.appendChild(zHelp);
     wrap.appendChild(field('Zotero-Bibliothek', zType));
     wrap.appendChild(field('Zotero User-/Gruppen-ID (leer = Zugang löschen)', zId));
     wrap.appendChild(field('Zotero API-Key', zKey));

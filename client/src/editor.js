@@ -8,6 +8,7 @@ import { defaultKeymap } from '@codemirror/commands';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { lintKeymap, linter, lintGutter, forceLinting } from '@codemirror/lint';
+import { fixHint } from './fixHint.js';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { vim } from '@replit/codemirror-vim';
 import { emacs } from '@replit/codemirror-emacs';
@@ -381,7 +382,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
       for (const e of compileEntries) {
         if (e.file !== path || !e.line) continue;
         const line = doc.line(Math.min(e.line, doc.lines));
-        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message, source: 'LaTeX' });
+        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message + (fixHint(e.message, line.text) ? `\nVermutlicher Fix: ${fixHint(e.message, line.text)}` : ''), source: 'LaTeX' });
       }
     }
     if (prefs.grammar && path && /\.(tex|ltx|bib|md|txt)$/i.test(path)) {

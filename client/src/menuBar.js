@@ -31,7 +31,7 @@ export function setupMenuBar(ctx) {
   home.setAttribute('aria-label', 'Alle Projekte');
   home.title = 'Alle Projekte';
   home.innerHTML =
-    '<img class="home-logo" src="/logo.png" alt="" width="32" height="32">' +
+    '<img class="home-logo" src="/logo.svg" alt="" width="32" height="32">' +
     '<span class="home-icon"><svg class="ol-icon"><use href="#i-home"></use></svg></span>';
   home.addEventListener('click', () => ctx.onHome && ctx.onHome());
   bar.appendChild(home);

@@ -133,6 +133,13 @@ Server-Adresse.
   `http://languagetool:8010`. Dann bietet Einstellungen ▸ Spelling die
   Grammatikprüfung an; ohne Eintrag ist sie aus. Texte gehen nur an diesen
   Server.
+- LanguageTool auf dem eigenen Rechner: Einstellungen ▸ Spelling ▸
+  „LanguageTool-URL (eigener Rechner)“, z. B. `http://localhost:8081`. Der
+  Browser (Web-UI und Desktop-App) fragt dann `<URL>/v2/check` direkt an, der
+  Server wird nicht gebraucht. LanguageTool muss dafür mit `--allow-origin '*'`
+  laufen, z. B. `java -cp languagetool-server.jar
+  org.languagetool.server.HTTPServer --port 8081 --allow-origin '*'`. Leer =
+  Server-LanguageTool.
 - `PANDOC` — Pfad zu Pandoc (GPL, läuft als externer Prozess) für
   File ▸ Download ▸ Markdown/HTML. Im Docker-Image enthalten; ohne Pandoc
   meldet der Export einen Fehler.

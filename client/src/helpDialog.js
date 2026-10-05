@@ -27,6 +27,13 @@ const SECTIONS = [
     'Review zeigt vorgeschlagene Änderungen, die man annehmen oder ablehnen kann – auch Konflikte nach einer Offline-Phase landen dort.',
     'Kommentare hängen an einer Textstelle; Text markieren und Kommentar hinzufügen.',
   ]],
+  ['Literatur & Zotero', [
+    'Zotero-Zugang einrichten: [zotero.org/settings/keys](https://www.zotero.org/settings/keys) öffnen und „Create new private key“ wählen.',
+    'Beschreibung vergeben und unter „Personal Library“ „Allow library access“ (Lesen) aktivieren; speichern und den angezeigten Schlüssel kopieren.',
+    'Auf derselben Seite steht „Your userID for use in API calls“ – diese Zahl ist die Library-ID. Bei einer Gruppenbibliothek ist es die Zahl aus der Gruppen-URL (zotero.org/groups/<ID>/…), Bibliothek = „Gruppe“.',
+    'In der IDE: Einstellungen ▸ References: Library-ID und API-Key eintragen, „Zotero-Zugang speichern“.',
+    'Danach Neue Datei ▸ References ▸ Zotero: „Aus Zotero importieren“ legt die .bib-Datei im Projekt an.',
+  ]],
   ['Offline & Desktop-App', [
     'Die Desktop-App hält von deinen eigenen Projekten eine lokale Kopie und kompiliert lokal.',
     'Ohne Verbindung erscheint oben ein gelber Hinweis (mit × zu einem schmalen Balken verkleinerbar); du arbeitest in der lokalen Kopie weiter.',
@@ -36,6 +43,20 @@ const SECTIONS = [
     'Alle Tastenkürzel lassen sich unter Einstellungen → Editor → „Tastenkürzel bearbeiten…“ ansehen und ändern.',
   ]],
 ];
+
+// Text mit [Label](https://…)-Links in ein Element schreiben (target=_blank, noopener).
+export function linkify(el, text) {
+  el.textContent = '';
+  let last = 0;
+  for (const m of text.matchAll(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g)) {
+    el.append(text.slice(last, m.index));
+    const a = Object.assign(document.createElement('a'), { textContent: m[1], href: m[2], target: '_blank', rel: 'noopener' });
+    el.append(a);
+    last = m.index + m[0].length;
+  }
+  el.append(text.slice(last));
+  return el;
+}
 
 export function setupHelpDialog() {
   const modal = document.getElementById('help-dialog');
@@ -56,7 +77,7 @@ export function setupHelpDialog() {
     const ul = document.createElement('ul');
     for (const line of SECTIONS[active][1]) {
       const li = document.createElement('li');
-      li.textContent = line;
+      linkify(li, line);
       ul.appendChild(li);
     }
     body.appendChild(ul);

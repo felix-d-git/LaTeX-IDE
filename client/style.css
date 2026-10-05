@@ -745,7 +745,9 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 .log-card-chevron:hover, .log-card-goto:hover{ background: rgba(0,0,0,.08); }
 .log-card-chevron .ol-icon{ width: 16px; height: 16px; transition: transform .15s; }
 .log-card.is-open .log-card-chevron .ol-icon{ transform: rotate(90deg); }
-.log-card-goto{ font-size: 16px; }
+.log-card-goto{ flex: 0 0 auto; width: 28px; height: 28px; font-size: 22px; line-height: 24px; font-weight: 700; color: var(--ol-text); }
+.log-card-goto:hover{ color: var(--ol-primary); }
+.log-card-fix{ padding: 6px 12px 8px 16px; font-size: var(--ol-fs-sm); background: rgba(54,108,191,.08); border-top: 1px solid var(--ol-border); }
 .log-card-title{ flex: 1 1 auto; min-width: 0; font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
 .log-card-loc{ flex: 0 0 auto; color: var(--ol-text-muted); font-size: var(--ol-fs-xs); line-height: 24px; }
 .log-card-body{ padding: 8px 12px; }
@@ -1315,3 +1317,6 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 #app.layout-pdf-only #menu-edit,
 #app.layout-pdf-only #menu-insert,
 #app.layout-pdf-only #menu-format{ display: none; }
+
+/* Logo folgt dem In-App-Theme (nicht dem OS): img-Quelle per content ersetzen */
+:root[data-theme="dark"] .home-logo, :root[data-theme="dark"] .dash-logo{ content: url(/logo-dark.svg); }
