@@ -510,6 +510,7 @@ async function openProjectByRoot(root) {
     const result = await api.openProject(root);
     mainFile = result.mainFile;
     await loadProject(result.activeRoot);
+    if (result.startFile) await openFile(result.startFile);
   } catch (e) {
     alert('Fehler beim Öffnen: ' + e.message);
   }
@@ -902,12 +903,8 @@ connectWs({
       alert(e.message);
     }
   }
-  const { activeRoot } = await api.listProjects();
-  if (activeRoot) {
-    await loadProject(activeRoot);
-  } else {
-    projectsView.show();
-  }
+  // Start und Login landen immer in der Projektübersicht, nicht im zuletzt aktiven Projekt.
+  projectsView.show();
 })();
 
 }

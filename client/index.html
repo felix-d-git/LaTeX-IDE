@@ -342,6 +342,15 @@
             <button id="tab-archive" class="dash-link">Archiviert</button>
             <button id="tab-trash" class="dash-link">Papierkorb</button>
           </div>
+          <div class="dash-sidebar-group" id="labels-group">
+            <div class="dash-sidebar-heading">Labels <button id="btn-label-add" class="label-add" title="Neues Label" aria-label="Neues Label">+</button></div>
+            <div id="labels-list"></div>
+            <form id="label-form" class="hidden">
+              <input id="label-form-name" maxlength="40" placeholder="Labelname" />
+              <div id="label-form-colors"></div>
+              <div class="label-form-btns"><button type="submit" class="primary">OK</button><button type="button" id="label-form-cancel">Abbrechen</button></div>
+            </form>
+          </div>
           <div class="dash-sidebar-group">
             <div class="dash-sidebar-heading">Aktionen</div>
             <button id="btn-open-project" class="dash-link">Ordner öffnen…</button>
@@ -354,8 +363,23 @@
               <svg class="ol-icon dash-search-icon"><use href="#i-search"></use></svg>
               <input id="projects-search" class="dash-search" placeholder="In Projekten suchen…" />
             </div>
-            <button id="btn-new-project" class="btn-new-project">Neues Projekt</button>
+            <div class="new-project-wrap">
+              <button id="btn-new-project" class="btn-new-project">Neues Projekt ▸</button>
+              <div id="new-project-menu" class="dash-popup hidden">
+                <button id="btn-new-empty">Leeres Projekt</button>
+                <button id="btn-new-zip">Zip hochladen</button>
+              </div>
+              <input id="zip-input" type="file" accept=".zip,application/zip" hidden />
+            </div>
           </div>
+          <div id="projects-bulk" class="hidden">
+            <span id="projects-bulk-count"></span>
+            <button id="bulk-trash">In Papierkorb</button>
+            <button id="bulk-archive">Archivieren</button>
+            <button id="bulk-download">Herunterladen</button>
+            <button id="bulk-labels">Labels ▾</button>
+          </div>
+          <div id="label-menu" class="dash-popup hidden"></div>
           <div id="projects-table-wrap">
             <table id="projects-table">
               <colgroup>
