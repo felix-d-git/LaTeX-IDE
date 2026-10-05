@@ -1,7 +1,9 @@
 # LaTeX IDE (Mehrbenutzer) auf dem Pi, öffentlich per Tailscale Funnel
 # unter https://latex.<tailnet>.ts.net. Aufsetzen: siehe deploy-Notiz im Vault.
 #   docker compose -f docker-compose.pi.yml up -d --build
-# Daten + TeX Live liegen auf der SSD (nicht SD-Karte).
+# TeX Live liegt auf der SSD (nicht SD-Karte). Nutzerdaten: nur verschluesselt auf der SSD
+# (${LATEX_DATA_DIR}/vault), Klartext nur im RAM (tmpfs unter /app/data). Einmal-Migration
+# und Schluessel: siehe README "Verschluesselte Daten".
 services:
   app:
     build:
@@ -39,9 +41,17 @@ services:
       # Update-Banner fuer Admins: off | notify | button | auto (siehe scripts/server-update.sh)
       UPDATE_MODE: ${UPDATE_MODE:-notify}
       UPDATE_TOKEN: ${UPDATE_TOKEN:-}
+      DATA_KEY: ${DATA_KEY:?DATA_KEY fehlt in .env (node server/lib/vault.js keygen)}
+      VAULT_DIR: /vault
       NODE_OPTIONS: --max-old-space-size=${LATEX_HEAP_MB:-384}
+    # Arbeitsverzeichnis im RAM. tmpfs-Nutzung zaehlt zum mem_limit des Containers.
+    # size = Obergrenze fuer Projekte + Sitzungen + Yjs-Staende + Build-Ausgaben (Rest bleibt
+    # fuer Node/TeX): LATEX_TMPFS und LATEX_MEM passend zur Datenmenge waehlen.
+    tmpfs:
+      - /app/data:size=${LATEX_TMPFS:-512m},uid=1000,gid=1000,mode=0700
     volumes:
-      - ${LATEX_DATA_DIR:?LATEX_DATA_DIR fehlt - muss auf die SSD zeigen}:/app/data
+      # Verschluesselter Speicher (muss dem Container-User node, uid 1000, gehoeren)
+      - ${LATEX_DATA_DIR:?LATEX_DATA_DIR fehlt - muss auf die SSD zeigen}/vault:/vault
       - ${LATEX_TEXLIVE_DIR:?LATEX_TEXLIVE_DIR fehlt}:/data/texlive:ro
     ports:
       # Nur zum Prüfen auf dem Pi selbst (ssh -L 8095:127.0.0.1:8095 ...).

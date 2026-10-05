@@ -126,6 +126,16 @@ Server-Adresse.
 - Solange das GitHub-Repo privat ist, braucht der Server einen Lese-Token
   (`UPDATE_TOKEN` in `.env`, `GITHUB_TOKEN` in `.update.env`).
 
+### Verschluesselte Daten (optional)
+
+Mit `DATA_KEY` (32 Byte, hex/base64; `node server/lib/vault.js keygen`) und `VAULT_DIR`
+liegen alle Nutzerdaten nur verschluesselt (AES-256-GCM, Dateinamen als HMAC) in `VAULT_DIR`.
+`DATA_DIR` ist dann ein fluechtiges Arbeitsverzeichnis (z. B. tmpfs): der Server entschluesselt
+beim Start dorthin und spiegelt Aenderungen entprellt zurueck. Falscher Schluessel = Start
+bricht ab. Bestehende Daten einmalig uebernehmen:
+`DATA_KEY=… VAULT_DIR=… node server/lib/vault.js encrypt <alter-Datenordner>` (Klartext bleibt, danach selbst loeschen).
+Nicht gespiegelt: Build-Ausgaben, `desktop/`, `texlive`. Ohne Schluessel kein Zugriff: Schluessel separat sichern.
+
 ### Entwicklung (ohne Docker)
 
 ```
