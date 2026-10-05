@@ -618,6 +618,8 @@ app.get('/api/projects/list', (req, res) => {
       }),
     trashedProjects: projects.listTrash(projectsDir),
     archivedProjects: projects.listArchived(projectsDir),
+    labels: state.getLabels(req.user.id),
+    labelColors: state.LABEL_COLORS,
   });
 });
 
@@ -649,7 +651,9 @@ app.post('/api/projects/open', (req, res) => {
   if (previousRoot !== root) ensureWatcher(root);
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (main) state.setMainFile(root, main);
-  res.json({ activeRoot: root, mainFile: main, projectId: projectIdOf(root) });
+  // Startdatei beim Öffnen: main.tex, sonst die Hauptdatei, sonst erste .tex im Wurzelordner.
+  const startFile = fs.existsSync(path.join(root, 'main.tex')) ? 'main.tex' : main;
+  res.json({ activeRoot: root, mainFile: main, startFile, projectId: projectIdOf(root) });
 });
 
 app.post('/api/projects/create', (req, res) => {
@@ -673,6 +677,7 @@ app.post('/api/projects/rename', (req, res) => {
     // ponytail: members who have this project open keep the old path until they reopen it from the dashboard.
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
     state.moveRoot(path.resolve(root), path.resolve(newRoot));
+    state.moveLabelKey(req.user.id, oldName, path.basename(newRoot));
     res.json({ root: newRoot });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -710,6 +715,105 @@ app.post('/api/projects/unarchive', (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Neues Projekt aus .zip (Body = rohe Zip-Bytes, ?name=<Dateiname>). Limits/Zip-Slip: lib/unzip.js.
+app.post('/api/projects/upload-zip', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Keine Zip-Datei empfangen.' });
+  try {
+    const root = projects.importZip(userProjectsDir(req.user), String(req.query.name || ''), req.body);
+    res.json({ root });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Mehrere Projekte als ein Zip, je ein Ordner pro Projekt. ?items=<JSON-Array>: eigene = Ordnername,
+// geteilte = Root-Pfad (nur wenn mit dem Nutzer geteilt).
+app.get('/api/projects/download/zip', (req, res) => {
+  let items;
+  try {
+    items = JSON.parse(String(req.query.items || '[]'));
+    if (!Array.isArray(items) || !items.length || items.some((i) => typeof i !== 'string')) throw new Error();
+  } catch (e) {
+    return res.status(400).json({ error: 'Ungültige Auswahl.' });
+  }
+  const dir = userProjectsDir(req.user);
+  const shared = state.sharedRootsFor(req.user.id).map((r) => path.resolve(r));
+  const list = [];
+  try {
+    for (const it of items) {
+      const root = path.isAbsolute(it) ? path.resolve(it) : resolveProjectRoot(dir, it);
+      if (path.isAbsolute(it) ? !shared.includes(root) : root === path.resolve(dir)) throw new Error('Ungültiger Projektname.');
+      if (!fs.existsSync(root)) throw new Error('Projekt nicht gefunden.');
+      list.push(root);
+    }
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', 'attachment; filename="projekte.zip"');
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.on('error', (err) => res.status(500).end(err.message));
+  archive.pipe(res);
+  const used = new Set();
+  for (const root of list) {
+    collab.flushRoot(root);
+    let folder = path.basename(root);
+    for (let i = 2; used.has(folder); i++) folder = `${path.basename(root)}_${i}`;
+    used.add(folder);
+    archive.directory(root, folder, (entry) => (entry.name.split('/').slice(1).some((p) => isIgnored(p)) ? false : entry));
+  }
+  archive.finalize();
+});
+
+// --- Labels (pro Nutzer privat) ---
+
+function labelFields(body, partial) {
+  const out = {};
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 40) throw new Error('Labelname: 1-40 Zeichen.');
+    out.name = name;
+  }
+  if (!partial || body.color !== undefined) {
+    if (!state.LABEL_COLORS.includes(body.color)) throw new Error('Ungültige Farbe.');
+    out.color = body.color;
+  }
+  return out;
+}
+
+app.post('/api/labels', (req, res) => {
+  try {
+    const f = labelFields(req.body, false);
+    res.json(state.addLabel(req.user.id, f.name, f.color));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/labels/:id', (req, res) => {
+  try {
+    const l = state.updateLabel(req.user.id, req.params.id, labelFields(req.body, true));
+    if (!l) return res.status(404).json({ error: 'Label nicht gefunden.' });
+    res.json(l);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/labels/:id', (req, res) => {
+  state.deleteLabel(req.user.id, req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/labels/assign', (req, res) => {
+  const { keys, labelId, on } = req.body;
+  if (!Array.isArray(keys) || keys.length > 1000 || keys.some((k) => typeof k !== 'string')) {
+    return res.status(400).json({ error: 'Ungültige Auswahl.' });
+  }
+  if (!state.assignLabel(req.user.id, keys, String(labelId), !!on)) return res.status(404).json({ error: 'Label nicht gefunden.' });
+  res.json(state.getLabels(req.user.id));
 });
 
 app.get('/api/projects/:name/download/zip', (req, res) => {
@@ -777,6 +881,7 @@ app.post('/api/projects/restore', (req, res) => {
 app.delete('/api/projects/trash/:name', (req, res) => {
   try {
     projects.deleteProjectPermanently(userProjectsDir(req.user), req.params.name);
+    state.moveLabelKey(req.user.id, req.params.name, null);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });

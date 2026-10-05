@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { isIgnored } = require('./fsTree');
+const { extractZip } = require('./unzip');
 
 const TRASH_DIRNAME = '.trash';
 const ARCHIVE_DIRNAME = '.archive';
@@ -105,6 +106,20 @@ function uniqueDest(dir, name) {
   return dest;
 }
 
+// Neues Projekt aus Zip-Bytes; Name = Zip-Name ohne .zip, bei Kollision Suffix _2, _3 ...
+function importZip(projectsDir, zipName, buf) {
+  const base = (zipName || '').replace(/\.zip$/i, '').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim() || 'Import';
+  const root = uniqueDest(projectsDir, base);
+  fs.mkdirSync(root, { recursive: true });
+  try {
+    extractZip(buf, root);
+  } catch (e) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw e;
+  }
+  return root;
+}
+
 function trashProject(projectsDir, name) {
   const src = path.join(projectsDir, name);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
@@ -191,6 +206,7 @@ module.exports = {
   listArchived,
   createProject,
   copyProject,
+  importZip,
   archiveProject,
   unarchiveProject,
   trashProject,

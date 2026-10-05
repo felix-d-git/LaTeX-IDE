@@ -29,3 +29,12 @@ desktop-data/
 data/
 backups/
 .session-secret
+
+# Laufzeitdaten bei DATA_DIR = Repo-Wurzel (Labels liegen in workspace.json)
+workspace.json.tmp
+/desktop/
+.update-request
+.env.*
+!.env.example
+vault/
+.claude/worktrees/

@@ -67,6 +67,23 @@ export const api = {
   deleteProjectPermanently: (name) => req('DELETE', `/api/projects/trash/${encodeURIComponent(name)}`),
   projectZipUrl: (name) => `/api/projects/${encodeURIComponent(name)}/download/zip`,
   projectPdfUrl: (name) => `/api/projects/${encodeURIComponent(name)}/download/pdf`,
+  // items: eigene Projekte = Ordnername, geteilte = Root-Pfad
+  projectsZipUrl: (items) => `/api/projects/download/zip?items=${encodeURIComponent(JSON.stringify(items))}`,
+  uploadZip: async (file) => {
+    const csrf = getCookie('csrfToken');
+    const res = await fetch(`/api/projects/upload-zip?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+      body: file,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+    return data;
+  },
+  addLabel: (name, color) => req('POST', '/api/labels', { name, color }),
+  updateLabel: (id, patch) => req('PUT', `/api/labels/${encodeURIComponent(id)}`, patch),
+  deleteLabel: (id) => req('DELETE', `/api/labels/${encodeURIComponent(id)}`),
+  assignLabel: (keys, labelId, on) => req('POST', '/api/labels/assign', { keys, labelId, on }),
   getTree: () => req('GET', '/api/tree'),
   getFile: (relPath) => req('GET', `/api/file?path=${encodeURIComponent(relPath)}`),
   saveFile: (relPath, content) => req('PUT', '/api/file', { path: relPath, content }),

@@ -25,6 +25,7 @@ if (!workspace.mainFileByRoot) workspace.mainFileByRoot = {};
 if (!workspace.activeRootByUser) workspace.activeRootByUser = {};
 if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
 if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
+if (!workspace.labelsByUser) workspace.labelsByUser = {};
 
 // One-time migration: pre-auth workspace.json had a single global
 // activeRoot/recentRoots (single-user tool). Once the admin account exists,
@@ -110,6 +111,7 @@ function moveRoot(oldRoot, newRoot) {
 function purgeUser(userId, ownDir) {
   delete workspace.activeRootByUser[userId];
   delete workspace.recentRootsByUser[userId];
+  delete workspace.labelsByUser[userId];
   const own = (r) => r === ownDir || r.startsWith(ownDir + require('path').sep);
   for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot']) {
     for (const r of Object.keys(workspace[k])) if (own(r)) delete workspace[k][r];
@@ -118,6 +120,65 @@ function purgeUser(userId, ownDir) {
     workspace.sharesByRoot[r] = workspace.sharesByRoot[r].filter((id) => id !== userId);
     if (!workspace.sharesByRoot[r].length) delete workspace.sharesByRoot[r];
   }
+  saveWorkspace(workspace);
+}
+
+// --- Labels: pro Nutzer privat. assign: Projektschlüssel (eigene: Ordnername, geteilte: Root-Pfad) -> [labelId] ---
+
+const LABEL_COLORS = ['#c0392b', '#e67e22', '#d4ac0d', '#27ae60', '#16a085', '#2980b9', '#8e44ad', '#7f8c8d'];
+
+function labelData(userId) {
+  return (workspace.labelsByUser[userId] ||= { labels: [], assign: {} });
+}
+
+function getLabels(userId) {
+  return labelData(userId);
+}
+
+function addLabel(userId, name, color) {
+  const l = { id: require('crypto').randomUUID(), name, color };
+  labelData(userId).labels.push(l);
+  saveWorkspace(workspace);
+  return l;
+}
+
+function updateLabel(userId, id, patch) {
+  const l = labelData(userId).labels.find((x) => x.id === id);
+  if (!l) return null;
+  Object.assign(l, patch);
+  saveWorkspace(workspace);
+  return l;
+}
+
+function deleteLabel(userId, id) {
+  const d = labelData(userId);
+  d.labels = d.labels.filter((l) => l.id !== id);
+  for (const k of Object.keys(d.assign)) {
+    d.assign[k] = d.assign[k].filter((x) => x !== id);
+    if (!d.assign[k].length) delete d.assign[k];
+  }
+  saveWorkspace(workspace);
+}
+
+function assignLabel(userId, keys, id, on) {
+  const d = labelData(userId);
+  if (!d.labels.some((l) => l.id === id)) return false;
+  for (const k of keys) {
+    const cur = (d.assign[k] || []).filter((x) => x !== id);
+    if (on) cur.push(id);
+    if (cur.length) d.assign[k] = cur;
+    else delete d.assign[k];
+  }
+  saveWorkspace(workspace);
+  return true;
+}
+
+// Projekt umbenannt/endgültig gelöscht: Zuweisung mitnehmen bzw. verwerfen.
+function moveLabelKey(userId, oldKey, newKey) {
+  const d = labelData(userId);
+  if (d.assign[oldKey] === undefined) return;
+  if (newKey) d.assign[newKey] = d.assign[oldKey];
+  delete d.assign[oldKey];
   saveWorkspace(workspace);
 }
 
@@ -142,4 +203,11 @@ module.exports = {
   sharedRootsFor,
   moveRoot,
   purgeUser,
+  LABEL_COLORS,
+  getLabels,
+  addLabel,
+  updateLabel,
+  deleteLabel,
+  assignLabel,
+  moveLabelKey,
 };

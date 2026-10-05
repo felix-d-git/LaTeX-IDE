@@ -44,9 +44,30 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   const btnCancelCopy = document.getElementById('btn-cancel-copy-project');
   const btnConfirmCopy = document.getElementById('btn-confirm-copy-project');
   let pendingCopySource = null;
+  const selectAll = document.getElementById('projects-select-all');
+  const bulkBar = document.getElementById('projects-bulk');
+  const bulkCount = document.getElementById('projects-bulk-count');
+  const bulkTrash = document.getElementById('bulk-trash');
+  const bulkArchive = document.getElementById('bulk-archive');
+  const bulkDownload = document.getElementById('bulk-download');
+  const bulkLabels = document.getElementById('bulk-labels');
+  const labelMenu = document.getElementById('label-menu');
+  const labelsList = document.getElementById('labels-list');
+  const labelForm = document.getElementById('label-form');
+  const labelFormName = document.getElementById('label-form-name');
+  const labelFormColors = document.getElementById('label-form-colors');
+  const newMenu = document.getElementById('new-project-menu');
+  const zipInput = document.getElementById('zip-input');
 
   let mode = 'projects'; // 'projects' | 'shared' | 'archive' | 'trash'
-  let cache = { localProjects: [], trashedProjects: [], archivedProjects: [] };
+  let cache = { localProjects: [], trashedProjects: [], archivedProjects: [], labels: { labels: [], assign: {} }, labelColors: [] };
+  const selected = new Set(); // Projektschlüssel: eigene = Ordnername, geteilte = Root-Pfad
+  let labelFilter = null;
+  let labelEditId = null; // null = neues Label
+  let labelColor = null;
+  let visibleKeys = [];
+  const isShared = (p) => !!p.owner;
+  const keyOf = (p) => (isShared(p) ? p.root : p.name);
   let sortKey = 'lastModified';
   let sortDir = -1; // -1 desc, 1 asc
 
@@ -78,6 +99,8 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     render();
   }
 
+  const labelsOf = (p) => (cache.labels.assign[keyOf(p)] || []).map((id) => cache.labels.labels.find((l) => l.id === id)).filter(Boolean);
+
   function listForMode() {
     // Shared projects also belong under "Alle Projekte", flagged so they get owner-less actions.
     if (mode === 'projects') return [...cache.localProjects, ...(cache.sharedProjects || []).map((p) => ({ ...p, shared: true }))];
@@ -96,7 +119,8 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   function render() {
     const list = listForMode();
     const q = searchInput.value.trim().toLowerCase();
-    const filtered = q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list.slice();
+    let filtered = q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list.slice();
+    if (labelFilter) filtered = filtered.filter((p) => (cache.labels.assign[keyOf(p)] || []).includes(labelFilter));
     filtered.sort((a, b) => {
       if (sortKey === 'name') return sortDir * a.name.localeCompare(b.name);
       return sortDir * ((a.lastModified || 0) - (b.lastModified || 0));
@@ -106,6 +130,11 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     tbody.innerHTML = '';
     emptyEl.classList.toggle('hidden', filtered.length > 0);
 
+    visibleKeys = filtered.map(keyOf);
+    const existing = new Set([...cache.localProjects, ...(cache.sharedProjects || []), ...cache.trashedProjects, ...(cache.archivedProjects || [])].map(keyOf));
+    for (const k of [...selected]) if (!existing.has(k)) selected.delete(k);
+    renderLabels();
+
     // R8: fünf Spalten — Auswahl, Titel, Eigentümer, Zuletzt geändert, Aktionen
     for (const p of filtered) {
       const tr = document.createElement('tr');
@@ -113,12 +142,19 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       const tdSelect = document.createElement('td');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
+      cb.checked = selected.has(keyOf(p));
       cb.setAttribute('aria-label', `${p.name} auswählen`);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(keyOf(p));
+        else selected.delete(keyOf(p));
+        updateBulk();
+      });
       tdSelect.appendChild(cb);
       tr.appendChild(tdSelect);
 
       const tdTitle = document.createElement('td');
       tdTitle.textContent = p.name;
+      for (const l of labelsOf(p)) tdTitle.appendChild(chip(l));
       tdTitle.className = 'project-title';
       tdTitle.addEventListener('click', () => {
         if (mode !== 'projects' && mode !== 'shared') return;
@@ -161,11 +197,186 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
         tdActions.appendChild(actionBtn('Wiederherstellen', 'primary', () => restoreProject(p.name)));
         tdActions.appendChild(iconBtn('close', 'Endgültig löschen', () => deletePermanently(p.name), 'danger'));
       }
+      tdActions.appendChild(iconBtn('dots', 'Labels', (e) => openLabelMenu([keyOf(p)], e.currentTarget)));
       tr.appendChild(tdActions);
 
       tbody.appendChild(tr);
     }
+    updateBulk();
   }
+
+  function chip(l) {
+    const s = document.createElement('span');
+    s.className = 'label-chip';
+    s.textContent = l.name;
+    s.style.background = l.color;
+    return s;
+  }
+
+  // --- Mehrfachauswahl ---
+
+  function updateBulk() {
+    const sel = selected.size;
+    bulkBar.classList.toggle('hidden', !sel);
+    selectAll.checked = visibleKeys.length > 0 && visibleKeys.every((k) => selected.has(k));
+    if (!sel) return labelMenu.classList.add('hidden');
+    const owned = ownedSelected().length > 0;
+    bulkCount.textContent = `${sel} ausgewählt`;
+    bulkTrash.classList.toggle('hidden', mode === 'trash' || !owned);
+    bulkArchive.classList.toggle('hidden', !owned);
+    bulkArchive.textContent = mode === 'archive' || mode === 'trash' ? 'Wiederherstellen' : 'Archivieren';
+    bulkDownload.classList.toggle('hidden', mode === 'archive' || mode === 'trash');
+  }
+
+  // Nur eigene Projekte (Ordnername) - geteilte sind Root-Pfade.
+  const ownedSelected = () => [...selected].filter((k) => !k.startsWith('/') && !/^[A-Za-z]:/.test(k));
+
+  async function bulkRun(label, fn) {
+    const names = ownedSelected();
+    const errors = [];
+    for (const n of names) {
+      try {
+        await fn(n);
+      } catch (e) {
+        errors.push(`${n}: ${e.message}`);
+      }
+    }
+    selected.clear();
+    await refresh();
+    if (errors.length) alert(`${label} fehlgeschlagen:\n${errors.join('\n')}`);
+  }
+
+  bulkTrash.addEventListener('click', () => {
+    if (confirm(`${ownedSelected().length} Projekt(e) in den Papierkorb verschieben?`)) bulkRun('In Papierkorb', (n) => api.trashProject(n));
+  });
+  bulkArchive.addEventListener('click', () => {
+    if (mode === 'archive') bulkRun('Wiederherstellen', (n) => api.unarchiveProject(n));
+    else if (mode === 'trash') bulkRun('Wiederherstellen', (n) => api.restoreProject(n));
+    else bulkRun('Archivieren', (n) => api.archiveProject(n));
+  });
+  bulkDownload.addEventListener('click', () => {
+    const keys = [...selected];
+    triggerDownload(keys.length === 1 && ownedSelected().length === 1 ? api.projectZipUrl(keys[0]) : api.projectsZipUrl(keys));
+  });
+  bulkLabels.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openLabelMenu([...selected], bulkLabels);
+  });
+  selectAll.addEventListener('change', () => {
+    for (const k of visibleKeys) {
+      if (selectAll.checked) selected.add(k);
+      else selected.delete(k);
+    }
+    render();
+  });
+
+  // --- Labels ---
+
+  function openLabelMenu(keys, anchor) {
+    labelMenu.innerHTML = '';
+    if (!cache.labels.labels.length) labelMenu.textContent = 'Noch keine Labels (links anlegen).';
+    for (const l of cache.labels.labels) {
+      const n = keys.filter((k) => (cache.labels.assign[k] || []).includes(l.id)).length;
+      const row = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = n === keys.length;
+      cb.indeterminate = n > 0 && n < keys.length;
+      cb.addEventListener('change', async () => {
+        try {
+          cache.labels = await api.assignLabel(keys, l.id, cb.checked);
+          render();
+        } catch (e) {
+          alert('Fehler: ' + e.message);
+        }
+      });
+      row.append(cb, chip(l));
+      labelMenu.appendChild(row);
+    }
+    labelMenu.classList.remove('hidden');
+    const r = anchor.getBoundingClientRect();
+    const pr = labelMenu.offsetParent.getBoundingClientRect();
+    labelMenu.style.top = `${r.bottom - pr.top + labelMenu.offsetParent.scrollTop}px`;
+    labelMenu.style.left = `${Math.max(0, Math.min(r.left - pr.left, pr.width - 220))}px`;
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!labelMenu.contains(e.target)) labelMenu.classList.add('hidden');
+    if (!newMenu.contains(e.target) && e.target !== btnNewProject) newMenu.classList.add('hidden');
+  });
+  // Klick in der Menü-Checkbox rendert die Tabelle neu und entfernt das Ziel; Menü bleibt trotzdem offen.
+  labelMenu.addEventListener('click', (e) => e.stopPropagation());
+
+  function renderLabels() {
+    labelsList.innerHTML = '';
+    for (const l of cache.labels.labels) {
+      const row = document.createElement('div');
+      row.className = 'label-row' + (labelFilter === l.id ? ' active' : '');
+      const b = document.createElement('button');
+      b.className = 'dash-link';
+      b.append(chip(l));
+      b.title = 'Nach Label filtern';
+      b.addEventListener('click', () => {
+        labelFilter = labelFilter === l.id ? null : l.id;
+        render();
+      });
+      const edit = document.createElement('button');
+      edit.textContent = '✎';
+      edit.title = 'Label bearbeiten';
+      edit.addEventListener('click', () => showLabelForm(l));
+      const del = document.createElement('button');
+      del.textContent = '×';
+      del.title = 'Label löschen';
+      del.addEventListener('click', async () => {
+        if (!confirm(`Label "${l.name}" löschen?`)) return;
+        try {
+          await api.deleteLabel(l.id);
+          if (labelFilter === l.id) labelFilter = null;
+          await refresh();
+        } catch (e) {
+          alert('Fehler: ' + e.message);
+        }
+      });
+      row.append(b, edit, del);
+      labelsList.appendChild(row);
+    }
+  }
+
+  function showLabelForm(l) {
+    labelEditId = l ? l.id : null;
+    labelFormName.value = l ? l.name : '';
+    labelColor = l ? l.color : cache.labelColors[0];
+    labelFormColors.innerHTML = '';
+    for (const c of cache.labelColors) {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'label-swatch' + (c === labelColor ? ' active' : '');
+      sw.style.background = c;
+      sw.setAttribute('aria-label', c);
+      sw.addEventListener('click', () => {
+        labelColor = c;
+        for (const o of labelFormColors.children) o.classList.toggle('active', o === sw);
+      });
+      labelFormColors.appendChild(sw);
+    }
+    labelForm.classList.remove('hidden');
+    labelFormName.focus();
+  }
+
+  document.getElementById('btn-label-add').addEventListener('click', () => showLabelForm(null));
+  document.getElementById('label-form-cancel').addEventListener('click', () => labelForm.classList.add('hidden'));
+  labelForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const name = labelFormName.value;
+      if (labelEditId) await api.updateLabel(labelEditId, { name, color: labelColor });
+      else await api.addLabel(name, labelColor);
+      labelForm.classList.add('hidden');
+      await refresh();
+    } catch (err) {
+      alert('Fehler: ' + err.message);
+    }
+  });
 
   function actionBtn(label, cls, onClick) {
     const btn = document.createElement('button');
@@ -186,12 +397,25 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     if (cls) btn.className = cls;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      onClick();
+      onClick(e);
     });
     return btn;
   }
 
+  async function uploadZip(file) {
+    if (!file) return;
+    try {
+      const { root } = await api.uploadZip(file);
+      await refresh();
+      onOpenProject(root);
+      hide();
+    } catch (e) {
+      alert('Zip-Upload fehlgeschlagen: ' + e.message);
+    }
+  }
+
   async function newProject() {
+    newMenu.classList.add('hidden');
     const name = prompt('Name des neuen Projekts:');
     if (!name) return;
     try {
@@ -312,6 +536,8 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
   function setMode(newMode) {
     mode = newMode;
+    selected.clear();
+    labelFilter = null;
     tabProjects.classList.toggle('active', mode === 'projects');
     tabShared.classList.toggle('active', mode === 'shared');
     tabArchive.classList.toggle('active', mode === 'archive');
@@ -322,7 +548,17 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   // Der frühere Toolbar-Button "Alle Projekte" ist im Redesign der Home-Button
   // links in der Menüleiste (R2/R3) und ruft show() über main.js auf.
   if (btnAllProjects) btnAllProjects.addEventListener('click', show);
-  btnNewProject.addEventListener('click', newProject);
+  btnNewProject.addEventListener('click', () => newMenu.classList.toggle('hidden'));
+  document.getElementById('btn-new-empty').addEventListener('click', newProject);
+  document.getElementById('btn-new-zip').addEventListener('click', () => {
+    newMenu.classList.add('hidden');
+    zipInput.click();
+  });
+  zipInput.addEventListener('change', () => {
+    const f = zipInput.files[0];
+    zipInput.value = '';
+    uploadZip(f);
+  });
   searchInput.addEventListener('input', render);
   tabProjects.addEventListener('click', () => setMode('projects'));
   tabShared.addEventListener('click', () => setMode('shared'));
