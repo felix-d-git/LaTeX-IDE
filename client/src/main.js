@@ -605,6 +605,7 @@ const projectsView = setupProjectsView({
 commentsPanel = setupCommentsPanel({
   commentsManager,
   editorMgr,
+  currentUser,
   getActivePath: () => editorMgr.getActivePath(),
 });
 

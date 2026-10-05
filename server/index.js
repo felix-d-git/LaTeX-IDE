@@ -1358,16 +1358,83 @@ app.get('/api/comments', (req, res) => {
   res.json({ comments: comments.listAll(root) });
 });
 
+// Kein Reviewer-/Rollenmodell in dieser Basis: jeder mit Zugriff darf schreiben.
+// Einziger Haken fuer spaetere Rollen (Verlauf-Wiederherstellen).
+function canWriteRoot(user, root) {
+  return canAccessRoot(user, root);
+}
+
+function authorOf(user) {
+  return { id: user.id, name: auth.toPublicUser(user).username };
+}
+
+// Eigener Beitrag oder Owner/Admin (Altbestand ohne Autor: nur Owner/Admin).
+function mayChange(user, root, item) {
+  return canManageRoot(user, root) || (!!item.author && item.author.id === user.id);
+}
+
+function commentText(req, res) {
+  const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+  if (!text) res.status(400).json({ error: 'text ist erforderlich.' });
+  return text;
+}
+
+// result: Kommentar | null (nicht gefunden) | false (verboten)
+function commentResult(res, root, relPath, result) {
+  if (result === null) return res.status(404).json({ error: 'Nicht gefunden.' });
+  if (result === false) return res.status(403).json({ error: 'Nur eigene Beitraege (oder der Eigentuemer) duerfen geaendert werden.' });
+  broadcast(root, { type: 'commentsChanged', path: relPath });
+  res.json({ comment: result });
+}
+
 app.post('/api/comments', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const { path: relPath, from, to, anchorText, text } = req.body;
-  if (!relPath || typeof from !== 'number' || typeof to !== 'number' || !text || !text.trim()) {
+  const { path: relPath, from, to, anchorText } = req.body;
+  if (!relPath || typeof from !== 'number' || typeof to !== 'number') {
     return res.status(400).json({ error: 'path, from, to und text sind erforderlich.' });
   }
-  const comment = comments.add(root, relPath, { from, to, anchorText, text: text.trim() });
+  const text = commentText(req, res);
+  if (!text) return;
+  const comment = comments.add(root, relPath, { from, to, anchorText, text, author: authorOf(req.user) });
   broadcast(root, { type: 'commentsChanged', path: relPath });
   res.json({ comment });
+});
+
+app.patch('/api/comments/:id', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const text = commentText(req, res);
+  if (!text) return;
+  const relPath = req.body.path;
+  const r = comments.edit(root, relPath, req.params.id, null, text, (c) => mayChange(req.user, root, c));
+  commentResult(res, root, relPath, r);
+});
+
+app.post('/api/comments/:id/replies', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const text = commentText(req, res);
+  if (!text) return;
+  const relPath = req.body.path;
+  commentResult(res, root, relPath, comments.reply(root, relPath, req.params.id, { text, author: authorOf(req.user) }));
+});
+
+app.patch('/api/comments/:id/replies/:rid', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const text = commentText(req, res);
+  if (!text) return;
+  const relPath = req.body.path;
+  const r = comments.edit(root, relPath, req.params.id, req.params.rid, text, (c) => mayChange(req.user, root, c));
+  commentResult(res, root, relPath, r);
+});
+
+app.delete('/api/comments/:id/replies/:rid', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const relPath = req.query.path;
+  commentResult(res, root, relPath, comments.removeReply(root, relPath, req.params.id, req.params.rid, (c) => mayChange(req.user, root, c)));
 });
 
 app.delete('/api/comments/:id', (req, res) => {
@@ -1375,7 +1442,9 @@ app.delete('/api/comments/:id', (req, res) => {
   if (!root) return;
   const relPath = req.query.path;
   if (!relPath) return res.status(400).json({ error: 'path ist erforderlich.' });
-  const ok = comments.remove(root, relPath, req.params.id);
+  // Altkommentare ohne Autor bleiben fuer alle loeschbar (wie bisher).
+  const ok = comments.remove(root, relPath, req.params.id, (c) => !c.author || mayChange(req.user, root, c));
+  if (ok === null) return res.status(403).json({ error: 'Nur eigene Kommentare (oder der Eigentuemer) duerfen geloescht werden.' });
   if (ok) broadcast(root, { type: 'commentsChanged', path: relPath });
   res.json({ ok });
 });
@@ -1409,6 +1478,28 @@ app.get('/api/history/diff', (req, res) => {
   try {
     const parts = history.diffBetween(root, id, to, file);
     res.json({ parts });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/history/restore', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (!canWriteRoot(req.user, root)) return res.status(403).json({ error: 'Kein Schreibrecht.' });
+  const { id, file } = req.body;
+  try {
+    if (!id || !file || !isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('id und Textdatei sind erforderlich.');
+    const abs = safeResolve(root, file);
+    const content = history.readSnapshotFile(root, id, file);
+    if (content === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
+    collab.flushRoot(root);
+    history.snapshot(root, { trigger: 'restore' }); // aktuellen Stand sichern
+    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
+    fs.writeFileSync(abs, content, 'utf8');
+    collab.applyExternalText(root, file, content); // live fuer alle offenen Editoren
+    const entry = history.snapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
+    res.json({ ok: true, entry });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

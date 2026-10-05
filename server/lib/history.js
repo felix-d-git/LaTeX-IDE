@@ -51,6 +51,11 @@ function walkTextFiles(root, relDir = '', out = []) {
   return out;
 }
 
+function sameFiles(root, prev, files) {
+  if (prev.files.length !== files.length || prev.files.some((f, i) => f !== files[i])) return false;
+  return files.every((f) => readSnapshotFile(root, prev.id, f) === readCurrentFile(root, f));
+}
+
 function snapshot(root, { label = null, trigger = 'autosave' } = {}) {
   if (trigger === 'autosave') {
     const entries = loadIndex(root);
@@ -60,8 +65,12 @@ function snapshot(root, { label = null, trigger = 'autosave' } = {}) {
     }
   }
 
-  const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const files = walkTextFiles(root);
+  // Nur bei echter Inhaltsaenderung gegenueber dem letzten Snapshot eine neue Version.
+  const prev = loadIndex(root).slice(-1)[0];
+  if (prev && sameFiles(root, prev, files)) return null;
+
+  const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const snapDir = path.join(historyRoot(root), SNAPSHOTS_DIR, id);
   for (const relPath of files) {
     const dest = path.join(snapDir, relPath);
@@ -119,4 +128,4 @@ function diffBetween(root, fromId, toId, relPath) {
   return diffLines(oldContent, newContent);
 }
 
-module.exports = { snapshot, list, getEntry, addLabel, diffBetween, HISTORY_DIR };
+module.exports = { snapshot, readSnapshotFile, list, getEntry, addLabel, diffBetween, HISTORY_DIR };
