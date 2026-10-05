@@ -1327,3 +1327,5 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 
 /* Logo folgt dem In-App-Theme (nicht dem OS): img-Quelle per content ersetzen */
 :root[data-theme="dark"] .home-logo, :root[data-theme="dark"] .dash-logo{ content: url(/logo-dark.svg); }
+
+.role-reviewer #btn-history-restore{ display: none; }

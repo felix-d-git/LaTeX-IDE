@@ -1358,10 +1358,9 @@ app.get('/api/comments', (req, res) => {
   res.json({ comments: comments.listAll(root) });
 });
 
-// Kein Reviewer-/Rollenmodell in dieser Basis: jeder mit Zugriff darf schreiben.
-// Einziger Haken fuer spaetere Rollen (Verlauf-Wiederherstellen).
 function canWriteRoot(user, root) {
-  return canAccessRoot(user, root);
+  const role = roleOf(user, root);
+  return !!role && role !== 'reviewer';
 }
 
 function authorOf(user) {
