@@ -1,4 +1,4 @@
-import { adminApi, api, authApi } from './api.js';
+﻿import { adminApi, authApi } from './api.js';
 
 // Account things (logout, password, desktop apps, invites, delete account) -
 // separate from the editor settings, reachable from the rail and the dashboard.
@@ -69,75 +69,6 @@ export function setupProfileDialog({ currentUser, onLogout }) {
         list.appendChild(note(e.message));
       }
     }
-    refresh();
-    return box;
-  }
-
-  // Tokens for external AI tools (MCP): level + optional single project, shown once.
-  function renderMcpSection() {
-    const box = el('div');
-    const list = el('div');
-    const name = el('input', 'settings-pw-input');
-    name.placeholder = 'Name (z. B. Claude Code)';
-    const level = el('select');
-    for (const [v, t] of [['read', 'Lesen'], ['review', 'Prüfen (Kommentare + Vorschläge)'], ['edit', 'Bearbeiten']]) {
-      const o = el('option', null, t);
-      o.value = v;
-      level.appendChild(o);
-    }
-    const project = el('select');
-    const all = el('option', null, 'Alle Projekte');
-    all.value = '';
-    project.appendChild(all);
-    api.listProjects().then(({ localProjects, sharedProjects }) => {
-      for (const p of [...localProjects, ...sharedProjects]) {
-        const o = el('option', null, p.name);
-        o.value = p.root;
-        project.appendChild(o);
-      }
-    }, () => {});
-    const btn = el('button', 'primary', 'Token erstellen');
-    const msg = note('');
-    box.append(
-      el('h4', null, 'KI-Zugriff (MCP)'),
-      note('Für Claude Desktop/Code, Cursor u. a. Der Token wird nur einmal angezeigt. Endpoint: ' + location.origin + '/mcp'),
-      name, level, project, btn, msg, list
-    );
-    async function refresh() {
-      list.innerHTML = '';
-      try {
-        const { tokens } = await authApi.listMcpTokens();
-        for (const t of tokens) {
-          const row = el('div', 'invite-row');
-          const status = el('span', 'invite-status', `${t.name} – ${t.level}${t.project ? `, nur ${t.project}` : ''} – erstellt ${formatDate(t.createdAt)}${t.lastUsedAt ? `, zuletzt benutzt ${formatDate(t.lastUsedAt)}` : ''}`);
-          const revoke = el('button', 'danger', 'Widerrufen');
-          revoke.addEventListener('click', async () => {
-            await authApi.revokeMcpToken(t.id);
-            refresh();
-          });
-          row.append(status, revoke);
-          list.appendChild(row);
-        }
-      } catch (e) {
-        list.appendChild(note(e.message));
-      }
-    }
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      try {
-        const { token } = await authApi.createMcpToken(name.value, level.value, project.value || undefined);
-        name.value = '';
-        const shown = el('input', 'settings-pw-input');
-        shown.readOnly = true;
-        shown.value = token;
-        msg.textContent = 'Token (jetzt kopieren, wird nicht erneut angezeigt):';
-        msg.appendChild(shown);
-        shown.select();
-        refresh();
-      } catch (e) {
-        msg.textContent = e.message;
-      }
-    });
     refresh();
     return box;
   }
@@ -243,7 +174,6 @@ export function setupProfileDialog({ currentUser, onLogout }) {
     body.appendChild(renderPasswordSection());
     body.appendChild(renderDownloadSection());
     body.appendChild(renderDesktopSection());
-    body.appendChild(renderMcpSection());
     if (currentUser.isAdmin) body.appendChild(renderInviteSection());
     body.appendChild(renderDeleteSection());
   }

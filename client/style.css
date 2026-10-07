@@ -1354,3 +1354,11 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 .label-swatch{ width: 18px; height: 18px; padding: 0; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
 .label-swatch.active{ border-color: var(--ol-text); }
 .label-form-btns{ display: flex; gap: 6px; }
+
+/* Settings tab MCP */
+.mcp-copy{ display: flex; gap: 6px; align-items: flex-start; }
+.mcp-copy .settings-pw-input{ flex: 1; max-width: none; font-family: var(--ol-font-mono, monospace); }
+.mcp-token{ border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm); padding: 8px 10px; margin-bottom: 8px; }
+.mcp-perms{ display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.mcp-project{ margin: 4px 0; }
+.mcp-project .mcp-perms{ margin-left: 22px; }

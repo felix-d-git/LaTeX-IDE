@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { linkify } from './helpDialog.js';
+import { renderMcpTab } from './mcpTab.js';
 import { REFERENCES_KEY, referencePrefs } from './latexCompletions.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
@@ -75,7 +76,9 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
   }
 
   let desktopInfo = null;
+  let mcpEl = null;
   function show() {
+    mcpEl = null;
     modal.classList.remove('hidden');
     if (!desktopInfo) {
       fetch('/api/desktop/info').then((r) => (r.ok ? r.json() : null)).then((d) => {
@@ -427,6 +430,7 @@ verschieben? Der alte Ordner bleibt danach leer. Der Zielordner muss leer oder n
     compiler: renderCompilerTab,
     references: renderReferencesTab,
     appearance: renderAppearanceTab,
+    mcp: () => (mcpEl = mcpEl || renderMcpTab()), // kept while open, so a fresh token survives tab switches
   };
 
   function render() {

@@ -221,15 +221,15 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 Externe KI-Tools (Claude Desktop/Code, Cursor) arbeiten mit ihrem eigenen Abo an deinen Projekten – die IDE ist dafür ein MCP-Server (`POST /mcp`, Streamable HTTP, zustandslos).
 
-1. Profil-Dialog → „KI-Zugriff (MCP)“: Name, Rechte-Stufe und optional ein Projekt wählen → „Token erstellen“. Der Token (`lmcp_…`) wird nur einmal angezeigt, der Server speichert nur den Hash. Widerrufen ebenfalls dort.
-2. Rechte-Stufen: `read` (lesen, suchen, kompilieren), `review` (zusätzlich Kommentare und Änderungsvorschläge), `edit` (zusätzlich Text ändern, Dateien anlegen). Nie mehr als dein eigener Zugriff auf das Projekt.
+1. Einstellungen → Reiter „MCP“: Name, Einzelrechte und Projekte wählen → „Token erstellen“. Der Token (`lmcp_…`) wird nur einmal angezeigt, der Server speichert nur den Hash. Rechte und Projektauswahl lassen sich dort später ändern, ohne neuen Token; Widerrufen ebenfalls.
+2. Einzelrechte: `read`, `comment`, `edit`, `create`, `delete`, `move`, `compile` (standardmäßig aus – Kompilieren ist langsam und belastet den Server). Pro Projekt einstellbar. Nie mehr als dein eigener Zugriff; als Reviewer höchstens `read` + `comment`. Details: [docs/MCP.md](docs/MCP.md).
 3. Claude Code: `claude mcp add --transport http latex https://<server>/mcp --header "Authorization: Bearer <token>"`
 4. Claude Desktop / Cursor (Konfigurationsdatei, ggf. über `npx mcp-remote`):
    ```json
    { "mcpServers": { "latex": { "command": "npx", "args": ["-y", "mcp-remote", "https://<server>/mcp", "--header", "Authorization: Bearer <token>"] } } }
    ```
 
-Werkzeuge: `list_projects`, `project_tree`, `outline`, `read_file` (max. 400 Zeilen), `search`, `compile`, `get_errors`; ab `review` `add_comment`, `suggest_change` (erscheint im Kommentar-Panel mit „Annehmen/Ablehnen“, der Text bleibt bis dahin unverändert); ab `edit` `edit_file`, `create_file` (Änderungen laufen über das Yjs-Dokument, offene Editoren sehen sie live).
+Werkzeuge je Recht: `read`: `list_projects`, `project_tree`, `outline`, `read_file` (max. 400 Zeilen), `search`, `get_errors`; `comment`: `add_comment`, `suggest_change`; `edit`: `edit_file`; `create`: `create_file` (Text oder base64); `delete`: `delete_file`; `move`: `move_file`; `compile`: `compile` (startet asynchron) + `compile_status`. Änderungen laufen über das Yjs-Dokument bzw. den Datei-Watcher, offene Editoren sehen sie live.
 
 ## Architektur
 
