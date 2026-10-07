@@ -18,6 +18,11 @@ async function deleteSelected(container, ctx) {
   if (selected.size && ctx.onDeleteMany && (await ctx.onDeleteMany(selectedRoots()))) clearSelection(container);
 }
 
+// beim Projektwechsel: gleichnamige Pfade im neuen Projekt dürfen nicht markiert bleiben
+export function resetTreeSelection() {
+  selected.clear();
+}
+
 export function renderTree(container, tree, ctx) {
   container.innerHTML = '';
   container.appendChild(renderNodes(tree, ctx, container));

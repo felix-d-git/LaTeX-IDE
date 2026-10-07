@@ -1,7 +1,7 @@
 import { api, authApi, adminApi, shareApi } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
-import { renderTree } from './fileTree.js';
+import { renderTree, resetTreeSelection } from './fileTree.js';
 import { createEditorManager } from './editor.js';
 import {
   configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts, prewarm,
@@ -507,6 +507,7 @@ async function loadTree() {
 
 async function loadProject(root) {
   activeProjectRoot = root;
+  resetTreeSelection();
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
   els.projectButton.title = root;
