@@ -466,8 +466,12 @@ async function setMainFile(path) {
 }
 
 let currentProjectId = null;
+let treeSeq = 0;
 async function loadTree() {
+  const seq = ++treeSeq;
   const { tree, mainFile: mf, projectId } = await api.getTree();
+  // A slower, older answer (e.g. old project, requested before an open) must not undo a newer one.
+  if (seq !== treeSeq) return;
   if (projectId !== currentProjectId) {
     // Other project: tabs of the previous one point at files that don't exist here.
     for (const p of [...openOrder]) {
@@ -592,9 +596,10 @@ const searchPanelApi = setupSearchPanel({
 });
 
 setupProjectDialog({
-  onOpened: ({ activeRoot, mainFile: mf }) => {
+  onOpened: async ({ activeRoot, mainFile: mf, startFile }) => {
     mainFile = mf;
-    loadProject(activeRoot);
+    await loadProject(activeRoot);
+    if (startFile) await openFile(startFile);
   },
 });
 
