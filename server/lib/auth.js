@@ -8,12 +8,15 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 Stunde
 const VERIFY_TTL_MS = 48 * 60 * 60 * 1000; // 2 Tage
 const USERNAME_RE = /^[A-Za-z0-9_.-]{3,32}$/;
+const MCP_PERMS = ['read', 'comment', 'edit', 'create', 'delete', 'move', 'compile'];
+const LEGACY_LEVEL_PERMS = { read: ['read'], review: ['read', 'comment'], edit: ['read', 'comment', 'edit'] }; // before load(): migration uses it
 
 function load() {
   if (fs.existsSync(DATA_PATH)) {
     try {
       const data = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
       for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!data[k]) data[k] = [];
+      data.mcpTokens.forEach(migrateMcpToken);
       return data;
     } catch (e) {
       // fall through to default
@@ -226,20 +229,38 @@ function revokeApiToken(userId, id) {
   save(data);
 }
 
-// --- MCP tokens (external AI tools): level read|review|edit, optionally one project, stored hashed ---
+// --- MCP tokens (external AI tools): single rights, for all projects (perms) or per selected project (projects), stored hashed ---
 
-const MCP_LEVELS = ['read', 'review', 'edit'];
+// Old tokens had level read|review|edit (+ optional single project); compile was implicit, now off by default.
+function migrateMcpToken(t) {
+  if (t.perms) return;
+  const perms = LEGACY_LEVEL_PERMS[t.level] || ['read'];
+  t.perms = t.project ? [] : perms;
+  t.projects = t.project ? { [t.project]: perms } : null;
+  delete t.level;
+  delete t.project;
+}
 
-function createMcpToken(userId, { name, level, project }) {
-  if (!MCP_LEVELS.includes(level)) throw new Error('Ungültige Rechte-Stufe.');
+function cleanMcpScope({ perms, projects }) {
+  const clean = (list) => {
+    if (!Array.isArray(list) || list.some((p) => !MCP_PERMS.includes(p))) throw new Error('Ungültige Rechte.');
+    return MCP_PERMS.filter((p) => list.includes(p));
+  };
+  if (projects && typeof projects === 'object') {
+    return { perms: [], projects: Object.fromEntries(Object.entries(projects).map(([id, l]) => [id, clean(l)])) };
+  }
+  return { perms: clean(perms), projects: null };
+}
+
+function createMcpToken(userId, { name, perms, projects }) {
+  const scope = cleanMcpScope({ perms, projects });
   const token = 'lmcp_' + randomToken();
   data.mcpTokens.push({
     id: crypto.randomUUID(),
     tokenHash: hashToken(token),
     userId,
     name: String(name || 'KI-Tool').slice(0, 80),
-    level,
-    project: project || null,
+    ...scope,
     createdAt: new Date().toISOString(),
     lastUsedAt: null,
   });
@@ -247,7 +268,17 @@ function createMcpToken(userId, { name, level, project }) {
   return token;
 }
 
-// -> { user, level, project, name } or null
+// Rights/name can be changed later; the secret stays the same.
+function updateMcpToken(userId, id, { name, perms, projects }) {
+  const t = data.mcpTokens.find((x) => x.userId === userId && x.id === id);
+  if (!t) return false;
+  Object.assign(t, cleanMcpScope({ perms, projects }));
+  if (name) t.name = String(name).slice(0, 80);
+  save(data);
+  return true;
+}
+
+// -> { user, perms, projects, name } or null (projects null = perms apply to every project)
 function findMcpToken(token) {
   if (!token || !token.startsWith('lmcp_')) return null;
   const tokenHash = hashToken(token);
@@ -255,13 +286,13 @@ function findMcpToken(token) {
   const user = entry && findUserById(entry.userId);
   if (!user || !isVerified(user)) return null;
   entry.lastUsedAt = new Date().toISOString(); // in memory; persisted with the next save
-  return { user, level: entry.level, project: entry.project, name: entry.name };
+  return { user, perms: entry.perms, projects: entry.projects, name: entry.name };
 }
 
 function listMcpTokens(userId) {
   return data.mcpTokens
     .filter((t) => t.userId === userId)
-    .map(({ id, name, level, project, createdAt, lastUsedAt }) => ({ id, name, level, project, createdAt, lastUsedAt }));
+    .map(({ id, name, perms, projects, createdAt, lastUsedAt }) => ({ id, name, perms, projects, createdAt, lastUsedAt }));
 }
 
 function revokeMcpToken(userId, id) {
@@ -311,10 +342,11 @@ module.exports = {
   listApiTokens,
   revokeApiToken,
   createMcpToken,
+  updateMcpToken,
   findMcpToken,
   listMcpTokens,
   revokeMcpToken,
-  MCP_LEVELS,
+  MCP_PERMS,
   USERNAME_RE,
   get users() {
     return data.users;

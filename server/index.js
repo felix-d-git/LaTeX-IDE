@@ -399,7 +399,13 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 });
 
 // --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
-app.post('/mcp', createMcp({ PROJECTS_DIR, version: APP_VERSION, state, userProjectsDir, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast }));
+// Projects a user can reach (own + shared) as { id, name, shared }; id = stable project id used in MCP tokens.
+function mcpProjects(user) {
+  const own = projects.listProjects(userProjectsDir(user)).filter((p) => !(user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const shared = state.sharedRootsFor(user.id).filter((r) => fs.existsSync(r));
+  return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
+}
+app.post('/mcp',createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast }));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -494,25 +500,35 @@ app.get('/api/auth/desktop-tokens', (req, res) => {
   res.json({ tokens: auth.listApiTokens(req.user.id) });
 });
 
-// MCP tokens (level + optional single project); shown once, only the hash is stored. Browser session only.
+// MCP tokens: single rights (perms) for all projects or per selected project; shown once, only the hash is stored.
+// Creating and changing the rights need the browser session.
+function mcpScope(req) {
+  if (!req.session || req.session.userId !== req.user.id) throw Object.assign(new Error('Nur aus einer Browser-Anmeldung heraus möglich.'), { status: 403 });
+  const ids = new Set(mcpProjects(req.user).map((p) => p.id));
+  const sel = req.body.projects && typeof req.body.projects === 'object' ? req.body.projects : null;
+  if (sel) for (const id of Object.keys(sel)) if (!ids.has(id)) throw Object.assign(new Error('Kein Zugriff auf Projekt ' + id), { status: 403 });
+  return { perms: req.body.perms, projects: sel };
+}
+
 app.post('/api/auth/mcp-token', (req, res) => {
-  if (!req.session || req.session.userId !== req.user.id) {
-    return res.status(403).json({ error: 'Nur aus einer Browser-Anmeldung heraus möglich.' });
-  }
   try {
-    let project = null;
-    if (req.body.root) {
-      if (!canAccessRoot(req.user, req.body.root)) return res.status(403).json({ error: 'Kein Zugriff auf dieses Projekt.' });
-      project = projectIdOf(req.body.root);
-    }
-    res.json({ token: auth.createMcpToken(req.user.id, { name: req.body.name, level: req.body.level, project }) });
+    res.json({ token: auth.createMcpToken(req.user.id, { name: req.body.name, ...mcpScope(req) }) });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+app.patch('/api/auth/mcp-tokens/:id', (req, res) => {
+  try {
+    if (!auth.updateMcpToken(req.user.id, req.params.id, { name: req.body.name, ...mcpScope(req) })) return res.status(404).json({ error: 'Token nicht gefunden.' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
 app.get('/api/auth/mcp-tokens', (req, res) => {
-  res.json({ tokens: auth.listMcpTokens(req.user.id) });
+  res.json({ tokens: auth.listMcpTokens(req.user.id), projects: mcpProjects(req.user) });
 });
 
 app.delete('/api/auth/mcp-tokens/:id', (req, res) => {
@@ -1302,7 +1318,7 @@ app.post('/api/main-file', (req, res) => {
 let compileChain = Promise.resolve();
 const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
 
-function runCompile(root, main, userId) {
+function runCompile(root, main, userId, meta) {
   const outRel = outRelFor(root, userId);
   const key = path.join(root, outRel);
   // Group mode: everyone on the project sees the run; individual: only the compiling user.
@@ -1311,16 +1327,19 @@ function runCompile(root, main, userId) {
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain.then(() => {
     queuedCompile.delete(key);
-    return doCompile(root, main, outRel, to);
+    return doCompile(root, main, outRel, to, meta);
   });
   queuedCompile.set(key, run);
   compileChain = run.catch(() => {});
   return run;
 }
 
-async function doCompile(root, main, outRel, to) {
+async function doCompile(root, main, outRel, to, meta) {
   collab.flushRoot(root);
+  const t0 = Date.now();
   const result = await compile(root, main, state.getProjectSettings(root), outRel);
+  result.durationMs = Date.now() - t0;
+  state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
   broadcast(root, { type: 'compileStatus', status, log: result.log }, to);
   if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath }, to);
