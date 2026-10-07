@@ -376,13 +376,14 @@ function syncAll() {
   return syncing;
 }
 // Editor/server traffic on /ws and /yjs (own typing, other users, web) = something changed:
-// pull the open owned project into the local copy shortly after the last message.
+// pull the open owned project into the local copy 2 s after the first message (throttle, not
+// debounce: steady typing/cursor traffic would otherwise postpone the sync forever).
 let syncTimer = null;
 function scheduleSync() {
   const own = online && !moving && current && current.owned && ownedEntry(current.projectId);
-  if (!own) return;
-  clearTimeout(syncTimer);
+  if (!own || syncTimer) return;
   syncTimer = setTimeout(() => {
+    syncTimer = null;
     syncOwned(own).catch((e) => {
       if (!(e instanceof Offline)) console.error(`Sync ${own.name}: ${e.message}`);
     });
