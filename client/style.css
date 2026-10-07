@@ -360,6 +360,7 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
   cursor: pointer; white-space: nowrap;
 }
 .tree-row:hover{ background: var(--ol-hover); }
+.tree-row.selected{ background: var(--ol-pressed); box-shadow: inset 3px 0 0 var(--ol-primary); }
 .tree-row.active{ background: var(--ol-accent-bg); color: var(--ol-accent-fg); font-weight: 700; }
 .tree-row.drop-target{ outline: 2px dashed var(--ol-primary); outline-offset: -2px; background: var(--ol-accent-bg); }
 .tree-entity-details{ display: flex; align-items: center; padding: 4px; overflow: hidden; min-width: 0; }
@@ -1244,10 +1245,11 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
    Feature): die stex-Syntaxfarben sind für hellen Grund gebaut und wären auf
    dunklem Grund kaum lesbar. Nur die Umgebung wird dunkel. */
 :root[data-theme="dark"] .cm-editor{
-  --ol-surface:#ffffff; --ol-text:#1b222c;
+  --ol-surface:#ffffff; --ol-text:#1b222c; --ol-text-muted:#495365;
   --ol-gutter-bg:#f4f5f6; --ol-gutter-fg:#333333;
   --ol-active-line:rgba(0,0,0,.07); --ol-active-gutter:#e7e9ee;
 }
+:root[data-theme="dark"] .cm-scroller, :root[data-theme="dark"] .cm-panels{ color-scheme: dark; }
 :root[data-theme="dark"] #pdf-toolbar .page-input,
 :root[data-theme="dark"] input, :root[data-theme="dark"] select, :root[data-theme="dark"] textarea{
   background: var(--ol-surface-alt); color: var(--ol-text); border-color: var(--ol-border);
@@ -1293,7 +1295,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 
 /* Live-Kollaboration: Offline-Konflikte + Verbindungsstatus */
 .cm-collab-conflict{ background: #fff4d6; box-shadow: inset 3px 0 0 #e0a800; }
-.review-item.type-conflict .review-item-type{ color: #b07d00; font-weight: 600; }
+.review-item.type-conflict .review-item-type{ color: #8a6100; font-weight: 600; }
 #offline-banner{ position: fixed; top: 0; left: 0; right: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; gap: 12px; padding: 6px 40px; background: #fff4d6; color: #7a5600; border-bottom: 1px solid #f0d58a; font-size: var(--ol-fs-sm); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 #offline-banner.hidden{ display: none; }
 #offline-banner .offline-banner-close{ position: absolute; right: 10px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: var(--ol-r-sm); }

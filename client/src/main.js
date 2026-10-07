@@ -402,6 +402,20 @@ async function deleteTreeNode(relPath, isDir) {
   }
 }
 
+async function deleteTreeNodes(paths) {
+  if (!confirm(`${paths.length} Einträge (Ordner inkl. Inhalt) wirklich löschen?\n\n${paths.join('\n')}`)) return false;
+  try {
+    for (const p of paths) {
+      await api.deletePath(p);
+      closeTabsUnder(p);
+    }
+  } catch (e) {
+    alert('Fehler beim Löschen: ' + e.message);
+  }
+  await loadTree();
+  return true;
+}
+
 async function moveTreeNode(sourcePath, targetDir) {
   try {
     let result = await api.movePath(sourcePath, targetDir, false);
@@ -453,6 +467,7 @@ function refreshTreeHighlight() {
     onCreateFile: createTreeFile,
     onRename: renameTreeNode,
     onDelete: deleteTreeNode,
+    onDeleteMany: deleteTreeNodes,
     onMove: moveTreeNode,
     onUploadFiles: uploadDroppedFiles,
     onUploadHere: (dir) => newFileDialog.show(dir, 'upload'),

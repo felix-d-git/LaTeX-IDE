@@ -11,7 +11,7 @@ function formatTime(iso) {
   }
 }
 
-// Mehrzeiliges Eingabefeld: Enter = Zeilenumbruch, Strg+Enter / Button = Absenden, Escape = Abbrechen.
+// Mehrzeiliges Eingabefeld: Enter / Button = Absenden, Umschalt+Enter = Zeilenumbruch, Escape = Abbrechen.
 function composer(initial, submitLabel, onSubmit, onCancel) {
   const box = document.createElement('div');
   box.className = 'comment-edit';
@@ -21,7 +21,7 @@ function composer(initial, submitLabel, onSubmit, onCancel) {
   ta.value = initial;
   const send = () => ta.value.trim() && onSubmit(ta.value.trim());
   ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send();
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
     if (e.key === 'Escape') onCancel();
   });
   const row = document.createElement('div');
@@ -263,7 +263,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
   btnCancelComment.addEventListener('click', closeCompose);
   btnConfirmComment.addEventListener('click', confirmCompose);
   composeText.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmCompose();
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); confirmCompose(); }
     if (e.key === 'Escape') closeCompose();
   });
 
