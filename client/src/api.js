@@ -147,6 +147,7 @@ export const api = {
   refs: () => req('GET', '/api/refs'),
   languageToolStatus: () => req('GET', '/api/languagetool'),
   languageTool: (data, language) => req('POST', '/api/languagetool', { data, language }),
+  languageToolLocal: (url, data, language) => req('POST', '/api/languagetool-local', { url, data, language }),
   importProjects: () => req('GET', '/api/import/projects'),
   importFiles: (project) => req('GET', `/api/import/files?project=${encodeURIComponent(project)}`),
   importProjectFile: (project, filePath, dir, name) => req('POST', '/api/import/project-file', { project, path: filePath, dir, name }),

@@ -29,36 +29,60 @@ export function annotate(text) {
 
 let disabled = false; // Server ohne LanguageTool → nicht bei jedem Tastendruck neu fragen
 
-let warned = false; // Hinweis „eigener LanguageTool nicht erreichbar“ nur einmal pro Sitzung
+let failed = false; // letzter Versuch schlug fehl → genau ein Hinweis, bis es wieder klappt
+let retryAt = 0;
+let noProxy = false; // kein /api/languagetool-local (Web-Server) → Browser fragt direkt
 
-function warnOnce(url) {
-  if (warned) return;
-  warned = true;
-  const d = document.createElement('div');
-  d.textContent = `LanguageTool unter ${url} nicht erreichbar (läuft er mit --allow-origin '*'?). Grammatikprüfung pausiert.`;
-  d.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;max-width:80vw;padding:8px 14px;border-radius:6px;background:#333;color:#fff;font-size:13px;opacity:.92;cursor:pointer';
-  d.addEventListener('click', () => d.remove());
-  document.body.appendChild(d);
-  setTimeout(() => d.remove(), 10000);
+// POST /v2/check, Felder als x-www-form-urlencoded (so erwartet es LanguageTool).
+export function checkRequest(url, data, language) {
+  return [
+    url.replace(/\/+$/, '') + '/v2/check',
+    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ data, language }) },
+  ];
+}
+
+// Eigener LanguageTool (z. B. http://localhost:8081): Desktop-App über ihren Proxy (kein CORS),
+// im Web direkt aus dem Browser (LT braucht dann --allow-origin).
+async function checkLocal(url, data, language) {
+  if (!noProxy) {
+    try {
+      return await api.languageToolLocal(url, data, language);
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      noProxy = true;
+    }
+  }
+  const [u, opts] = checkRequest(url, data, language);
+  const r = await fetch(u, { ...opts, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
+  return r.json();
+}
+
+function toastOnce(msg) {
+  if (typeof document === 'undefined') return;
+  const el = document.createElement('div');
+  el.textContent = msg;
+  el.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;max-width:90vw;padding:10px 14px;border-radius:6px;background:#b3261e;color:#fff;font-size:13px;box-shadow:0 2px 8px #0006;cursor:pointer';
+  el.addEventListener('click', () => el.remove());
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 12000);
 }
 
 export async function grammarDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onAddWord) {
-  const local = (ltUrl || '').trim().replace(/\/+$/, ''); // eigener Rechner: direkt aus dem Browser
-  if ((disabled && !local) || !text.trim()) return [];
+  if ((disabled && !ltUrl) || !text.trim() || Date.now() < retryAt) return [];
+  let matches;
   const language = lang === 'en' ? 'en-US' : 'de-DE';
   const data = JSON.stringify({ annotation: annotate(text) });
-  let matches;
   try {
-    if (local) {
-      const r = await fetch(local + '/v2/check', { method: 'POST', body: new URLSearchParams({ data, language }), signal: AbortSignal.timeout(20000) });
-      if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
-      ({ matches } = await r.json());
-    } else {
-      ({ matches } = await api.languageTool(data, language));
-    }
+    ({ matches } = ltUrl ? await checkLocal(ltUrl, data, language) : await api.languageTool(data, language));
+    failed = false;
   } catch (e) {
-    if (local) warnOnce(local);
-    else if (e.status === 501) disabled = true;
+    if (e.status === 501) disabled = true;
+    else {
+      retryAt = Date.now() + 30000; // nicht bei jedem Tastendruck neu versuchen
+      if (!failed) toastOnce(`LanguageTool nicht erreichbar${ltUrl ? ` (${ltUrl})` : ''}: ${e.message}. Start mit --allow-origin '*', siehe Einstellungen → Rechtschreibung.`);
+      failed = true;
+    }
     return [];
   }
   const dict = new Set(dictionary);

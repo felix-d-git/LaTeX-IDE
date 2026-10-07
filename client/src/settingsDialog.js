@@ -237,7 +237,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
       saveSpelling({ ltUrl: v.trim() });
       render();
     }));
-    wrap.appendChild(note("Leer = LanguageTool des Servers. Beispiel: http://localhost:8081 – der Browser fragt dann direkt <URL>/v2/check an. Dein LanguageTool muss dafür mit --allow-origin '*' gestartet sein, z. B. java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*'. Gilt auch in der Desktop-App. Die Einstellung wird nur in diesem Browser gespeichert."));
+    wrap.appendChild(note("Lokal starten: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' und hier http://localhost:8081 eintragen. Die Desktop-App spricht ihn über ihren Proxy an; im Web fragt der Browser direkt (--allow-origin nötig; Safari blockiert HTTPS→http, Chrome fragt ggf. nach Zugriff auf lokale Geräte)."));
     const dict = document.createElement('textarea');
     dict.rows = 6;
     dict.value = (spelling.dictionary || []).join('\n');

@@ -303,6 +303,28 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Lokaler LanguageTool (nur Loopback): der Proxy umgeht CORS/Mixed Content des Browsers.
+app.post('/api/languagetool-local', express.json({ limit: '2mb' }), async (req, res) => {
+  let u;
+  try { u = new URL(String(req.body.url)); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
+  if (!/^https?:$/.test(u.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) {
+    return res.status(400).json({ error: 'Nur lokale Adressen (localhost) erlaubt.' });
+  }
+  const language = /^[a-z]{2}(-[A-Z]{2})?$/.test(req.body.language) ? req.body.language : 'auto';
+  try {
+    const r = await fetch(u.origin + u.pathname.replace(/\/+$/, '') + '/v2/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ data: String(req.body.data || ''), language }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
+    res.json({ matches: (await r.json()).matches || [] });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.use('/api', (req, res, next) => {
   if (!config.token) return res.status(401).json({ error: 'Desktop-App nicht angemeldet.', desktopLogin: true });
   next();

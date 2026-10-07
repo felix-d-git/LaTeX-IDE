@@ -39,6 +39,12 @@ const SECTIONS = [
     'Ohne Verbindung erscheint oben ein gelber Hinweis (mit × zu einem schmalen Balken verkleinerbar); du arbeitest in der lokalen Kopie weiter.',
     'Beim Wiederverbinden werden die Änderungen zusammengeführt; Konflikte erscheinen im Review.',
   ]],
+  ['Grammatik (LanguageTool)', [
+    'Einstellungen → Rechtschreibung → „Grammatik & Rechtschreibung“ einschalten. Der Server kann einen LanguageTool bereitstellen (LANGUAGETOOL_URL).',
+    "Eigener lokaler Server: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' starten und http://localhost:8081 unter „Eigener LanguageTool-Server“ eintragen.",
+    'Desktop-App: funktioniert direkt (Proxy). Im Web fragt der Browser den lokalen Server selbst, darum ist --allow-origin nötig; Safari blockiert das, Chrome fragt ggf. nach Zugriff auf lokale Geräte.',
+    'Ist der Server nicht erreichbar, erscheint ein einmaliger Hinweis; nach 30 Sekunden wird erneut versucht.',
+  ]],
   ['Tastenkürzel', [
     'Alle Tastenkürzel lassen sich unter Einstellungen → Editor → „Tastenkürzel bearbeiten…“ ansehen und ändern.',
   ]],
