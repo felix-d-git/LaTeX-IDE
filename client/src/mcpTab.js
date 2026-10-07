@@ -1,7 +1,7 @@
 import { authApi } from './api.js';
 
 // Settings tab "MCP": tokens for external AI tools (Claude, Codex, Cursor) with single rights per project.
-const DOCS_URL = 'https://github.com/felix-d-git/latex-web-ide/blob/master/docs/MCP.md';
+const DOCS_URL = 'https://github.com/felix-d-git/latex-web-ide/blob/multiuser/docs/MCP.md';
 const PERMS = [
   ['read', 'Lesen'],
   ['comment', 'Kommentieren/Vorschlagen'],
