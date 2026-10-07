@@ -263,7 +263,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
   btnCancelComment.addEventListener('click', closeCompose);
   btnConfirmComment.addEventListener('click', confirmCompose);
   composeText.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmCompose();
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); confirmCompose(); }
     if (e.key === 'Escape') closeCompose();
   });
 
