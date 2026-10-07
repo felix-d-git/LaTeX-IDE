@@ -440,15 +440,50 @@ function readFileAsBase64(file) {
   });
 }
 
+// Gleichnamige Datei schon da → Dialog „Überschreiben/Überspringen" (Escape = überspringen).
+// Resolves to { overwrite, all }.
+function askUploadConflict(name, more) {
+  const box = document.getElementById('upload-conflict');
+  const all = document.getElementById('upload-conflict-all');
+  document.getElementById('upload-conflict-name').textContent = name;
+  document.getElementById('upload-conflict-all-row').classList.toggle('hidden', !more);
+  all.checked = false;
+  box.classList.remove('hidden');
+  return new Promise((resolve) => {
+    const done = (overwrite) => {
+      box.classList.add('hidden');
+      for (const [id, fn] of handlers) document.getElementById(id).removeEventListener('click', fn);
+      resolve({ overwrite, all: all.checked });
+    };
+    const handlers = [
+      ['btn-upload-overwrite', () => done(true)],
+      ['btn-upload-skip', () => done(false)],
+      ['btn-upload-conflict-close', () => done(false)],
+    ];
+    for (const [id, fn] of handlers) document.getElementById(id).addEventListener('click', fn);
+  });
+}
+
 async function uploadDroppedFiles(targetDir, entries) {
+  const existing = treeFiles();
+  let decideAll = null; // true/false, sobald „für alle" angehakt wurde
   try {
-    for (const { relPath, file } of entries) {
-      const content = await readFileAsBase64(file);
+    for (let i = 0; i < entries.length; i++) {
+      const { relPath, file } = entries[i];
       const slash = relPath.lastIndexOf('/');
       const subDir = slash === -1 ? '' : relPath.slice(0, slash);
       const name = slash === -1 ? relPath : relPath.slice(slash + 1);
       const dir = targetDir && subDir ? `${targetDir}/${subDir}` : targetDir || subDir;
-      await api.uploadFile(dir, name, content);
+      let overwrite = false;
+      if (existing.has(dir ? `${dir}/${name}` : name)) {
+        if (decideAll === null) {
+          const ans = await askUploadConflict(name, i < entries.length - 1);
+          overwrite = ans.overwrite;
+          if (ans.all) decideAll = ans.overwrite;
+        } else overwrite = decideAll;
+        if (!overwrite) continue;
+      }
+      await api.uploadFile(dir, name, await readFileAsBase64(file), overwrite);
     }
     await loadTree();
   } catch (e) {

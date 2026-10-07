@@ -197,7 +197,7 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     const zName = input('zotero.bib');
     wrap.append(h('Zotero'), field('Dateiname', zName));
     wrap.appendChild(note('Lädt die ganze Bibliothek (Zugang unter Einstellungen ▸ Literatur, Format dort wählbar).'));
-    wrap.appendChild(actionButton('Aus Zotero importieren', () => api.importZotero(targetDir, zName.value.trim(), referencePrefs().format)));
+    wrap.appendChild(actionButton('Aus Zotero importieren / aktualisieren (ersetzt die Datei)', () => api.importZotero(targetDir, zName.value.trim(), referencePrefs().format)));
 
     const bibUrl = input('', 'https://…/literatur.bib');
     wrap.append(h('.bib-Datei'), field('URL', bibUrl));

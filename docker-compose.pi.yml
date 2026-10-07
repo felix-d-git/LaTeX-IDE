@@ -1,7 +1,7 @@
-# LaTeX IDE (Mehrbenutzer) auf dem Pi, öffentlich per Tailscale Funnel
-# unter https://latex.<tailnet>.ts.net. Aufsetzen: siehe deploy-Notiz im Vault.
+# LaTeX IDE (Mehrbenutzer) auf einem kleinen Server (z. B. Raspberry Pi), öffentlich per
+# Tailscale Funnel unter https://latex.<tailnet>.ts.net. TeX Live liegt auf dem Host.
 #   docker compose -f docker-compose.pi.yml up -d --build
-# TeX Live liegt auf der SSD (nicht SD-Karte). Nutzerdaten: nur verschluesselt auf der SSD
+# TeX Live + Daten am besten auf SSD statt SD-Karte. Nutzerdaten: nur verschluesselt auf der SSD
 # (${LATEX_DATA_DIR}/vault), Klartext nur im RAM (tmpfs unter /app/data). Einmal-Migration
 # und Schluessel: siehe README "Verschluesselte Daten".
 services:

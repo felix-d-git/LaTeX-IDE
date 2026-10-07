@@ -248,10 +248,9 @@ Zielmaschine).
 
 ## Bekannte Grenzen (MVP, Stand jetzt)
 
-- SyncTeX (Klick im PDF → Sprung zur Tex-Zeile) ist noch nicht implementiert.
 - Bilddateien werden im Baum angezeigt, aber nicht in einem Bild-Viewer
   geöffnet (nur Text-Dateien sind editierbar).
 - **Google-Login:** bewusst zurückgestellt, bis der Raspberry-Pi-Deploy mit
   Portweiterleitung/echter Domain steht - Google OAuth verlangt eine
   öffentlich erreichbare HTTPS-Redirect-URI, die auf reinem `localhost` nicht
-  funktioniert. Vermerkt für später, siehe STATUS.md.
+  funktioniert.

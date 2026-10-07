@@ -23,8 +23,16 @@ if [ -z "${DATA_DIR:-}" ] && [ -f "$APP_DIR/.env" ]; then
 fi
 DATA_DIR="${DATA_DIR:-./data}"
 case "$DATA_DIR" in /*) ;; *) DATA_DIR="$APP_DIR/${DATA_DIR#./}" ;; esac
+# Encrypted setup (DATA_KEY, docker-compose.pi.yml): only $DATA_DIR/vault is on disk,
+# the plaintext lives in container RAM. Backup = vault only; restoring needs DATA_KEY.
+BACKUP_SRC="$(basename "$DATA_DIR")"
+SRC_PARENT="$(dirname "$DATA_DIR")"
+if [ -d "$DATA_DIR/vault" ]; then
+  BACKUP_SRC=vault
+  SRC_PARENT="$DATA_DIR"
+fi
 # --if-requested: only run when an admin pressed "Jetzt aktualisieren" (file written by the app).
-REQUEST="$DATA_DIR/.update-request"
+REQUEST="$SRC_PARENT/$BACKUP_SRC/.update-request"
 if [ "${1:-}" = "--if-requested" ]; then
   [ -f "$REQUEST" ] || exit 0
   rm -f "$REQUEST"
@@ -46,7 +54,7 @@ echo "$(date -Is) Update $installed -> $tag"
 
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$(basename "$DATA_DIR")/desktop" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
+tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$BACKUP_SRC/desktop" --exclude="$BACKUP_SRC/.update-request" -C "$SRC_PARENT" "$BACKUP_SRC"
 ls -1t "$BACKUP_DIR"/data-*.tar.gz | tail -n +4 | xargs -r rm -f --
 
 # 2. Unpack the release source over APP_DIR.

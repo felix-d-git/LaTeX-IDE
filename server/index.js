@@ -359,7 +359,9 @@ app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin,
 // scripts/server-update.sh on the host; "button" only drops a request file it picks up.
 const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
 const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/latex-web-ide';
-const UPDATE_REQUEST = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
+// Mit Vault ist DATA_DIR tmpfs im Container → Marker in VAULT_DIR, das der Host sieht
+// (vault.js ignoriert dort Dateien, die kein Eintrag sind).
+const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
 const APP_VERSION = require('../package.json').version;
 let releaseCache = { at: 0, version: null, url: null };
 
@@ -796,7 +798,8 @@ app.post('/api/import/url', limitToken, async (req, res) => {
 });
 
 // Literatur: DOI → BibTeX (doi.org Content-Negotiation) und Zotero-Bibliothek als .bib.
-function appendOrUpload(root, dir, name, text) {
+// replace: Zotero-Refresh überschreibt die Datei (wie Overleaf), DOI hängt an.
+function appendOrUpload(root, dir, name, text, replace = false) {
   if (!/\.bib$/i.test(name)) throw new Error('Zieldatei muss auf .bib enden.');
   const rel = path.posix.join(String(dir || ''), name);
   const abs = safeResolve(root, rel);
@@ -804,7 +807,7 @@ function appendOrUpload(root, dir, name, text) {
     // Bestehende .bib ergänzen, auch wenn sie gerade live bearbeitet wird.
     collab.flushRoot(root);
     const relPath = path.relative(root, abs).split(path.sep).join('/');
-    const content = fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
+    const content = replace ? text : fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
     state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
@@ -864,7 +867,7 @@ app.post('/api/import/zotero', limitToken, async (req, res) => {
     }
     const name = String(req.body.name || 'zotero.bib').trim();
     if (!/\.bib$/i.test(name)) return res.status(400).json({ error: 'Dateiname muss auf .bib enden.' });
-    res.json({ path: treeOps.uploadFile(root, req.body.dir, name, Buffer.from(parts.filter(Boolean).join('\n\n') + '\n').toString('base64')) });
+    res.json({ path: appendOrUpload(root, req.body.dir, name, parts.filter(Boolean).join('\n\n') + '\n', true) });
   } catch (e) {
     res.status(400).json({ error: 'Zotero: ' + e.message });
   }
@@ -1296,7 +1299,11 @@ app.post('/api/tree/upload', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
-    const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content);
+    const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
+    // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
+    if (req.body.overwrite && isTextFile(relPath)) {
+      collab.applyExternalText(root, relPath, Buffer.from(req.body.content, 'base64').toString('utf8'));
+    }
     res.json({ ok: true, path: relPath });
   } catch (e) {
     res.status(400).json({ error: e.message });

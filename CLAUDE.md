@@ -1,7 +1,6 @@
 # LaTeX Web IDE — Arbeitsregeln
 
-- Betrieb (ab 25.09.2026, Mehrbenutzer): Server auf dem Pi in `~/container/latex` (Container `latex-collab` + `latex-tailscale`, Funnel `https://latex.example.org`), Deploy per `git archive` → `docker compose -f docker-compose.pi.yml up -d --build` (Build-Arg `TEXLIVE=host`, kein TeX Live im Image). `.env` nur auf dem Pi. Daten `/srv/latex/data`, TeX Live 2025 read-only aus `/srv/latex/texlive` (Pfad im Container `/data/texlive` = Installationspfad, nicht ändern).
-- Alte On-Demand-Installation am 27.09.2026 entfernt; ihre Daten liegen unangetastet in `/srv/latex-alt`. Alter Code auf Branch `legacy-local`.
+- Persönliches (Server, Pfade, Konten) steht in `CLAUDE.local.md` (gitignored).
 - Branches: `master` = Mehrbenutzer-Version (seit 27.09.2026), `multiuser` = Vorab-Stand zum Testen (ab 0.3.0, master folgt nach Freigabe), `legacy-local` = alte Einzelplatz-Version.
 - TeX-Backend per `TEX_BACKEND` (`latexmk` Standard, `tectonic`): tectonic nur in der Desktop-App, `server/index.js` verweigert den Start damit (liest Dateien außerhalb des Projekts). TeX läuft nur als externer Prozess (Lizenz: AGPL-3.0 + bloße Zusammenstellung).
 - Installer bauen: `installer\build-release.ps1`; Inno Setup per `$env:ISCC` (auch portabel), Ausgabe `installer\out\` (gitignored).
@@ -11,11 +10,11 @@
 - Lokale Kopie (Owner-Projekte): Ordner aus `LATEX_IDE_LOCAL` → Config (`localDir`, in den Einstellungen änderbar, verschiebt die Projekte) → `install.json` (vom Installer) → `~/Documents/LatexIDE`. Offline-Erkennung: Health-Ping alle 2 s, danach Circuit-Breaker (Anfragen sofort lokal). Tests immer mit `LATEX_IDE_LOCAL` auf Temp, sonst landet Testzeug in echten Dokumenten.
 - Release: Version **nur** in `package.json` hochzählen + committen/pushen, dann GitHub-Release `vX.Y.Z` veröffentlichen → `.github/workflows/release.yml` baut `LatexIDE-Setup.exe` + `LatexIDE-macOS.zip` und hängt sie an (bricht ab, wenn Tag ≠ `package.json`). `LatexIDE.iss` bekommt die Version per `/DMyAppVersion`.
 - Auto-Update Desktop (Windows + macOS, Popup): fragt den eigenen Server (`/api/desktop/release`, Download mit Desktop-Token) → App-Version folgt immer der Server-Version. Kein Token in den Paketen.
-- Server-Update: Admin-Banner im Web-UI, Verhalten per `UPDATE_MODE` (`off`/`notify`/`button`/`auto`), Token für den Check `UPDATE_TOKEN` in `.env`. Installation immer durch `scripts/server-update.sh` auf dem Host (Backup, 3 behalten); `button` = App legt `DATA_DIR/.update-request` ab, Cron mit `--if-requested`. Skript nimmt `docker-compose.yml`, auf dem Pi `COMPOSE=docker-compose.pi.yml` in `.update.env`. Auf dem Pi noch nicht eingerichtet; nicht ohne Freigabe auf dem Pi ausführen.
-- Verschlüsselung at-rest (ab 05.10.2026 auf dem Pi): mit `DATA_KEY` + `VAULT_DIR` liegen Nutzerdaten nur verschlüsselt in `VAULT_DIR` (Pi: `/srv/latex/data/vault`), `DATA_DIR` ist tmpfs im Container (`/app/data`, `LATEX_TMPFS`, zählt zu `mem_limit`). Start entschlüsselt alles, falscher Schlüssel = Abbruch. `DATA_KEY` steht nur in der Pi-`.env` → ohne ihn sind Daten + Backups des Vaults unlesbar. Migration/CLI: `node server/lib/vault.js encrypt|keygen`.
+- Server-Update: Admin-Banner im Web-UI, Verhalten per `UPDATE_MODE` (`off`/`notify`/`button`/`auto`), Token für den Check `UPDATE_TOKEN` in `.env`. Installation immer durch `scripts/server-update.sh` auf dem Host (Backup, 3 behalten); `button` = App legt `.update-request` ab (in `VAULT_DIR`, wenn verschlüsselt, sonst `DATA_DIR`; Backup dann nur `vault/`), Cron mit `--if-requested`. Skript nimmt `docker-compose.yml`, auf dem Pi `COMPOSE=docker-compose.pi.yml` in `.update.env`.
+- Verschlüsselung at-rest (ab 05.10.2026 auf dem Pi): mit `DATA_KEY` + `VAULT_DIR` liegen Nutzerdaten nur verschlüsselt in `VAULT_DIR`, `DATA_DIR` ist tmpfs im Container (`/app/data`, `LATEX_TMPFS`, zählt zu `mem_limit`). Start entschlüsselt alles, falscher Schlüssel = Abbruch. `DATA_KEY` steht nur in der Server-`.env` → ohne ihn sind Daten + Backups des Vaults unlesbar. Migration/CLI: `node server/lib/vault.js encrypt|keygen`.
 - MCP: `POST /mcp` mit Bearer-Token (`lmcp_`, Einzelrechte read/comment/edit/create/delete/move/compile, pro Projekt einstellbar, in Einstellungen → MCP erzeugt/änderbar; compile standardmäßig aus; Reviewer im Projekt bekommen höchstens read+comment; Doku `docs/MCP.md`).
 - Datenpfad per `DATA_DIR` (auth-data.json, .sessions, .session-secret, workspace.json, projects/, desktop/, mail-outbox.log); ohne = Repo-Wurzel. `SESSION_SECRET` optional, sonst einmalig erzeugt in `.session-secret`.
-- Git-Remote: `origin` = https://github.com/felix-d-git/latex-web-ide (privat), Push/Releases nur auf Anweisung; Releases als Tag `vX.Y.Z` + GitHub-Release. Seit 25.09.2026 global nur noch `felix-d-git` (Credential Manager + `user.email` = GitHub-noreply-Adresse); das alte Konto `altes-konto` wird nicht mehr genutzt.
+- Git-Remote: `origin` = https://github.com/felix-d-git/latex-web-ide (privat), Push/Releases nur auf Anweisung; Releases als Tag `vX.Y.Z` + GitHub-Release.
 - Nie committen/pushen: `projects/` (private Arbeiten), `.env`, `auth-data.json`, `workspace.json` (alle in `.gitignore`).
 - Start: `start.bat` (baut `client/dist` per `node build.js`, dann `node server/index.js`) → http://localhost:3077. Port per `PORT`-Env änderbar.
 - Nach Änderungen in `client/src/` immer `node build.js`, sonst liefert der Server den alten Bundle aus.
@@ -30,7 +29,6 @@
 - Farben in Agent-Screenshots wirken aufgehellt → Farbtreue nur per Pixel-Sampling (PIL) beurteilen.
 
 ## graphify
-- Binary liegt nicht im PATH: `<lokaler Pfad>`
 - `graphify query "<Begriff>"` sucht über Datei-/Funktionsnamen (keine DOM-IDs/Strings) → nach Modulnamen fragen, z. B. „menu bar" statt „home button".
 - Git-Hook aktualisiert `graphify-out/` nach jedem Commit; manuell: `graphify update .`
 - Nie `graphify install`/`graphify claude install` ausführen: schreibt nach `~\.claude` statt `CLAUDE_CONFIG_DIR`.

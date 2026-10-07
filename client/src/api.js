@@ -121,7 +121,8 @@ export const api = {
     return data;
   },
   deletePath: (relPath) => req('DELETE', `/api/tree?path=${encodeURIComponent(relPath)}`),
-  uploadFile: (dir, name, contentBase64) => req('POST', '/api/tree/upload', { dir, name, content: contentBase64 }),
+  uploadFile: (dir, name, contentBase64, overwrite = false) =>
+    req('POST', '/api/tree/upload', { dir, name, content: contentBase64, overwrite }),
   collabEpoch: (relPath) => req('GET', `/api/collab/epoch?path=${encodeURIComponent(relPath)}`),
   compile: (overrides) => req('POST', '/api/compile', overrides ? { overrides } : undefined),
   clearCache: () => req('POST', '/api/compile/clear-cache'),

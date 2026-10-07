@@ -93,12 +93,14 @@ function deletePath(root, relPath) {
 }
 
 // Used both by drag&drop upload from the OS and by (future) file-picker upload.
-// contentBase64 is the raw file bytes, base64-encoded client-side.
-function uploadFile(root, relDir, name, contentBase64) {
+// contentBase64 is the raw file bytes, base64-encoded client-side. overwrite:
+// replace a same-named file (user chose so in the conflict dialog), else "_2".
+function uploadFile(root, relDir, name, contentBase64, overwrite = false) {
   const dirAbs = safeResolve(root, relDir || '');
   fs.mkdirSync(dirAbs, { recursive: true });
   const safeName = assertValidName(name);
-  const dest = uniqueDest(dirAbs, safeName);
+  const exact = path.join(dirAbs, safeName);
+  const dest = overwrite && !(fs.existsSync(exact) && fs.statSync(exact).isDirectory()) ? exact : uniqueDest(dirAbs, safeName);
   fs.writeFileSync(dest, Buffer.from(contentBase64, 'base64'));
   return toRel(root, dest);
 }

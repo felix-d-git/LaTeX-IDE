@@ -658,6 +658,26 @@
         </div>
       </div>
     </div>
+
+    <div id="upload-conflict" class="hidden">
+      <div class="modal-backdrop"></div>
+      <div class="dialog-box" style="max-width:500px">
+        <div class="dialog-header">
+          <h3>Datei existiert bereits</h3>
+          <button id="btn-upload-conflict-close" class="dialog-close" title="Schließen">
+            <svg class="ol-icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="dialog-body-pad">
+          <p>„<span id="upload-conflict-name"></span>" gibt es in diesem Ordner schon. Hochgeladene Datei überschreiben oder überspringen?</p>
+          <label id="upload-conflict-all-row"><input type="checkbox" id="upload-conflict-all" /> Für alle weiteren Konflikte übernehmen</label>
+          <div class="dialog-buttons">
+            <button class="btn-secondary" id="btn-upload-skip">Überspringen</button>
+            <button id="btn-upload-overwrite" class="primary">Überschreiben</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/dist/bundle.js"></script>

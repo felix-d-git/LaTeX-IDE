@@ -38,3 +38,11 @@ workspace.json.tmp
 !.env.example
 vault/
 .claude/worktrees/
+
+# Persönliche Notizen/Entwickler-Notizen (nur lokal)
+CLAUDE.local.md
+STATUS.md
+NotebookLM-Grundlagen.md
+OVERLEAF_UI_SPEC_PROMPT.md
+AUTOCOMPLETE_PLAN.md
+ui-measure.js
