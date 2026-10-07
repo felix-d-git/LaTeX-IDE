@@ -44,6 +44,20 @@ function buildTree(root, relDir = '') {
   return nodes;
 }
 
+// Startdatei beim Öffnen: flachste main.tex, sonst die erste .tex (Wurzel zuerst, dann Baum-Reihenfolge).
+function pickStartFile(root) {
+  let level = buildTree(root);
+  let first = null;
+  while (level.length) {
+    const tex = level.filter((n) => n.type === 'file' && n.name.toLowerCase().endsWith('.tex'));
+    const main = tex.find((n) => n.name === 'main.tex');
+    if (main) return main.path;
+    if (!first && tex.length) first = tex[0].path;
+    level = level.flatMap((n) => n.children || []);
+  }
+  return first;
+}
+
 const TEXT_EXTENSIONS = new Set(['.tex', '.bib', '.sty', '.bst', '.cls', '.txt', '.md', '.cfg']);
 
 function isTextFile(relPath) {
@@ -59,4 +73,4 @@ function safeResolve(root, relPath) {
   return abs;
 }
 
-module.exports = { buildTree, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve };
+module.exports = { buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve };

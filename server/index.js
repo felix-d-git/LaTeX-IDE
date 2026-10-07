@@ -12,7 +12,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { buildTree, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
+const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -927,8 +927,8 @@ app.post('/api/projects/open', (req, res) => {
   if (previousRoot !== root) ensureWatcher(root);
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (main) state.setMainFile(root, main);
-  // Startdatei beim Öffnen: main.tex, sonst die Hauptdatei, sonst erste .tex im Wurzelordner.
-  const startFile = fs.existsSync(path.join(root, 'main.tex')) ? 'main.tex' : main;
+  // Startdatei beim Öffnen: flachste main.tex, sonst erste .tex (nicht die gespeicherte Hauptdatei).
+  const startFile = pickStartFile(root);
   res.json({ activeRoot: root, mainFile: main, startFile, projectId: projectIdOf(root), role: roleOf(req.user, root) });
 });
 

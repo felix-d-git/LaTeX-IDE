@@ -11,10 +11,10 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const httpProxy = require('http-proxy');
-const { compile, OUT_DIR } = require('./lib/compile');
+const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
-const { buildTree, isTextFile } = require('./lib/fsTree');
+const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir } = require('./lib/localSync');
 const os = require('os');
 const { spawn, execFileSync } = require('child_process');
@@ -119,7 +119,10 @@ const wsSockets = new Set(); // proxied browser sockets - dropped when we go off
 function setOnline(v) {
   if (v === online) return;
   online = v;
-  if (v) setImmediate(syncAll); // back online: merge the offline copy
+  if (v) {
+    setImmediate(syncAll); // back online: merge the offline copy
+    setImmediate(reopenOnServer);
+  }
   else for (const s of wsSockets) s.destroy();
 }
 
@@ -372,6 +375,19 @@ function syncAll() {
   })();
   return syncing;
 }
+// Editor/server traffic on /ws and /yjs (own typing, other users, web) = something changed:
+// pull the open owned project into the local copy shortly after the last message.
+let syncTimer = null;
+function scheduleSync() {
+  const own = online && !moving && current && current.owned && ownedEntry(current.projectId);
+  if (!own) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncOwned(own).catch((e) => {
+      if (!(e instanceof Offline)) console.error(`Sync ${own.name}: ${e.message}`);
+    });
+  }, 2000);
+}
 fs.mkdirSync(SYNC_DIR, { recursive: true });
 setInterval(syncAll, 60 * 1000);
 setTimeout(syncAll, 2000);
@@ -534,6 +550,52 @@ app.get('/api/synctex/inverse', async (req, res) => {
 
 // --- offline: tree/files of the own project straight from the local copy ---
 
+// Project opened from the offline copy: after reconnecting the server must switch to it too,
+// or the client would load the project that was active before.
+let offlineOpened = null;
+async function reopenOnServer() {
+  const name = offlineOpened;
+  offlineOpened = null;
+  const cached = name && readJson(cacheFile('/api/projects/list'), null);
+  const root = cached && (JSON.parse(cached.body).localProjects || []).find((p) => p.name === name)?.root;
+  if (root) await remote('/api/projects/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root }) }).catch(() => {});
+}
+
+// Offline dashboard: all owned projects from the local copy (shared ones stay as cached, but can't be opened).
+function serveOfflineProjects(req, res) {
+  const route = req.baseUrl + req.path;
+  if (online || !owned.length || !['/api/projects/list', '/api/projects/open'].includes(route)) return false;
+  const have = owned.filter((p) => fs.existsSync(localDirOf(p)));
+  res.setHeader('X-Offline', '1');
+  if (req.method === 'GET' && route === '/api/projects/list') {
+    const cached = readJson(cacheFile(req.originalUrl), null);
+    const base = cached ? JSON.parse(cached.body) : { labels: { labels: [], assign: {} }, labelColors: [] };
+    res.json({
+      ...base,
+      activeRoot: current && current.owned ? current.dir : null,
+      localProjects: have.map((p) => ({ name: p.name, root: localDirOf(p), lastModified: fs.statSync(localDirOf(p)).mtimeMs })),
+    });
+    return true;
+  }
+  if (req.method !== 'POST' || route !== '/api/projects/open') return false;
+  let root = '';
+  try {
+    root = path.resolve(JSON.parse(req.body.toString('utf8')).root);
+  } catch {}
+  const p = have.find((x) => path.resolve(localDirOf(x)) === root);
+  if (!p) {
+    res.status(503).json({ error: 'Offline: Geteilte Projekte lassen sich nur mit Verbindung zum Server öffnen.', offline: true });
+    return true;
+  }
+  const dir = localDirOf(p);
+  const mainFile = findMainCandidate(dir);
+  current = { projectId: p.projectId, dir, mainFile, settings: {}, owned: true };
+  writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+  offlineOpened = p.name;
+  res.json({ activeRoot: dir, mainFile, startFile: pickStartFile(dir), projectId: p.projectId, role: 'owner' });
+  return true;
+}
+
 function offlineCopy() {
   return !online && current && current.owned && fs.existsSync(current.dir) ? current : null;
 }
@@ -542,6 +604,7 @@ const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
 
 // Answers from the offline copy; false = not applicable (other route/project).
 function serveLocal(req, res) {
+  if (serveOfflineProjects(req, res)) return true;
   const c = offlineCopy();
   if (!c || req.method !== 'GET' || !LOCAL_GETS.has(req.baseUrl + req.path)) return false;
   res.setHeader('X-Offline', '1');
@@ -627,6 +690,7 @@ app.use('/katex', express.static(path.join(__dirname, '..', 'node_modules', 'kat
 
 const server = http.createServer(app);
 const proxy = httpProxy.createProxyServer({ target: REMOTE, changeOrigin: true, ws: true, secure: true });
+proxy.on('open', (proxySocket) => proxySocket.on('data', scheduleSync));
 proxy.on('error', (err, req, socket) => {
   if (socket && socket.destroy) socket.destroy(); // client reconnects on its own
 });
@@ -641,6 +705,7 @@ server.on('upgrade', (req, socket, head) => {
   socket.on('close', () => wsSockets.delete(socket));
   delete req.headers.cookie;
   proxy.ws(req, socket, head, { headers: { authorization: `Bearer ${config.token}`, origin: new URL(REMOTE).origin } });
+  socket.on('data', scheduleSync);
 });
 
 server.listen(PORT, '127.0.0.1', () => {
