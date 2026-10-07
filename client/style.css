@@ -360,6 +360,7 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
   cursor: pointer; white-space: nowrap;
 }
 .tree-row:hover{ background: var(--ol-hover); }
+.tree-row.selected{ background: var(--ol-pressed); box-shadow: inset 3px 0 0 var(--ol-primary); }
 .tree-row.active{ background: var(--ol-accent-bg); color: var(--ol-accent-fg); font-weight: 700; }
 .tree-row.drop-target{ outline: 2px dashed var(--ol-primary); outline-offset: -2px; background: var(--ol-accent-bg); }
 .tree-entity-details{ display: flex; align-items: center; padding: 4px; overflow: hidden; min-width: 0; }

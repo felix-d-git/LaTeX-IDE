@@ -1,9 +1,32 @@
 import { openDropdownAt } from './dropdown.js';
 
+// Mehrfachauswahl (Strg/Cmd+Klick): bleibt über Neu-Rendern erhalten, bis ein
+// normaler Klick sie aufhebt oder das Löschen durch ist.
+const selected = new Set();
+
+function clearSelection(container) {
+  selected.clear();
+  container.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
+}
+
+// Ist ein Ordner und ein Kind darin gewählt, reicht der Ordner.
+function selectedRoots() {
+  return [...selected].filter((p) => ![...selected].some((q) => q !== p && p.startsWith(q + '/')));
+}
+
+async function deleteSelected(container, ctx) {
+  if (selected.size && ctx.onDeleteMany && (await ctx.onDeleteMany(selectedRoots()))) clearSelection(container);
+}
+
 export function renderTree(container, tree, ctx) {
   container.innerHTML = '';
-  container.appendChild(renderNodes(tree, ctx));
+  container.appendChild(renderNodes(tree, ctx, container));
   setupRootDrop(container, ctx);
+  if (!ctx.onDeleteMany) return;
+  container.tabIndex = -1; // damit die Entf-Taste hier ankommt
+  container.onkeydown = (e) => {
+    if (e.key === 'Delete' && selected.size) { e.preventDefault(); deleteSelected(container, ctx); }
+  };
 }
 
 function dirnameOf(relPath) {
@@ -23,7 +46,7 @@ function joinPath(dir, name) {
 // R4: Zeilenhöhe 28, Pitch 32 (4px margin-bottom), Icon 20px + 4px Abstand,
 // 32px rechts dauerhaft für den ⋮-Button freigehalten, damit der Name beim
 // Auswählen nicht springt.
-function renderNodes(nodes, ctx) {
+function renderNodes(nodes, ctx, container) {
   const wrap = document.createElement('div');
   for (const node of nodes) {
     const el = document.createElement('div');
@@ -33,6 +56,17 @@ function renderNodes(nodes, ctx) {
     row.className = 'tree-row';
     if (node.path === ctx.activePath) row.classList.add('active');
     if (node.path === ctx.mainFile) row.classList.add('main-file');
+    if (ctx.onDeleteMany) {
+      if (selected.has(node.path)) row.classList.add('selected');
+      // zuerst registriert: Strg/Cmd+Klick wählt nur aus, alles andere hebt die Auswahl auf
+      row.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.stopImmediatePropagation();
+          if (selected.delete(node.path)) row.classList.remove('selected');
+          else { selected.add(node.path); row.classList.add('selected'); }
+        } else if (selected.size) clearSelection(container);
+      });
+    }
 
     const details = document.createElement('div');
     details.className = 'tree-entity-details';
@@ -57,13 +91,13 @@ function renderNodes(nodes, ctx) {
     menuBtn.onclick = (e) => {
       e.stopPropagation();
       const rect = menuBtn.getBoundingClientRect();
-      openNodeMenu(rect.left, rect.bottom, node, ctx);
+      openNodeMenu(rect.left, rect.bottom, node, ctx, container);
     };
     row.appendChild(menuBtn);
     row.oncontextmenu = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openNodeMenu(e.clientX, e.clientY + 18, node, ctx);
+      openNodeMenu(e.clientX, e.clientY + 18, node, ctx, container);
     };
 
     // historyView.js reuses this renderer for its read-only snapshot tree
@@ -83,7 +117,7 @@ function renderNodes(nodes, ctx) {
     if (node.type === 'dir') {
       const childrenWrap = document.createElement('div');
       childrenWrap.className = 'tree-children';
-      childrenWrap.appendChild(renderNodes(node.children, ctx));
+      childrenWrap.appendChild(renderNodes(node.children, ctx, container));
       let expanded = true;
       row.addEventListener('click', () => {
         expanded = !expanded;
@@ -118,7 +152,7 @@ function fileIcon(name) {
 
 // --- Kontextmenü (R4: min-width 160 statt der 240 der Toolbar-Menüs) ---
 
-function openNodeMenu(x, y, node, ctx) {
+function openNodeMenu(x, y, node, ctx, container) {
   const isDir = node.type === 'dir';
   const items = [];
   if (ctx.onRename) items.push({ label: 'Rename', onClick: () => ctx.onRename(node.path, isDir, node.name) });
@@ -139,7 +173,11 @@ function openNodeMenu(x, y, node, ctx) {
   }
   if (ctx.onDelete) {
     items.push({ type: 'divider' });
-    items.push({ label: 'Delete', icon: 'close', onClick: () => ctx.onDelete(node.path, isDir) });
+    if (ctx.onDeleteMany && selected.size > 1 && selected.has(node.path)) {
+      items.push({ label: `Delete ${selected.size} items`, icon: 'close', onClick: () => deleteSelected(container, ctx) });
+    } else {
+      items.push({ label: 'Delete', icon: 'close', onClick: () => ctx.onDelete(node.path, isDir) });
+    }
   }
   if (ctx.onCreateFile) {
     // Bei Dateien (wie Overleaf) im Elternordner anlegen.
