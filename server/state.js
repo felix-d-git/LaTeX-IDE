@@ -28,6 +28,7 @@ if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
 if (!workspace.rolesByRoot) workspace.rolesByRoot = {}; // root -> { userId: 'reviewer' }, absent = editor
 if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { editor?: link, reviewer?: link }, siehe getShareLinks
 if (!workspace.labelsByUser) workspace.labelsByUser = {};
+if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root -> [{ ms, at, estimateMs? }], letzte 10 Läufe
 
 // One-time migration: pre-auth workspace.json had a single global
 // activeRoot/recentRoots (single-user tool). Once the admin account exists,
@@ -68,6 +69,16 @@ function setMainFile(root, relPath) {
 
 function getMainFile(root) {
   return workspace.mainFileByRoot[root] || null;
+}
+
+// Dauer jedes Compile-Laufs (Web + MCP): Basis der Schätzung und des Vergleichs Schätzung/Ist.
+function addCompileTime(root, entry) {
+  workspace.compileTimesByRoot[root] = [...(workspace.compileTimesByRoot[root] || []), entry].slice(-10);
+  saveWorkspace(workspace);
+}
+
+function getCompileTimes(root) {
+  return workspace.compileTimesByRoot[root] || [];
 }
 
 const DEFAULT_PROJECT_SETTINGS = { compiler: 'pdflatex', stopOnFirstError: false, autocompile: false };
@@ -149,7 +160,7 @@ function sharedRootsFor(userId) {
 
 // Project renamed: carry its per-root settings/main file/shares over.
 function moveRoot(oldRoot, newRoot) {
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot']) {
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot']) {
     if (workspace[k][oldRoot] === undefined) continue;
     workspace[k][newRoot] = workspace[k][oldRoot];
     delete workspace[k][oldRoot];
@@ -164,7 +175,7 @@ function purgeUser(userId, ownDir) {
   delete workspace.recentRootsByUser[userId];
   delete workspace.labelsByUser[userId];
   const own = (r) => r === ownDir || r.startsWith(ownDir + require('path').sep);
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot']) {
+  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot']) {
     for (const r of Object.keys(workspace[k])) if (own(r)) delete workspace[k][r];
   }
   for (const m of Object.values(workspace.rolesByRoot)) delete m[userId];
@@ -249,6 +260,8 @@ module.exports = {
   getMainFile,
   getProjectSettings,
   setProjectSettings,
+  addCompileTime,
+  getCompileTimes,
   selfWrittenHashes,
   getShares,
   setShares,

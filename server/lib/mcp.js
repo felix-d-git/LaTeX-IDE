@@ -1,29 +1,27 @@
 // MCP server (Model Context Protocol, Streamable HTTP, stateless, JSON replies) so external
 // AI tools (Claude Desktop/Code, Cursor) can work on projects with a per-user token.
 // JSON-RPC 2.0 by hand - the handful of methods needed don't justify the SDK.
-// Token level: read < review (comments + suggestions) < edit (changes the text).
-// Access to a project is always bounded by the user's own access (owner/admin/shared member).
+// Token rights (single switches): read, comment, edit, create, delete, move, compile - for all projects or per selected project.
+// Access to a project is always bounded by the user's own access (owner/admin/shared member); reviewers get at most read+comment.
 const fs = require('fs');
 const path = require('path');
 const auth = require('./auth');
 const collab = require('./collab');
 const comments = require('./comments');
-const projects = require('./projects');
 const treeOps = require('./treeOps');
 const { buildTree, isTextFile, safeResolve, isIgnored } = require('./fsTree');
 const { searchProject } = require('./search');
 const { findMainCandidate } = require('./compile');
 
 const MAX_LINES = 400;
-const LEVEL_RANK = { read: 0, review: 1, edit: 2 };
 const SECTION_RE = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*(?:\[[^\]]*\])?\s*\{([^}]*)/;
 
 const S = (type, description, extra) => ({ type, description, ...extra });
-const PROJECT = S('string', 'Projekt-ID aus list_projects (bei projektgebundenem Token optional)');
+const PROJECT = S('string', 'Projekt-ID aus list_projects (bei Token für genau ein Projekt optional)');
 const FILE = S('string', 'Dateipfad relativ zum Projekt, z. B. "chapters/intro.tex"');
-const tool = (name, level, description, properties, required, run) => ({
+const tool = (name, perm, description, properties, required, run) => ({
   name,
-  level,
+  perm,
   description,
   inputSchema: { type: 'object', properties: { project: PROJECT, ...properties }, required },
   run,
@@ -32,11 +30,17 @@ const tool = (name, level, description, properties, required, run) => ({
 const lineOf = (text, idx) => text.slice(0, idx).split('\n').length;
 const cap = (s, n = 200) => (s.length > n ? s.slice(0, n) + '…' : s);
 
-// Only whole text files inside the project, never the IDE's own bookkeeping.
-function textPath(root, rel) {
+// Any path inside the project (traversal blocked), never the IDE's own bookkeeping.
+function anyPath(root, rel) {
   if (typeof rel !== 'string' || !rel) throw new Error('path fehlt.');
   safeResolve(root, rel);
   if (rel.split(/[\\/]/).some((seg) => isIgnored(seg) || seg.startsWith('.latex-ide'))) throw new Error('Pfad nicht erlaubt.');
+  return rel.replace(/\\/g, '/');
+}
+
+// Only whole text files.
+function textPath(root, rel) {
+  anyPath(root, rel);
   if (!isTextFile(rel)) throw new Error('Keine Textdatei (.tex, .bib, .sty, .cls, .bst, .txt, .md, .cfg).');
   return rel.replace(/\\/g, '/');
 }
@@ -73,25 +77,52 @@ function summarize(result) {
 
 function createMcp(ctx) {
   const lastCompile = new Map(); // root -> compact text of the last compile
+  const jobs = new Map(); // root -> compile job (one at a time per project)
 
-  // Token's project binding + the user's own access, both enforced per call.
+  const secs = (ms) => `${Math.round(ms / 1000)} s`;
+
+  // Mean of the last 5 stored durations; without history rough guess from project size.
+  function estimate(root) {
+    const times = ctx.state.getCompileTimes(root).slice(-5);
+    if (times.length) return { ms: Math.round(times.reduce((n, t) => n + t.ms, 0) / times.length), basis: `Mittel der letzten ${times.length} Läufe` };
+    const bytes = flatten(buildTree(root)).reduce((n, f) => n + fs.statSync(path.join(root, f)).size, 0);
+    return { ms: Math.min(600000, Math.max(10000, 10000 + bytes / 100)), basis: 'Schätzung aus Projektgröße, noch keine Laufzeiten gespeichert' };
+  }
+
+  function jobStatus(job) {
+    if (!job.done) {
+      const elapsed = Date.now() - job.startedAt;
+      return `Läuft: ${Math.min(99, Math.floor((100 * elapsed) / job.estimateMs))} % (${secs(elapsed)} von geschätzt ${secs(job.estimateMs)}, ${job.basis}).`;
+    }
+    const total = job.actualMs !== undefined ? job.actualMs : job.endedAt - job.startedAt;
+    const diff = total - job.estimateMs;
+    const dev = `Dauer ${secs(total)}, geschätzt ${secs(job.estimateMs)}, Abweichung ${diff >= 0 ? '+' : '-'}${secs(Math.abs(diff))} (${diff >= 0 ? '+' : '-'}${Math.round((100 * Math.abs(diff)) / job.estimateMs)} %).`;
+    return `Fertig (100 %). ${dev}\n${job.text}`;
+  }
+
+  // Token's project scope + the user's own access, both enforced per call.
   function resolveRoot(a, args) {
-    const id = args.project || a.project;
+    const ids = a.projects ? Object.keys(a.projects) : [];
+    const id = args.project || (ids.length === 1 ? ids[0] : '');
     if (!id) throw new Error('project fehlt (siehe list_projects).');
-    if (a.project && a.project !== id) throw new Error('Dieser Token ist auf ein anderes Projekt beschränkt.');
     const root = path.resolve(ctx.PROJECTS_DIR, String(id));
     const inside = root.startsWith(path.resolve(ctx.PROJECTS_DIR) + path.sep);
-    if (!inside || !fs.existsSync(root) || !fs.statSync(root).isDirectory() || !ctx.canAccessRoot(a.user, root)) throw new Error('Projekt nicht gefunden.');
+    if ((a.projects && !a.projects[id]) || !inside || !fs.existsSync(root) || !fs.statSync(root).isDirectory() || !ctx.canAccessRoot(a.user, root)) throw new Error('Projekt nicht gefunden.');
     return root;
   }
 
+  // Rights of the token in one project, capped by the user's role there.
+  function permsAt(a, root) {
+    const list = (a.projects ? a.projects[ctx.projectIdOf(root)] : a.perms) || [];
+    return ctx.roleOf(a.user, root) === 'reviewer' ? list.filter((p) => p === 'read' || p === 'comment') : list;
+  }
+
+  const anyPerms = (a) => new Set(a.projects ? Object.values(a.projects).flat() : a.perms);
+
   const TOOLS = [
-    tool('list_projects', 'read', 'Projekte, auf die dieser Token Zugriff hat (Projekt-ID für die anderen Werkzeuge).', {}, [], async (a) => {
-      const own = projects.listProjects(ctx.userProjectsDir(a.user)).filter((p) => !(a.user.isAdmin && p.name === 'users'));
-      const shared = ctx.state.sharedRootsFor(a.user.id).filter((r) => fs.existsSync(r));
-      const roots = [...own.map((p) => p.root), ...shared].map((r) => ({ id: ctx.projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
-      const list = roots.filter((p) => !a.project || p.id === a.project);
-      return list.length ? list.map((p) => `${p.id}  (${p.name}${p.shared ? ', geteilt' : ''})`).join('\n') : 'Keine Projekte.';
+    tool('list_projects', null, 'Projekte, auf die dieser Token Zugriff hat, mit den Rechten des Tokens dort (Projekt-ID für die anderen Werkzeuge).', {}, [], async (a) => {
+      const list = ctx.mcpProjects(a.user).map((p) => ({ ...p, perms: permsAt(a, path.join(ctx.PROJECTS_DIR, p.id)) })).filter((p) => p.perms.length);
+      return list.length ? list.map((p) => `${p.id}  (${p.name}${p.shared ? ', geteilt' : ''})  Rechte: ${p.perms.join(', ')}`).join('\n') : 'Keine Projekte.';
     }),
 
     tool('project_tree', 'read', 'Dateien des Projekts mit Größe und Zeilenzahl (nur Pfade, kein Inhalt).', {}, [], async (a, args) => {
@@ -154,20 +185,43 @@ function createMcp(ctx) {
       }
     ),
 
-    tool('compile', 'read', 'Projekt kompilieren (Hauptdatei) und Fehler/Warnungen kompakt zurückgeben. Kann bis zu einigen Minuten dauern.', {}, [], async (a, args) => {
-      const root = resolveRoot(a, args);
-      const main = ctx.state.getMainFile(root) || findMainCandidate(root);
-      if (!main) throw new Error('Keine .tex-Hauptdatei gefunden.');
-      const text = summarize(await ctx.runCompile(root, main, a.user.id));
-      lastCompile.set(root, text);
-      return text;
+    tool(
+      'compile',
+      'compile',
+      'Projekt kompilieren (Hauptdatei). Startet den Lauf im Hintergrund und antwortet sofort mit geschätzter Dauer; Fortschritt/Ergebnis (Fehler/Warnungen) mit compile_status abfragen. ACHTUNG: Kompilieren dauert lange und belastet den Server stark - nur selten kompilieren (z. B. einmal nach einer Reihe von Änderungen), nicht nach jeder Kleinigkeit und nicht in kurzen Abständen nachfragen.',
+      {},
+      [],
+      async (a, args) => {
+        const root = resolveRoot(a, args);
+        const running = jobs.get(root);
+        if (running && !running.done) return 'Es läuft bereits ein Lauf für dieses Projekt.\n' + jobStatus(running);
+        const main = ctx.state.getMainFile(root) || findMainCandidate(root);
+        if (!main) throw new Error('Keine .tex-Hauptdatei gefunden.');
+        const est = estimate(root);
+        const job = { startedAt: Date.now(), estimateMs: est.ms, basis: est.basis, done: false };
+        jobs.set(root, job);
+        ctx.runCompile(root, main, a.user.id, { estimateMs: est.ms, via: 'mcp' }).then(
+          (result) => Object.assign(job, { result, text: summarize(result), actualMs: result.durationMs }),
+          (e) => Object.assign(job, { text: `Kompilierung abgebrochen: ${e.message}` })
+        ).finally(() => {
+          job.done = true;
+          job.endedAt = Date.now();
+          if (job.text) lastCompile.set(root, job.text);
+        });
+        return `Kompilierung gestartet (läuft im Hintergrund, evtl. erst nach wartenden Läufen anderer). Geschätzte Dauer: ${secs(est.ms)} (${est.basis}). Ergebnis mit compile_status abrufen.`;
+      }
+    ),
+
+    tool('compile_status', 'compile', 'Fortschritt (in %, bis zum Ende höchstens 99 %) bzw. Ergebnis des letzten compile-Laufs inkl. Abweichung von der Schätzung.', {}, [], async (a, args) => {
+      const job = jobs.get(resolveRoot(a, args));
+      return job ? jobStatus(job) : 'Kein Compile-Job für dieses Projekt - zuerst compile aufrufen.';
     }),
 
     tool('get_errors', 'read', 'Fehler/Warnungen des letzten compile-Laufs erneut abrufen.', {}, [], async (a, args) => lastCompile.get(resolveRoot(a, args)) || 'Noch nicht kompiliert - zuerst compile aufrufen.'),
 
     tool(
       'add_comment',
-      'review',
+      'comment',
       'Kommentar an einer Zeile oder Textstelle hinzufügen (erscheint im Kommentar-Panel der IDE).',
       { path: FILE, line: S('integer', 'Zeile (1-basiert)'), quote: S('string', 'Alternativ: exakte Textstelle (muss einmal vorkommen)'), text: S('string', 'Kommentartext') },
       ['path', 'text'],
@@ -195,7 +249,7 @@ function createMcp(ctx) {
 
     tool(
       'suggest_change',
-      'review',
+      'comment',
       'Änderung vorschlagen: erscheint im Kommentar-Panel der IDE mit Annehmen/Ablehnen, der Text bleibt bis dahin unverändert.',
       { path: FILE, old_text: S('string', 'Zu ersetzender Text (exakt, genau einmal vorhanden)'), new_text: S('string', 'Neuer Text'), reason: S('string', 'Optionale Begründung') },
       ['path', 'old_text', 'new_text'],
@@ -242,22 +296,73 @@ function createMcp(ctx) {
       }
     ),
 
-    tool('create_file', 'edit', 'Neue Textdatei anlegen (Ordner werden bei Bedarf erstellt).', { path: FILE, content: S('string', 'Inhalt (Standard leer)') }, ['path'], async (a, args) => {
+    tool(
+      'create_file',
+      'create',
+      'Datei anlegen/hochladen (Ordner werden bei Bedarf erstellt, bestehende Dateien werden nicht überschrieben). Text: content als Klartext; Binärdatei (Bild, PDF …): encoding "base64".',
+      { path: FILE, content: S('string', 'Inhalt (Standard leer)'), encoding: S('string', '"utf8" (Standard) oder "base64" für Binärdateien') },
+      ['path'],
+      async (a, args) => {
+        const root = resolveRoot(a, args);
+        const rel = anyPath(root, args.path);
+        if (args.encoding === 'base64') {
+          const abs = safeResolve(root, rel);
+          if (fs.existsSync(abs)) throw new Error('Datei existiert bereits.');
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, Buffer.from(String(args.content || ''), 'base64'));
+          return `${rel} hochgeladen (${fs.statSync(abs).size} B).`;
+        }
+        if (args.encoding && args.encoding !== 'utf8') throw new Error('encoding: "utf8" oder "base64".');
+        textPath(root, rel);
+        treeOps.createFile(root, rel);
+        if (args.content) collab.editText(root, rel, () => String(args.content));
+        return `${rel} angelegt.`;
+      }
+    ),
+
+    tool('delete_file', 'delete', 'Datei oder Ordner (samt Inhalt) endgültig löschen.', { path: S('string', 'Pfad relativ zum Projekt') }, ['path'], async (a, args) => {
       const root = resolveRoot(a, args);
-      const rel = treeOps.createFile(root, textPath(root, args.path));
-      if (args.content) collab.editText(root, rel, () => String(args.content));
-      return `${rel} angelegt.`;
+      const rel = anyPath(root, args.path);
+      collab.flushRoot(root);
+      treeOps.deletePath(root, rel);
+      collab.onPathMoved(root, rel, null);
+      return `${rel} gelöscht.`;
     }),
+
+    tool(
+      'move_file',
+      'move',
+      'Datei oder Ordner umbenennen/verschieben (new_path = vollständiger Zielpfad, Zielordner werden bei Bedarf erstellt, nichts wird überschrieben).',
+      { path: S('string', 'Bisheriger Pfad'), new_path: S('string', 'Neuer Pfad relativ zum Projekt') },
+      ['path', 'new_path'],
+      async (a, args) => {
+        const root = resolveRoot(a, args);
+        const from = anyPath(root, args.path);
+        const to = anyPath(root, args.new_path);
+        const absFrom = safeResolve(root, from);
+        const absTo = safeResolve(root, to);
+        if (!fs.existsSync(absFrom)) throw new Error('Nicht gefunden.');
+        if (fs.existsSync(absTo)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner.');
+        if (absTo.startsWith(absFrom + path.sep)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.');
+        collab.flushRoot(root);
+        fs.mkdirSync(path.dirname(absTo), { recursive: true });
+        fs.renameSync(absFrom, absTo);
+        collab.onPathMoved(root, from, to);
+        return `${from} -> ${to} verschoben.`;
+      }
+    ),
   ];
 
   async function callTool(a, params) {
     const t = TOOLS.find((x) => x.name === (params && params.name));
     if (!t) throw Object.assign(new Error(`Unbekanntes Werkzeug: ${params && params.name}`), { rpc: -32602 });
-    if (LEVEL_RANK[a.level] < LEVEL_RANK[t.level]) return { isError: true, content: [{ type: 'text', text: `Dieser Token (${a.level}) darf ${t.name} nicht ausführen (nötig: ${t.level}).` }] };
+    const denied = (why) => ({ isError: true, content: [{ type: 'text', text: `Keine Berechtigung für ${t.name} (nötig: ${t.perm})${why}.` }] });
+    if (t.perm && !anyPerms(a).has(t.perm)) return denied(' - dieser Token hat das Recht nicht');
     try {
-      // Reviewer im Projekt: Token darf hoechstens kommentieren/vorschlagen.
-      if (t.level === 'edit' && ctx.roleOf(a.user, resolveRoot(a, (params && params.arguments) || {})) === 'reviewer') throw new Error('Im Projekt nur Reviewer-Rechte: bitte suggest_change verwenden.');
-      return { content: [{ type: 'text', text: await t.run(a, (params && params.arguments) || {}) }] };
+      const args = (params && params.arguments) || {};
+      // Per project: the token's rights there, reviewers at most read+comment.
+      if (t.perm && !permsAt(a, resolveRoot(a, args)).includes(t.perm)) return denied(' in diesem Projekt');
+      return { content: [{ type: 'text', text: await t.run(a, args) }] };
     } catch (e) {
       return { isError: true, content: [{ type: 'text', text: e.message }] };
     }
@@ -273,12 +378,12 @@ function createMcp(ctx) {
           protocolVersion: (params && params.protocolVersion) || '2025-03-26',
           capabilities: { tools: {} },
           serverInfo: { name: 'latex-web-ide', version: ctx.version },
-          instructions: 'LaTeX-Projekte lesen/prüfen/bearbeiten. Erst list_projects, dann gezielt outline/search/read_file statt ganze Dateien zu lesen.',
+          instructions: 'LaTeX-Projekte lesen/prüfen/bearbeiten. Erst list_projects, dann gezielt outline/search/read_file statt ganze Dateien zu lesen. Kompilieren (compile) ist teuer und läuft asynchron - nur selten nutzen.',
         });
       }
       if (method === 'ping') return ok({});
       if (method === 'tools/list') {
-        return ok({ tools: TOOLS.filter((t) => LEVEL_RANK[a.level] >= LEVEL_RANK[t.level]).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+        return ok({ tools: TOOLS.filter((t) => !t.perm || anyPerms(a).has(t.perm)).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
       }
       if (method === 'tools/call') return ok(await callTool(a, params));
       return { jsonrpc: '2.0', id, error: { code: -32601, message: `Methode nicht unterstützt: ${method}` } };
