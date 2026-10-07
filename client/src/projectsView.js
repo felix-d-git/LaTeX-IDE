@@ -404,13 +404,21 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
   async function uploadZip(file) {
     if (!file) return;
+    const wrap = document.getElementById('zip-progress-wrap');
+    const bar = document.getElementById('zip-progress');
+    const lbl = document.getElementById('zip-progress-label');
+    const setPct = (p) => { bar.value = p; lbl.textContent = p >= 100 ? 'Wird entpackt…' : `${file.name}: ${p} %`; };
+    setPct(0);
+    wrap.classList.remove('hidden');
     try {
-      const { root } = await api.uploadZip(file);
+      const { root } = await api.uploadZip(file, setPct);
       await refresh();
       onOpenProject(root);
       hide();
     } catch (e) {
       alert('Zip-Upload fehlgeschlagen: ' + e.message);
+    } finally {
+      wrap.classList.add('hidden');
     }
   }
 

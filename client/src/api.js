@@ -76,17 +76,23 @@ export const api = {
   projectPdfUrl: (name) => `/api/projects/${encodeURIComponent(name)}/download/pdf`,
   // items: eigene Projekte = Ordnername, geteilte = Root-Pfad
   projectsZipUrl: (items) => `/api/projects/download/zip?items=${encodeURIComponent(JSON.stringify(items))}`,
-  uploadZip: async (file) => {
+  // XMLHttpRequest statt fetch: nur so gibt es Upload-Fortschritt (onProgress(0..100)).
+  uploadZip: (file, onProgress) => new Promise((resolve, reject) => {
     const csrf = getCookie('csrfToken');
-    const res = await fetch(`/api/projects/upload-zip?name=${encodeURIComponent(file.name)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/zip', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-      body: file,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
-    return data;
-  },
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/projects/upload-zip?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader('Content-Type', 'application/zip');
+    if (csrf) xhr.setRequestHeader('X-CSRF-Token', csrf);
+    if (onProgress) xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    xhr.onerror = () => reject(new Error('Netzwerkfehler'));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* keine JSON-Antwort */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `${xhr.status} ${xhr.statusText}`));
+    };
+    xhr.send(file);
+  }),
   addLabel: (name, color) => req('POST', '/api/labels', { name, color }),
   updateLabel: (id, patch) => req('PUT', `/api/labels/${encodeURIComponent(id)}`, patch),
   deleteLabel: (id) => req('DELETE', `/api/labels/${encodeURIComponent(id)}`),
