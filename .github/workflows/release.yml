@@ -46,3 +46,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload $env:TAG installer/out/LatexIDE-Setup.exe installer/out/LatexIDE-macOS.zip --clobber
+
+      # Download overview from .github/release-template.md under the release text (once).
+      - name: Download-Übersicht in den Release-Text
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $body = gh release view $env:TAG --json body -q .body
+          if ($body -match 'Welche Datei brauche ich') { exit 0 }
+          $tpl = (Get-Content .github/release-template.md -Raw -Encoding utf8).Replace('{{TAG}}', $env:TAG)
+          [IO.File]::WriteAllText("$env:RUNNER_TEMP/notes.md", (($body -join "`n") + "`n" + $tpl), [Text.UTF8Encoding]::new($false))
+          gh release edit $env:TAG --notes-file "$env:RUNNER_TEMP/notes.md"

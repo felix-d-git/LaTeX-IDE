@@ -21,6 +21,8 @@ backups
 .session-secret
 .update.env
 .release
+.release-files
+.update.lock
 installer
 graphify-out
 scripts

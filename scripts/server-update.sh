@@ -4,7 +4,7 @@
 # release over APP_DIR and rebuild the container. Meant for cron; which line
 # depends on UPDATE_MODE in .env (the web UI shows admins a banner either way):
 #   auto:   17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
-#   button: */5 * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
+#   button: * * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
 #   notify: no cron, run the script by hand
 # Env (or APP_DIR/.update.env):
 #   APP_DIR      default: the folder this script lives in, one up
@@ -13,7 +13,8 @@
 #   BACKUP_DIR   default: $DATA_DIR/../backups
 #   GITHUB_TOKEN only while the repo is private (read-only "Contents" token)
 #   UPDATE_REPO  default: felix-d-git/latex-web-ide
-# .env, .update.env and anything not in the release stay untouched.
+# .env, .update.env and anything not in the release stay untouched. Progress goes to
+# .update-status next to .update-request, where the web UI shows it to admins.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -31,41 +32,82 @@ if [ -d "$DATA_DIR/vault" ]; then
   BACKUP_SRC=vault
   SRC_PARENT="$DATA_DIR"
 fi
-# --if-requested: only run when an admin pressed "Jetzt aktualisieren" (file written by the app).
 REQUEST="$SRC_PARENT/$BACKUP_SRC/.update-request"
+STATUS="$SRC_PARENT/$BACKUP_SRC/.update-status"
+
+# One run at a time (cron fires every minute in button mode, a rebuild takes longer).
+# flock is Linux-only; Git Bash/macOS run the script by hand anyway.
+if command -v flock >/dev/null; then
+  exec 9>"$APP_DIR/.update.lock"
+  flock -n 9 || exit 0
+fi
+
+# --if-requested: only run when an admin pressed "Jetzt aktualisieren" (file written by the app).
 if [ "${1:-}" = "--if-requested" ]; then
   [ -f "$REQUEST" ] || exit 0
   rm -f "$REQUEST"
 fi
+
+# Status for the web UI: {"state":"running|done|failed","from":..,"to":..,"at":..,"log":..}.
+# Not fatal if the data dir is not writable for this user.
+RUNLOG="$(mktemp)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$RUNLOG"' EXIT
+installed="$(cat "$APP_DIR/.release" 2>/dev/null || true)"
+tag=""
+status() {
+  local log=""
+  [ "$1" = failed ] && log="$(tail -n 20 "$RUNLOG" | tr -d '\000-\010\013-\037' | tr '\t' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')"
+  printf '{"state":"%s","from":"%s","to":"%s","at":"%s","log":"%s"}\n' "$1" "$installed" "$tag" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$log" > "$STATUS" 2>/dev/null || true
+}
+say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$RUNLOG"; }
+trap 'status failed' ERR
+# Request already taken: report "running" before the GitHub lookup so the banner keeps polling.
+[ "${1:-}" = "--if-requested" ] && status running
+
 BACKUP_DIR="${BACKUP_DIR:-$(dirname "$DATA_DIR")/backups}"
 REPO="${UPDATE_REPO:-felix-d-git/latex-web-ide}"
 AUTH=()
 [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
 
-rel="$(curl -fsSL "${AUTH[@]}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest")"
-tag="$(printf '%s' "$rel" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
-[ -n "$tag" ] || { echo "$(date -Is) kein Release gefunden"; exit 1; }
-installed="$(cat "$APP_DIR/.release" 2>/dev/null || true)"
+rel="$(curl -fsSL "${AUTH[@]}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest" 2>>"$RUNLOG")" \
+  || { say "GitHub nicht erreichbar oder Repo privat ohne GITHUB_TOKEN"; false; }
+tag="$(printf '%s' "$rel" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+[ -n "$tag" ] || { say "kein Release gefunden"; false; }
 if [ "$tag" = "$installed" ]; then
-  echo "$(date -Is) aktuell ($tag)"
+  say "aktuell ($tag)"
+  [ "${1:-}" = "--if-requested" ] && status done
   exit 0
 fi
-echo "$(date -Is) Update $installed -> $tag"
+say "Update $installed -> $tag"
+status running
 
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$BACKUP_SRC/desktop" --exclude="$BACKUP_SRC/.update-request" -C "$SRC_PARENT" "$BACKUP_SRC"
+tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$BACKUP_SRC/desktop" \
+  --exclude="$BACKUP_SRC/.update-request" --exclude="$BACKUP_SRC/.update-status" -C "$SRC_PARENT" "$BACKUP_SRC" 2>>"$RUNLOG"
 ls -1t "$BACKUP_DIR"/data-*.tar.gz | tail -n +4 | xargs -r rm -f --
+say "Backup fertig"
 
-# 2. Unpack the release source over APP_DIR.
-# ponytail: files deleted in the new release stay behind; switch to a fresh dir + swap if that ever matters.
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "${AUTH[@]}" -H 'Accept: application/vnd.github+json' -o "$tmp/src.tar.gz" "https://api.github.com/repos/$REPO/tarball/$tag"
-tar -xzf "$tmp/src.tar.gz" -C "$APP_DIR" --strip-components=1
+# 2. Unpack the release into a fresh dir, copy it over APP_DIR and delete files the
+# previous release had but this one no longer has (.release-files = list of the last one).
+curl -fsSL "${AUTH[@]}" -H 'Accept: application/vnd.github+json' -o "$tmp/src.tar.gz" "https://api.github.com/repos/$REPO/tarball/$tag" 2>>"$RUNLOG"
+mkdir "$tmp/src"
+tar -xzf "$tmp/src.tar.gz" -C "$tmp/src" --strip-components=1
+(cd "$tmp/src" && find . -type f | sed 's|^\./||' | sort) > "$tmp/files"
+cp -a "$tmp/src/." "$APP_DIR/"
+if [ -f "$APP_DIR/.release-files" ]; then
+  comm -23 <(sort "$APP_DIR/.release-files") "$tmp/files" | while IFS= read -r f; do
+    case "$f" in ""|/*|*..*) continue ;; esac
+    rm -f -- "$APP_DIR/$f"
+  done
+fi
+cp "$tmp/files" "$APP_DIR/.release-files"
+say "Quellstand $tag entpackt"
 
 # 3. Rebuild + restart.
 cd "$APP_DIR"
-docker compose ${COMPOSE:+-f "$COMPOSE"} up -d --build
+docker compose ${COMPOSE:+-f "$COMPOSE"} up -d --build >>"$RUNLOG" 2>&1
 printf '%s\n' "$tag" > "$APP_DIR/.release"
-echo "$(date -Is) fertig ($tag)"
+say "fertig ($tag)"
+status done

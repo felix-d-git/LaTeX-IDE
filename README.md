@@ -13,137 +13,38 @@ Weboberfläche aus und bietet nach der Anmeldung die Desktop-App zum Download an
 eingebaut. Desktop-Apps holen ihre Updates von ihrem Server, der Server holt sie
 aus den GitHub-Releases.
 
-Es gibt drei Varianten: **Server** (Docker oder Windows-Installer, mehrere
-Konten), **Desktop-App** (verbindet sich mit einem Server, arbeitet offline
-weiter) und **100 % lokal** (Windows-Installer, nur dieser Rechner, ohne Konto,
-siehe unten).
+### Welche Datei brauche ich?
 
-Drei Wege, den Server zu betreiben:
+Alles liegt unter [Releases](https://github.com/felix-d-git/latex-web-ide/releases/latest).
 
-| Weg | Für | TeX Live |
-|---|---|---|
-| Docker unter Linux | Heimserver, VPS, Raspberry Pi | im Image (Debian) oder eigenes einhängen |
-| Docker Desktop unter Windows/macOS | Rechner, der ohnehin läuft | im Image (Debian) |
-| Windows-Installer, Option „Eigener Server" | ein einzelner Windows-PC, ohne Docker | TeX Live 2025, lädt der Installer |
+| Ich will … | Datei | Voraussetzungen | Updates | Anleitung |
+|---|---|---|---|---|
+| einen **Server** für mehrere Konten (Linux, Raspberry Pi, Docker Desktop) | Source code bzw. `git clone`, dann `docker compose up -d --build` | Docker, 2 GB RAM (besser 4), ~8 GB Platte | Skript auf dem Host: Hinweis, Button im Web-UI oder nachts | [docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md) |
+| einen **Server auf einem Windows-PC** ohne Docker | `LatexIDE-Setup.exe` → „Eigener Server auf diesem Rechner“ | Windows 10/11, ~8 GB | neues Setup drüber | [docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md) |
+| die **Desktop-App** für einen bestehenden Server (offline arbeiten, lokal kompilieren) | aus der Weboberfläche (Profil → „Desktop-App herunterladen“), sonst `LatexIDE-Setup.exe` / `LatexIDE-macOS.zip` | Konto auf einem Server, Windows oder macOS, ~6 GB | automatisch über den eigenen Server | [docs/DESKTOP-APP.md](docs/DESKTOP-APP.md) |
+| **100 % lokal** an einem Windows-Rechner, ohne Server und Konto | `LatexIDE-Setup.exe` → „Nur dieser Rechner (100 % lokal, ohne Konto)“ | Windows 10/11, ~8 GB | neues Setup drüber | [docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md#100--lokal-betrieb) |
 
-### Docker unter Linux
+- `LatexIDE-Setup.exe` enthält alle drei Windows-Varianten; das Setup fragt nach
+  der Betriebsart. Die Dateinamen bleiben über alle Versionen gleich (Server und
+  Desktop-Apps laden sie unter diesem Namen).
+- Setup und macOS-Paket installieren TeX Live 2025 bzw. MacTeX (~5 GB), falls
+  noch keines da ist. Das Docker-Image bringt TeX Live 2022 aus Debian mit oder
+  hängt ein eigenes ein.
+- Updates aller Varianten: [docs/UPDATES.md](docs/UPDATES.md).
 
-Voraussetzungen: Docker mit Compose-Plugin (`docker compose version`), git, ~8 GB
-freier Speicher (TeX Live im Image ist ~5 GB).
+### Öffentliches oder privates Repository
 
-```bash
-git clone https://github.com/felix-d-git/latex-web-ide.git
-cd latex-web-ide
-git checkout "$(git describe --tags --abbrev=0)"   # neuestes Release statt Entwicklungsstand
-cp .env.example .env
-nano .env                                          # PUBLIC_URL, ADMIN_EMAIL, ADMIN_PASSWORD
-mkdir -p data                                      # vorher anlegen, sonst gehört er root
-docker compose up -d --build                       # erster Build dauert (TeX Live)
-```
+Alle Anleitungen funktionieren mit beidem. Solange das Repository privat ist:
 
-Danach unter `http://<server>:3077` mit `ADMIN_EMAIL` / `ADMIN_PASSWORD`
-anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen).
+- Herunterladen nur mit GitHub-Zugang zum Repository (`git clone` per SSH-Schlüssel
+  oder Token).
+- Der Server braucht einen Lese-Token (fine-grained, nur „Contents: Read-only“)
+  für Update-Hinweis und Desktop-Downloads: `UPDATE_TOKEN` in `.env`,
+  `GITHUB_TOKEN` in `.update.env` → [docs/UPDATES.md](docs/UPDATES.md#privates-repository).
+- Ein fertiges Docker-Image (`ghcr.io`) gibt es erst bei öffentlichem Repository.
 
-- **Von außen erreichbar machen:** Reverse Proxy mit HTTPS (Caddy, nginx,
-  Traefik, Tailscale Funnel …) auf Port 3077, Websockets durchreichen. Dann in
-  `.env` `PUBLIC_URL=https://…` und `COOKIE_SECURE=true` setzen und
-  `docker compose up -d` erneut ausführen. `PUBLIC_URL` ist auch die Adresse,
-  die in die heruntergeladene Desktop-App eingebaut wird.
-- **Daten** liegen in `./data` (Konten, Projekte, Sitzungen). Diesen Ordner sichern.
-- **Eigenes TeX Live statt Debian-Paket** (aktueller als TeX Live 2022 aus
-  Debian, oder auf einer anderen Platte): TeX Live 2025 nach `/data/texlive`
-  installieren (bzw. dort hin einhängen), in `.env` `TEXLIVE=host` setzen und in
-  `docker-compose.override.yml` einhängen:
-
-  ```yaml
-  services:
-    app:
-      volumes:
-        - /pfad/zu/texlive:/data/texlive:ro
-  ```
-
-- **Eigene Anpassungen** (anderer Port, Speicherlimit, Proxy-Netz) gehören in
-  `docker-compose.override.yml` – die Datei wird von Updates nicht angefasst.
-
-Jedes Release wird per CI als Image gebaut und getestet
-(`.github/workflows/docker.yml`); ein fertiges Image unter `ghcr.io` gibt es,
-sobald das Repository öffentlich ist – bis dahin selbst bauen wie oben.
-
-### Docker Desktop unter Windows (oder macOS)
-
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installieren
-   (unter Windows mit WSL 2) und starten.
-2. Release-Quellcode herunterladen: GitHub → Releases → neuestes Release →
-   „Source code (zip)", entpacken (oder per `git clone` wie oben).
-3. Im entpackten Ordner `.env.example` nach `.env` kopieren und ausfüllen,
-   Ordner `data` anlegen.
-4. Im Ordner ein Terminal öffnen (PowerShell) und `docker compose up -d --build`
-   ausführen.
-5. `http://localhost:3077` öffnen.
-
-Docker Desktop startet den Container nach einem Neustart automatisch wieder,
-sofern „Start Docker Desktop when you sign in" aktiv ist.
-
-### Windows ohne Docker (Installer)
-
-1. GitHub → Releases → neuestes Release → `LatexIDE-Setup.exe` herunterladen.
-2. Setup starten, Betriebsart **„Eigener Server auf diesem Rechner"** wählen,
-   Admin-E-Mail und -Passwort festlegen.
-3. Der Installer bringt Node mit und installiert TeX Live 2025 (kann je nach
-   Leitung mehrere Stunden dauern).
-4. Start über das Startmenü („LatexIDE") → öffnet `http://localhost:3077`.
-
-Einstellungen stehen danach in `%LOCALAPPDATA%\Programs\LatexIDE\.env`, die Daten
-in `%LOCALAPPDATA%\LatexIDE\server-data`. Andere Rechner im Netz erreichen den
-Server unter `http://<rechnername>:3077` (Windows-Firewall freigeben; dann
-`PUBLIC_URL` in `.env` setzen). Update: neues Setup aus dem Release darüber
-installieren – `.env` und Daten bleiben erhalten.
-
-### 100 % lokal (Windows, ohne Konto)
-
-Für alle, die nur allein an einem Rechner schreiben: Setup starten, Betriebsart
-**„Nur dieser Rechner (100 % lokal, ohne Konto)"** wählen. Kein Login, kein
-Netzwerk (nur `127.0.0.1`), kein Konsolenfenster. Das Startmenü-Symbol startet
-einen unsichtbaren Server und öffnet den Browser; schließt man das letzte
-Browserfenster, sichert der Server alles und beendet sich nach etwa 30 s.
-Daten in `%LOCALAPPDATA%\LatexIDE\local-data`. Teilen/Einladen gibt es hier
-nicht – dafür einen Server betreiben.
-
-### Desktop-App
-
-Nach der Anmeldung in der Weboberfläche: Profil → „Desktop-App herunterladen"
-(Windows oder macOS). Das Paket kennt die Server-Adresse bereits; beim ersten
-Start meldet man sich einmal im Browser an. Die App hält eine lokale Kopie der
-eigenen Projekte und kompiliert lokal (TeX Live installiert der
-Windows-Installer bzw. `install.command` unter macOS).
-
-Ein Setup direkt aus den GitHub-Releases fragt stattdessen nach der
-Server-Adresse.
-
-### Updates
-
-- **Server:** Admins sehen ein Banner, sobald es ein neues Release gibt.
-  Verhalten per `UPDATE_MODE` in `.env`:
-  `notify` (Standard, nur Hinweis) · `button` (Admin stößt das Update im
-  Web-UI an) · `auto` (nachts) · `off`.
-  Installiert wird immer durch `scripts/server-update.sh` auf dem Host: Backup
-  von `data/` (die letzten 3 bleiben), neues Release entpacken, Container neu
-  bauen. Cron-Zeilen (`crontab -e`):
-
-  ```
-  # auto:
-  17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
-  # button:
-  */5 * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
-  ```
-
-  Bei `notify` das Skript von Hand starten. Unter Windows mit Docker Desktop
-  läuft es in Git Bash oder WSL. Zusätzliche Einstellungen für das Skript
-  (`COMPOSE`, `BACKUP_DIR`, `GITHUB_TOKEN`) in `.update.env` im Repo-Ordner.
-- **Desktop-Apps** fragen ihren Server und bieten ein Update an, sobald der
-  Server auf einer neueren Version läuft.
-- Solange das GitHub-Repo privat ist, braucht der Server einen Lese-Token
-  (`UPDATE_TOKEN` in `.env`, `GITHUB_TOKEN` in `.update.env`).
+Ist das Repository öffentlich, entfallen Tokens und Zugang; vorhandene Tokens
+können dann gelöscht werden.
 
 ### Optionale Dienste (`.env`)
 

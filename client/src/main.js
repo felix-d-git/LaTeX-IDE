@@ -888,26 +888,90 @@ fetch('/api/desktop/info')
   .catch(() => {});
 
 // Admins: banner when GitHub has a newer server release (text/button depend on UPDATE_MODE).
+// In button mode the host cron picks the request up within a minute; the banner then follows
+// .update-status (written by scripts/server-update.sh) until the new version answers.
 async function checkServerUpdate() {
   const u = await adminApi.updateStatus().catch(() => null);
-  if (!u || !u.available) return;
+  if (!u) return;
+  const st = u.status;
+  const running = st && st.state === 'running';
+  if (!u.available && !running) return;
   const bar = document.createElement('div');
   bar.id = 'update-banner';
   const text = document.createElement('span');
-  text.textContent = `Server-Update verfügbar: Version ${u.version} (installiert: ${u.current}). ` +
-    (u.requested ? 'Update angefordert, wird in Kürze installiert.' : u.mode === 'auto' ? 'Wird nachts automatisch installiert (mit Backup).' : u.mode === 'button' ? '' : 'Installation auf dem Server per scripts/server-update.sh.');
   bar.appendChild(text);
+  const log = document.createElement('details');
+  log.hidden = true;
+  log.append(Object.assign(document.createElement('summary'), { textContent: 'Protokoll' }), document.createElement('pre'));
+  bar.appendChild(log);
   if (u.url) bar.appendChild(Object.assign(document.createElement('a'), { href: u.url, target: '_blank', rel: 'noopener', textContent: 'Release-Notizen' }));
-  if (u.mode === 'button' && !u.requested) {
-    const btn = Object.assign(document.createElement('button'), { textContent: 'Jetzt aktualisieren' });
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      await adminApi.requestUpdate().then(() => { text.textContent = 'Update angefordert – Backup und Installation laufen gleich auf dem Server, danach neu laden.'; btn.remove(); }).catch((e) => { btn.disabled = false; alert(e.message); });
-    });
-    bar.appendChild(btn);
-  }
   const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
-  close.addEventListener('click', () => bar.remove());
+  let timer = null;
+  close.addEventListener('click', () => { clearTimeout(timer); bar.remove(); });
+
+  // .update-status holds release tags (v1.2.3), the API plain versions (1.2.3).
+  const ver = (x) => String(x || '').replace(/^v/, '');
+  const from = u.current;
+  const target = u.version;
+  const failed = (s) => {
+    text.textContent = `Update auf ${ver(s.to) || target} fehlgeschlagen (${new Date(s.at).toLocaleString()}). Details im Protokoll bzw. in latex-update.log auf dem Server.`;
+    log.querySelector('pre').textContent = s.log || '';
+    log.hidden = !s.log;
+  };
+  // Poll until the server reports the new version (fetch errors = container is restarting).
+  // Give up after ~30 min (script killed, server not coming back) instead of polling forever.
+  let polls = 0;
+  const follow = () => {
+    timer = setTimeout(async () => {
+      if (!bar.isConnected) return;
+      if (++polls > 180) { text.textContent = `Update auf ${target}: nach 30 Minuten noch nicht fertig. Bitte auf dem Server prüfen (latex-update.log).`; return; }
+      const v = await adminApi.updateStatus().catch(() => null);
+      if (!v) { text.textContent = `Update auf ${target}: Server startet neu …`; return follow(); }
+      if (v.current !== from) {
+        text.textContent = `Version ${v.current} installiert. `;
+        const reload = Object.assign(document.createElement('button'), { textContent: 'Neu laden' });
+        reload.addEventListener('click', () => location.reload());
+        text.after(reload);
+        return;
+      }
+      const s = v.status;
+      const fresh = s && s.at !== seenAt; // new status line since we started watching (no clock comparison)
+      if (fresh && s.state === 'failed' && (!s.from || ver(s.from) === from)) return failed(s);
+      // Script finished but this server still reports the old version (e.g. .release already on the new tag).
+      if (fresh && s.state === 'done') { text.textContent = `Update-Skript meldet ${ver(s.to)} als installiert, der Server läuft aber noch mit ${from}. Bitte auf dem Server prüfen (latex-update.log).`; return; }
+      text.textContent = s && s.state === 'running'
+        ? `Update auf ${ver(s.to) || target} läuft (Backup, Download, Neubau – dauert einige Minuten) …`
+        : `Update auf ${target} angefordert, startet innerhalb einer Minute …`;
+      follow();
+    }, 10000);
+  };
+  const seenAt = st ? st.at : null;
+
+  if (running) {
+    text.textContent = `Update auf ${ver(st.to) || target} läuft (Backup, Download, Neubau – dauert einige Minuten) …`;
+    follow();
+  } else if (u.requested) {
+    text.textContent = `Update auf ${target} angefordert, startet innerhalb einer Minute …`;
+    follow();
+  } else {
+    text.textContent = `Server-Update verfügbar: Version ${target} (installiert: ${from}). ` +
+      (u.mode === 'auto' ? 'Wird nachts automatisch installiert (mit Backup).' : u.mode === 'button' ? '' : 'Installation auf dem Server per scripts/server-update.sh.');
+    if (st && st.state === 'failed' && (!st.from || ver(st.from) === from)) failed(st);
+    if (u.mode === 'button') {
+      const btn = Object.assign(document.createElement('button'), { textContent: st && st.state === 'failed' ? 'Erneut versuchen' : 'Jetzt aktualisieren' });
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await adminApi.requestUpdate();
+        } catch (e) { btn.disabled = false; return alert(e.message); }
+        btn.remove();
+        log.hidden = true;
+        text.textContent = `Update auf ${target} angefordert, startet innerhalb einer Minute …`;
+        follow();
+      });
+      text.after(btn);
+    }
+  }
   bar.appendChild(close);
   document.body.appendChild(bar);
 }

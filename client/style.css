@@ -1305,6 +1305,8 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 .settings-pw-input{ display: block; width: 100%; max-width: 320px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); }
 #update-banner{ position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: var(--z-modal); display: flex; align-items: center; gap: 12px; padding: 8px 40px 8px 14px; background: #e8f3ec; color: #1e5631; border: 1px solid #b5d8c0; border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 #update-banner a{ color: inherit; }
+#update-banner details{ max-width: 50vw; }
+#update-banner details pre{ max-height: 40vh; overflow: auto; margin: 6px 0 0; font-size: 11px; white-space: pre-wrap; }
 #update-banner .update-banner-close{ position: absolute; right: 8px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; }
 
 /* Einstellungen ▸ PDF-Viewer "Browser" */

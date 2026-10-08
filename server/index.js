@@ -387,8 +387,14 @@ function isNewer(a, b) {
   return false;
 }
 
+// Written by scripts/server-update.sh on the host: { state: running|done|failed, from, to, at, log }.
+const UPDATE_STATUS = path.join(path.dirname(UPDATE_REQUEST), '.update-status');
+function updateStatus() {
+  try { return JSON.parse(fs.readFileSync(UPDATE_STATUS, 'utf8')); } catch { return null; }
+}
+
 app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, async (req, res) => {
-  const base = { current: APP_VERSION, mode: UPDATE_MODE, requested: fs.existsSync(UPDATE_REQUEST) };
+  const base = { current: APP_VERSION, mode: UPDATE_MODE, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
   if (UPDATE_MODE === 'off') return res.json({ ...base, available: false });
   try {
     const rel = await latestRelease();
