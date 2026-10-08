@@ -13,6 +13,11 @@ Weboberfläche aus und bietet nach der Anmeldung die Desktop-App zum Download an
 eingebaut. Desktop-Apps holen ihre Updates von ihrem Server, der Server holt sie
 aus den GitHub-Releases.
 
+Es gibt drei Varianten: **Server** (Docker oder Windows-Installer, mehrere
+Konten), **Desktop-App** (verbindet sich mit einem Server, arbeitet offline
+weiter) und **100 % lokal** (Windows-Installer, nur dieser Rechner, ohne Konto,
+siehe unten).
+
 Drei Wege, den Server zu betreiben:
 
 | Weg | Für | TeX Live |
@@ -60,6 +65,10 @@ anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen
 - **Eigene Anpassungen** (anderer Port, Speicherlimit, Proxy-Netz) gehören in
   `docker-compose.override.yml` – die Datei wird von Updates nicht angefasst.
 
+Jedes Release wird per CI als Image gebaut und getestet
+(`.github/workflows/docker.yml`); ein fertiges Image unter `ghcr.io` gibt es,
+sobald das Repository öffentlich ist – bis dahin selbst bauen wie oben.
+
 ### Docker Desktop unter Windows (oder macOS)
 
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installieren
@@ -89,6 +98,16 @@ in `%LOCALAPPDATA%\LatexIDE\server-data`. Andere Rechner im Netz erreichen den
 Server unter `http://<rechnername>:3077` (Windows-Firewall freigeben; dann
 `PUBLIC_URL` in `.env` setzen). Update: neues Setup aus dem Release darüber
 installieren – `.env` und Daten bleiben erhalten.
+
+### 100 % lokal (Windows, ohne Konto)
+
+Für alle, die nur allein an einem Rechner schreiben: Setup starten, Betriebsart
+**„Nur dieser Rechner (100 % lokal, ohne Konto)"** wählen. Kein Login, kein
+Netzwerk (nur `127.0.0.1`), kein Konsolenfenster. Das Startmenü-Symbol startet
+einen unsichtbaren Server und öffnet den Browser; schließt man das letzte
+Browserfenster, sichert der Server alles und beendet sich nach etwa 30 s.
+Daten in `%LOCALAPPDATA%\LatexIDE\local-data`. Teilen/Einladen gibt es hier
+nicht – dafür einen Server betreiben.
 
 ### Desktop-App
 

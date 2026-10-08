@@ -96,10 +96,14 @@ function sessionUser(sessionData) {
   return user;
 }
 
+// LOCAL_MODE=1 (100 % lokale Variante, nur 127.0.0.1): kein Login, alles läuft als der eine Admin.
+const LOCAL_MODE = process.env.LOCAL_MODE === '1';
+const localUser = () => (LOCAL_MODE ? auth.users.find((u) => u.isAdmin) || null : null);
+
 function currentUser(req) {
   const token = bearerToken(req);
   if (token) return auth.findUserByApiToken(token);
-  return sessionUser(req.session);
+  return sessionUser(req.session) || localUser();
 }
 
 function requireAuth(req, res, next) {
@@ -147,7 +151,11 @@ function applyRememberMe(req, rememberMe) {
 // Resolves the userId for an incoming WebSocket upgrade request by manually
 // parsing + unsigning the session cookie and loading the session from the
 // same store express-session uses for regular HTTP requests.
-function getUserIdFromUpgradeRequest(req) {
+async function getUserIdFromUpgradeRequest(req) {
+  return (await upgradeUserId(req)) || (localUser() || {}).id || null;
+}
+
+function upgradeUserId(req) {
   const token = bearerToken(req);
   if (token) {
     const user = auth.findUserByApiToken(token);
@@ -179,4 +187,5 @@ module.exports = {
   applyRememberMe,
   getUserIdFromUpgradeRequest,
   CSRF_COOKIE_NAME,
+  LOCAL_MODE,
 };

@@ -167,6 +167,8 @@ export function setupProfileDialog({ currentUser, onLogout }) {
 
   function render() {
     body.innerHTML = '';
+    // 100 % lokal: kein Konto, also nichts zum Abmelden/Einladen/Löschen.
+    if (currentUser.localMode) return body.append(el('p', null, 'Lokaler Modus: nur dieser Rechner, ohne Anmeldung.'));
     body.appendChild(el('p', null, `Angemeldet als ${currentUser.username} (${currentUser.email})${currentUser.isAdmin ? ' – Admin' : ''}.`));
     const logoutBtn = el('button', 'danger', 'Abmelden');
     logoutBtn.addEventListener('click', () => onLogout && onLogout());

@@ -63,6 +63,10 @@ const PROJECTS_DIR = path.join(process.env.DATA_DIR || path.join(__dirname, '..'
 const app = express();
 // Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
 app.set('trust proxy', 'loopback, uniquelocal');
+// Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
+if (authMw.LOCAL_MODE) {
+  app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
+}
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.use(authMw.createSessionMiddleware());
@@ -297,7 +301,7 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = authMw.currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
-  res.json({ user: auth.toPublicUser(user) });
+  res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE } });
 });
 
 app.post('/api/auth/forgot-password', limitMail, async (req, res) => {
@@ -1738,6 +1742,7 @@ server.on('upgrade', async (req, socket, head) => {
     return rejectUpgrade(socket, 400, 'Bad Request');
   }
   // Cross-site WebSocket hijacking guard (cookies ride along on upgrades).
+  if (authMw.LOCAL_MODE && !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) return rejectUpgrade(socket, 403, 'Forbidden');
   const origin = req.headers.origin;
   if (origin) {
     let host = null;
@@ -1786,6 +1791,11 @@ async function bootstrapAdmin() {
   if (auth.users.length > 0) return;
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
+  if (authMw.LOCAL_MODE && !password) {
+    // Lokal meldet sich niemand an → zufälliges Passwort statt des bekannten Fallbacks.
+    await auth.createUser({ email: 'lokal@local.host', password: crypto.randomBytes(24).toString('hex'), username: 'lokal', isAdmin: true });
+    return;
+  }
   if (!email || !password) {
     console.warn(
       '[auth] ADMIN_EMAIL/ADMIN_PASSWORD nicht gesetzt - lege Fallback-Admin admin@local.host / bitte-sofort-aendern an. ' +
@@ -1811,19 +1821,42 @@ function restoreWatchers() {
 }
 
 // docker stop / Ctrl+C: get pending live edits onto disk first.
-for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
-    collab.flushAll();
-    vault.flush();
-    process.exit(0);
-  });
+function shutdown() {
+  collab.flushAll();
+  vault.flush();
+  process.exit(0);
 }
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, shutdown);
+
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]];
+  require('child_process').spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+}
+
+// Lokal: Browserfenster zu → kein /ws-Client mehr → Änderungen sichern und beenden.
+// ponytail: 30 s Gnadenfrist deckt Neuladen und langsamen Browserstart ab (LOCAL_IDLE_MS). Verwirft der
+// Browser einen lange inaktiven Tab, ist der Server danach weg → einfach neu starten (Verknüpfung).
+const LOCAL_IDLE_MS = Number(process.env.LOCAL_IDLE_MS) || 30000;
 
 bootstrapAdmin()
   .then(() => {
     restoreWatchers();
-    server.listen(PORT, () => {
+    if (authMw.LOCAL_MODE) {
+      // Zweiter Start, während schon einer läuft: nur den Browser öffnen.
+      server.on('error', (e) => {
+        if (e.code !== 'EADDRINUSE') throw e;
+        openBrowser(`http://localhost:${PORT}`);
+        process.exit(0);
+      });
+      let idleSince = Date.now();
+      setInterval(() => {
+        if (wss.clients.size > 0) idleSince = Date.now();
+        else if (Date.now() - idleSince > LOCAL_IDLE_MS) shutdown();
+      }, 2000).unref();
+    }
+    server.listen(PORT, authMw.LOCAL_MODE ? '127.0.0.1' : undefined, () => {
       console.log(`LaTeX Web IDE laeuft auf http://localhost:${PORT}`);
+      if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});
     });

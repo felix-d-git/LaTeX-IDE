@@ -1,0 +1,46 @@
+# Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt) und prueft,
+# dass der Container startet und latexmk findet. Veroeffentlicht wird es unter
+# ghcr.io/<owner>/latex-web-ide erst, wenn das Repo oeffentlich ist (privat braeuchte
+# jeder Nutzer einen Registry-Login, und das Paketkontingent reicht nicht fuer ~5 GB).
+name: Docker
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image bauen
+        run: docker build -t latex-web-ide:test .
+
+      - name: Container starten und pruefen
+        run: |
+          docker run -d --name ide -p 3077:3077 latex-web-ide:test
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3077/api/auth/me || true)
+            [ "$code" = "401" ] && break
+            sleep 2
+          done
+          docker logs ide
+          [ "$code" = "401" ] || { echo "Server antwortet nicht (HTTP $code)"; exit 1; }
+          docker exec ide latexmk -v
+
+      - name: Nach ghcr.io pushen (nur oeffentliches Repo)
+        if: github.event.repository.private == false
+        run: |
+          IMG=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          VER=$(node -p "require('./package.json').version")
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker tag latex-web-ide:test $IMG:$VER
+          docker tag latex-web-ide:test $IMG:latest
+          docker push $IMG:$VER
+          docker push $IMG:latest

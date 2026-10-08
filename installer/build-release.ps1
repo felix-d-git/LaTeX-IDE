@@ -80,6 +80,7 @@ Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE.cmd') 'LatexIDE.cmd'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE-Server.cmd') 'LatexIDE-Server.cmd'
+Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE-Lokal.vbs') 'LatexIDE-Lokal.vbs'
 
 if ($WhatIf) {
     Write-Host "[WhatIf] Trockenlauf beendet - kein npm ci / build / prune ausgefuehrt."
@@ -189,7 +190,7 @@ if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 
 Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
-    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd')) { return }
+    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd', 'LatexIDE-Lokal.vbs')) { return }
     $dst = Join-Path $MacStagingDir $_.Name
     if ($_.PSIsContainer) {
         Copy-Item -Path $_.FullName -Destination $dst -Recurse -Force

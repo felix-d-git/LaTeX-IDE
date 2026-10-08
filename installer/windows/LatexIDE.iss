@@ -46,13 +46,13 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{code:StarterExe}"; Tasks: 
 
 [Run]
 ; Nach einem stillen Update (aus der App heraus) die App wieder starten.
-Filename: "{app}\{code:StarterExe}"; Flags: nowait postinstall skipifnotsilent runhidden
+Filename: "{app}\{code:StarterExe}"; Flags: nowait postinstall skipifnotsilent runhidden shellexec
 ; TeX Live Installation nach dem Kopieren der Dateien. Sichtbares Fenster,
 ; kann sehr lange dauern (mehrere Stunden). Bricht die Installation nicht ab,
 ; falls der Nutzer latexmk bereits im PATH hat (Skript prueft selbst).
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-texlive.ps1"""; \
     WorkingDir: "{app}"; StatusMsg: "TeX Live wird installiert (kann mehrere Stunden dauern)..."; Flags: waituntilterminated
-Filename: "{app}\{code:StarterExe}"; Description: "LatexIDE jetzt starten"; Flags: nowait postinstall skipifsilent runhidden
+Filename: "{app}\{code:StarterExe}"; Description: "LatexIDE jetzt starten"; Flags: nowait postinstall skipifsilent runhidden shellexec
 
 [Code]
 var
@@ -87,9 +87,16 @@ begin
   Result := (TrailerUrl = '') and (ModePage.SelectedValueIndex = 1);
 end;
 
+function IsLocalMode: Boolean;
+begin
+  Result := (TrailerUrl = '') and (ModePage.SelectedValueIndex = 2);
+end;
+
 function StarterExe(Param: String): String;
 begin
-  if IsServerMode then Result := 'LatexIDE-Server.cmd' else Result := '{#MyAppExeName}';
+  if IsServerMode then Result := 'LatexIDE-Server.cmd'
+  else if IsLocalMode then Result := 'LatexIDE-Lokal.vbs'
+  else Result := '{#MyAppExeName}';
 end;
 
 function JsonEscape(V: String): String;
@@ -105,11 +112,14 @@ begin
 
   ModePage := CreateInputOptionPage(wpSelectDir,
     'Betriebsart', 'Wie soll LatexIDE auf diesem Rechner laufen?',
-    'Die Desktop-App verbindet sich mit einem bestehenden LatexIDE-Server. Als eigener Server laeuft das ganze System auf diesem Rechner (im Browser unter http://localhost:3077).',
+    'Die Desktop-App verbindet sich mit einem bestehenden LatexIDE-Server. Als eigener Server laeuft das ganze System auf diesem Rechner (im Browser unter http://localhost:3077). 100 % lokal: nur fuer dich, ohne Konto und Netzwerk, beendet sich mit dem Browserfenster.',
     True, False);
   ModePage.Add('Desktop-App (mit einem Server verbinden)');
   ModePage.Add('Eigener Server auf diesem Rechner');
-  if GetPreviousData('Mode', 'desktop') = 'server' then ModePage.SelectedValueIndex := 1 else ModePage.SelectedValueIndex := 0;
+  ModePage.Add('Nur dieser Rechner (100 % lokal, ohne Konto)');
+  if GetPreviousData('Mode', 'desktop') = 'server' then ModePage.SelectedValueIndex := 1
+  else if GetPreviousData('Mode', 'desktop') = 'local' then ModePage.SelectedValueIndex := 2
+  else ModePage.SelectedValueIndex := 0;
 
   UrlPage := CreateInputQueryPage(ModePage.ID,
     'Server', 'Mit welchem LatexIDE-Server soll sich die App verbinden?',
@@ -136,9 +146,9 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if PageID = ModePage.ID then Result := TrailerUrl <> ''
-  else if PageID = UrlPage.ID then Result := (TrailerUrl <> '') or IsServerMode
+  else if PageID = UrlPage.ID then Result := (TrailerUrl <> '') or IsServerMode or IsLocalMode
   else if PageID = AdminPage.ID then Result := (not IsServerMode) or FileExists(ExpandConstant('{app}\.env'))
-  else if PageID = LocalDirPage.ID then Result := IsServerMode;
+  else if PageID = LocalDirPage.ID then Result := IsServerMode or IsLocalMode;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -168,7 +178,9 @@ end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
-  if IsServerMode then SetPreviousData(PreviousDataKey, 'Mode', 'server') else SetPreviousData(PreviousDataKey, 'Mode', 'desktop');
+  if IsServerMode then SetPreviousData(PreviousDataKey, 'Mode', 'server')
+  else if IsLocalMode then SetPreviousData(PreviousDataKey, 'Mode', 'local')
+  else SetPreviousData(PreviousDataKey, 'Mode', 'desktop');
   SetPreviousData(PreviousDataKey, 'ServerUrl', UrlPage.Values[0]);
   SetPreviousData(PreviousDataKey, 'LocalDir', LocalDirPage.Values[0]);
 end;
@@ -190,6 +202,7 @@ begin
         'UPDATE_MODE=notify'], False);
     Exit;
   end;
+  if IsLocalMode then Exit; // Einstellungen setzt LatexIDE-Lokal.vbs
   Url := TrailerUrl;
   if Url = '' then Url := Trim(UrlPage.Values[0]);
   SaveStringsToUTF8File(ExpandConstant('{app}\server.json'), ['{"remoteUrl": "' + JsonEscape(Url) + '"}'], False);
