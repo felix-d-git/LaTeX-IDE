@@ -75,6 +75,12 @@ app.use(authMw.checkCsrf);
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/dist', express.static(path.join(__dirname, '..', 'client', 'dist')));
 app.use('/katex', express.static(path.join(__dirname, '..', 'node_modules', 'katex', 'dist')));
+// Lizenzhinweise (MIT/BSD-Pflicht auch für das an den Browser gelieferte Bundle), ohne Login.
+app.get('/licenses', (req, res) => {
+  const root = path.join(__dirname, '..');
+  const text = ['LICENSE', 'THIRD_PARTY_NOTICES.md'].map((f) => fs.readFileSync(path.join(root, f), 'utf8'));
+  res.type('text/plain; charset=utf-8').send(text.join('\n\n' + '='.repeat(72) + '\n\n'));
+});
 
 // Fehlende/gesperrte Datei beim Streamen: 404 statt unbehandeltem Stream-Fehler (Server-Absturz).
 function streamFile(res, abs) {

@@ -129,6 +129,36 @@ Jedes Release wird per CI gebaut und getestet. Ist das Repository öffentlich,
 liegt das Image zusätzlich unter `ghcr.io/felix-d-git/latex-web-ide:<version>`
 (x86_64). Solange es privat ist, gibt es kein fertiges Image – selbst bauen wie oben.
 
+## Drittsoftware im Docker-Image
+
+Das Image enthält neben der IDE (AGPL-3.0-only) Debian-Pakete unter eigenen
+Lizenzen, u. a. unter GPL:
+
+- Debian-Basissystem (`node:24-bookworm-slim`), z. B. bash, coreutils (GPL-2.0+/GPL-3.0+)
+- `perl` (GPL-1.0+ oder Artistic)
+- `pandoc` (GPL-2.0+)
+- beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL, LPPL)
+
+Die genauen Pakete und Versionen stehen im Image unter `/app/DEBIAN-PACKAGES.txt`
+(Spalten: Paket, Version, Quellpaket, Quellversion):
+
+```bash
+docker run --rm ghcr.io/felix-d-git/latex-web-ide:<version> cat /app/DEBIAN-PACKAGES.txt
+```
+
+Die Quellen genau dieser Versionen liegen unter <https://snapshot.debian.org>
+(`https://snapshot.debian.org/package/<Quellpaket>/<Quellversion>/`).
+Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
+<https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
+`THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server.
+
+**Schriftliches Angebot:** Für jede veröffentlichte Version des Images stellt
+felix-d-git mindestens drei Jahre lang nach ihrer letzten Verteilung den
+vollständigen Quellcode der darin enthaltenen GPL-lizenzierten Programme auf
+Anfrage bereit, für höchstens die Kosten der Bereitstellung. Anfrage als
+GitHub-Issue unter <https://github.com/felix-d-git/latex-web-ide/issues> mit der
+Image-Version. Das Angebot gilt für jeden, der das Image erhalten hat.
+
 ## Datensicherung
 
 - Alles Wichtige liegt in `LATEX_DATA_DIR` (mit Verschlüsselung: `…/vault`) und `.env`.

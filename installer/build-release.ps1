@@ -104,8 +104,9 @@ try {
     node build.js
     if ($LASTEXITCODE -ne 0) { throw "node build.js fehlgeschlagen (Exit $LASTEXITCODE)" }
 
-    Write-Step "npm prune --omit=dev"
-    npm prune --omit=dev
+    # optional raus: @napi-rs/canvas braucht nur pdf.js unter Node, die App nutzt pdf.js im Browser.
+    Write-Step "npm prune --omit=dev --omit=optional"
+    npm prune --omit=dev --omit=optional
     if ($LASTEXITCODE -ne 0) { throw "npm prune fehlgeschlagen (Exit $LASTEXITCODE)" }
 } finally {
     Pop-Location

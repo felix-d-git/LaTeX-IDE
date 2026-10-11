@@ -19,6 +19,8 @@ const options = {
   format: 'esm',
   target: 'es2020',
   loader: { '.css': 'text' },
+  // License notice in every copy of the bundle (pdf.js' @licstart header is not an esbuild legal comment).
+  banner: { js: '/*! latex-web-ide (AGPL-3.0-only). Licenses of bundled third-party code: /licenses */' },
 };
 
 async function run() {

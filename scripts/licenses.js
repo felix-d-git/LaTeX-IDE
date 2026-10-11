@@ -12,8 +12,47 @@ const OUT_PATH = path.join(ROOT, 'THIRD_PARTY_NOTICES.md');
 
 const ALLOWED = [
   'MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', '0BSD',
-  'BlueOak-1.0.0', 'CC0-1.0', 'Unlicense', 'Python-2.0'
+  'BlueOak-1.0.0', 'CC0-1.0', 'Unlicense', 'Python-2.0', 'MIT-0'
 ];
+
+const MIT_BODY = `Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+
+// MIT packages that ship without a license file. Copyright lines taken from the
+// package README or the upstream repo's LICENSE (URL per entry).
+const MANUAL_LICENSES = {
+  // Readme.md of 1.0.x; https://github.com/tj/node-cookie-signature/blob/master/LICENSE
+  'cookie-signature': `Copyright (c) 2012 LearnBoost <tj@learnboost.com>
+
+${MIT_BODY}`,
+  // https://github.com/komagata/eastasianwidth/blob/master/MIT-LICENSE.txt
+  eastasianwidth: `Copyright komagata
+
+${MIT_BODY}`,
+  // README.md; https://github.com/jensyt/imurmurhash-js/blob/master/LICENSE
+  imurmurhash: `Copyright (c) 2013 Gary Court, Jens Taylor
+
+${MIT_BODY}`,
+  // README.md; https://github.com/juliangruber/isarray/blob/master/LICENSE
+  isarray: `Copyright (c) 2013 Julian Gruber <julian@juliangruber.com>
+
+${MIT_BODY}`,
+};
 
 const LICENSE_FILE_NAMES = [
   'LICENSE', 'LICENSE.md', 'LICENSE.txt',
@@ -58,7 +97,9 @@ function findLicenseFile(pkgDir) {
     const hit = lowerMap.get(name.toLowerCase());
     if (hit) return path.join(pkgDir, hit);
   }
-  return null;
+  // variants like LICENSE-MIT.txt (emoji-regex) or MIT-License (bagpipe)
+  const variant = entries.find((e) => /^(licen[cs]e-\w+|\w+-licen[cs]e)(\.(md|txt))?$/i.test(e));
+  return variant ? path.join(pkgDir, variant) : null;
 }
 
 function main() {
@@ -70,7 +111,7 @@ function main() {
     if (pkgPath === '') continue; // the project itself
     if (!pkgPath.includes('node_modules/')) continue;
     if (meta.dev) continue;
-    if (meta.optional && !fs.existsSync(path.join(ROOT, pkgPath))) continue;
+    if (meta.optional) continue; // never shipped: installer + image prune with --omit=optional
 
     const absDir = path.join(ROOT, pkgPath);
     let pkgJson;
@@ -86,7 +127,9 @@ function main() {
     const version = pkgJson.version || meta.version || 'unknown';
     const license = licenseToString(pkgJson.license) || 'UNKNOWN';
     const licenseFilePath = findLicenseFile(absDir);
-    const licenseText = licenseFilePath ? fs.readFileSync(licenseFilePath, 'utf8') : null;
+    const licenseText = licenseFilePath
+      ? fs.readFileSync(licenseFilePath, 'utf8')
+      : (license === 'MIT' && MANUAL_LICENSES[name]) || null;
 
     results.push({ name, version, license, licenseText, licenseFilePath });
   }
