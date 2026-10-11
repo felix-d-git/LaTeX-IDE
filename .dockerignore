@@ -27,3 +27,10 @@ installer
 graphify-out
 scripts
 *-poc
+vault
+.env.*
+!.env.example
+CLAUDE.local.md
+STATUS.md
+.claude
+*.bundle
