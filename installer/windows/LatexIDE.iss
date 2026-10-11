@@ -209,10 +209,79 @@ begin
   SaveStringsToUTF8File(ExpandConstant('{app}\install.json'), ['{"localDir": "' + JsonEscape(LocalDirPage.Values[0]) + '"}'], False);
 end;
 
+// --- Deinstallation ---------------------------------------------------------
+
+// "localDir" aus einer JSON-Datei (install.json vom Setup, config.json der App).
+// ponytail: naiver Parser ohne UTF-8-Dekodierung - Pfade mit Umlauten werden nicht
+// gefunden und bleiben dann einfach liegen (nie falsch geloescht).
+function JsonLocalDir(FileName: String): String;
+var
+  S: AnsiString;
+  P: Integer;
+begin
+  Result := '';
+  if not LoadStringFromFile(FileName, S) then Exit;
+  P := Pos('"localDir"', S);
+  if P = 0 then Exit;
+  S := Copy(S, P + 10, Length(S));
+  P := Pos('"', S);
+  if P = 0 then Exit;
+  S := Copy(S, P + 1, Length(S));
+  P := Pos('"', S);
+  if P = 0 then Exit;
+  Result := Copy(S, 1, P - 1);
+  StringChangeEx(Result, '\\', '\', True);
+end;
+
+// Ordner der lokalen Kopie, aber nur, wenn er LatexIDE heisst - ein selbst gewaehlter
+// Ordner wie "Dokumente" kann fremde Dateien enthalten und wird nie geloescht.
+function LocalCopyDir: String;
+begin
+  Result := JsonLocalDir(ExpandConstant('{localappdata}\LatexIDE\data\config.json'));
+  if Result = '' then Result := JsonLocalDir(ExpandConstant('{app}\install.json'));
+  if Result = '' then Result := ExpandConstant('{userdocs}\LatexIDE');
+  if (CompareText(ExtractFileName(RemoveBackslashUnlessRoot(Result)), 'LatexIDE') <> 0) or not DirExists(Result) then
+    Result := '';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Base, LocalCopy, Msg: String;
+  Code: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Base := ExpandConstant('{localappdata}\LatexIDE');
+  LocalCopy := LocalCopyDir;
+
+  // Laufenden Server/App dieser Installation beenden, sonst sind Dateien gesperrt.
+  Exec('powershell.exe', '-NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ''' +
+    ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+
+  // TeX Live und Caches sind keine Nutzerdaten.
+  DelTree(Base + '\texlive', True, True, True);
+  DelTree(Base + '\data\cache', True, True, True);
+
+  // Projektdaten nur nach Rueckfrage (bei stiller Deinstallation: behalten).
+  if not UninstallSilent and (DirExists(Base) or (LocalCopy <> '')) then
+  begin
+    Msg := 'Sollen auch deine Projekte und Einstellungen geloescht werden?' + #13#10#13#10 +
+      Base + #13#10;
+    if LocalCopy <> '' then Msg := Msg + LocalCopy + ' (lokale Kopie)' + #13#10;
+    Msg := Msg + #13#10 + 'Projekte auf einem Server bleiben dort erhalten. Lokale Projekte und noch nicht ' +
+      'abgeglichene Offline-Aenderungen gehen verloren - vorher ggf. in LatexIDE unter ' +
+      '"Alle Projekte" als ZIP herunterladen.' + #13#10#13#10 +
+      'Ja = alles loeschen, Nein = Projekte behalten.';
+    if MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    begin
+      DelTree(Base, True, True, True);
+      if LocalCopy <> '' then DelTree(LocalCopy, True, True, True);
+    end;
+  end;
+  RemoveDir(Base); // nur falls leer
+end;
+
 [UninstallDelete]
-; Datenordner (LATEX_IDE_DATA) und TeX-Live-Installation werden bewusst NICHT
-; geloescht - der Uninstaller entfernt nur die App-Dateien unter {app} und
-; fragt dabei nichts nach (Standardverhalten von Inno Setup).
+; Datenordner und TeX Live raeumt CurUninstallStepChanged auf (Projekte nur nach Rueckfrage).
 ; Von [Code] erzeugte Dateien.
 Type: files; Name: "{app}\server.json"
 Type: files; Name: "{app}\install.json"

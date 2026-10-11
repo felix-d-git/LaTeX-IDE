@@ -20,7 +20,7 @@ import { setupShareDialog } from './shareDialog.js';
 import { setupHistoryView } from './historyView.js';
 import { setupMenuBar, setupLayoutMenu, setupProjectMenu } from './menuBar.js';
 import { setupSettingsDialog } from './settingsDialog.js';
-import { setupProfileDialog } from './profileDialog.js';
+import { setupAdminDialog, setupProfileDialog } from './profileDialog.js';
 import { setupHelpDialog } from './helpDialog.js';
 import { setupNewFileDialog, setupNewFolderDialog } from './newFileDialog.js';
 import { setupWordCountDialog } from './wordCountDialog.js';
@@ -709,8 +709,10 @@ const settingsDialog = setupSettingsDialog({
   onBreadcrumbs: (on) => document.getElementById('editor-breadcrumbs').classList.toggle('hidden', !on),
   onShowAccount: () => profileDialog.show(),
 });
+const adminDialog = setupAdminDialog({ currentUser, onUpdateRequested: () => checkServerUpdate() });
 const profileDialog = setupProfileDialog({
   currentUser,
+  onShowAdmin: () => adminDialog.show(),
   onLogout: async () => {
     await authApi.logout();
     location.reload();
@@ -812,6 +814,7 @@ document.addEventListener('keydown', (e) => {
   shareDialog.hide();
   settingsDialog.hide();
   profileDialog.hide();
+  adminDialog.hide();
   helpDialog.hide();
   if (appEl.classList.contains('layout-focus')) applyLayout('split');
 });
@@ -891,6 +894,7 @@ fetch('/api/desktop/info')
 // In button mode the host cron picks the request up within a minute; the banner then follows
 // .update-status (written by scripts/server-update.sh) until the new version answers.
 async function checkServerUpdate() {
+  document.getElementById('update-banner')?.remove(); // re-run from the admin page
   const u = await adminApi.updateStatus().catch(() => null);
   if (!u) return;
   const st = u.status;

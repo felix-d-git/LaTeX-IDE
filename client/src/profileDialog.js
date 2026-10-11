@@ -1,19 +1,20 @@
 ﻿import { adminApi, authApi } from './api.js';
 
-// Account things (logout, password, desktop apps, invites, delete account) -
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+const note = (text) => el('p', 'settings-inert-note', text);
+const formatDate = (iso) => new Date(iso).toLocaleString('de-DE');
+
+// Account things (logout, password, desktop apps, delete account) -
 // separate from the editor settings, reachable from the rail and the dashboard.
-export function setupProfileDialog({ currentUser, onLogout }) {
+export function setupProfileDialog({ currentUser, onLogout, onShowAdmin }) {
   const modal = document.getElementById('profile-dialog');
   const body = document.getElementById('profile-body');
 
-  const el = (tag, cls, text) => {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text !== undefined) e.textContent = text;
-    return e;
-  };
-  const note = (text) => el('p', 'settings-inert-note', text);
-  const formatDate = (iso) => new Date(iso).toLocaleString('de-DE');
   const pw = (placeholder, autocomplete) => {
     const i = el('input', 'settings-pw-input');
     i.type = 'password';
@@ -94,6 +95,142 @@ export function setupProfileDialog({ currentUser, onLogout }) {
     return box;
   }
 
+  // Deletes the account plus every project in the user's own folder (server side).
+  function renderDeleteSection() {
+    const box = el('div');
+    box.appendChild(el('h4', null, 'Konto löschen'));
+    if (currentUser.isAdmin) {
+      box.appendChild(note('Das Admin-Konto kann nicht gelöscht werden (es besitzt die Hauptprojekte).'));
+      return box;
+    }
+    const password = pw('Passwort zur Bestätigung', 'current-password');
+    const msg = note('');
+    const btn = el('button', 'danger', 'Konto und alle eigenen Projekte endgültig löschen');
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!confirm('Konto, alle eigenen Projekte und Dateien endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
+      try {
+        await authApi.deleteAccount(password.value);
+        location.reload();
+      } catch (e) {
+        msg.textContent = e.message;
+      }
+    });
+    box.append(note('Löscht dein Konto und alle Projekte, die dir gehören. Für dich freigegebene Projekte anderer bleiben erhalten.'), password, btn, msg);
+    return box;
+  }
+
+  function render() {
+    body.innerHTML = '';
+    // 100 % lokal: kein Konto, also nichts zum Abmelden/Einladen/Löschen.
+    if (currentUser.localMode) return body.append(el('p', null, 'Lokaler Modus: nur dieser Rechner, ohne Anmeldung.'));
+    body.appendChild(el('p', null, `Angemeldet als ${currentUser.username} (${currentUser.email})${currentUser.isAdmin ? ' – Admin' : ''}.`));
+    const logoutBtn = el('button', 'danger', 'Abmelden');
+    logoutBtn.addEventListener('click', () => onLogout && onLogout());
+    body.appendChild(logoutBtn);
+    body.appendChild(renderPasswordSection());
+    body.appendChild(renderDownloadSection());
+    body.appendChild(renderDesktopSection());
+    if (currentUser.isAdmin) {
+      const adminBtn = el('button', null, 'Server-Verwaltung (Nutzer, Einladungen, Update) …');
+      adminBtn.addEventListener('click', () => { hide(); onShowAdmin(); });
+      body.append(el('h4', null, 'Verwaltung'), adminBtn);
+    }
+    body.appendChild(renderDeleteSection());
+  }
+
+  const show = () => {
+    render();
+    modal.classList.remove('hidden');
+  };
+  const hide = () => modal.classList.add('hidden');
+  const isOpen = () => !modal.classList.contains('hidden');
+  document.getElementById('btn-close-profile').addEventListener('click', hide);
+  modal.querySelector('.modal-backdrop').addEventListener('click', hide);
+  return { show, hide, isOpen };
+}
+
+// Admin-only central page: server version/update, accounts, invite links.
+export function setupAdminDialog({ currentUser, onUpdateRequested }) {
+  const modal = document.getElementById('admin-dialog');
+  const body = document.getElementById('admin-body');
+  const MODES = {
+    off: 'aus – keine Prüfung',
+    notify: 'nur Hinweis – Installation per scripts/server-update.sh auf dem Server',
+    button: 'per Button – Cron auf dem Server führt die Anforderung innerhalb einer Minute aus',
+    auto: 'automatisch – Cron installiert nachts (mit Backup)',
+  };
+  const STATES = { running: 'läuft', done: 'fertig', failed: 'fehlgeschlagen' };
+
+  function renderUpdateSection() {
+    const box = el('div');
+    box.appendChild(el('h4', null, 'Version & Update'));
+    const info = note('Lade …');
+    box.appendChild(info);
+    adminApi.updateStatus().then((u) => {
+      info.remove();
+      const ver = (x) => String(x || '').replace(/^v/, '');
+      const latest = u.error ? `nicht abrufbar (${u.error})` : u.version ? `${u.version}${u.available ? ' – Update verfügbar' : ' – aktuell'}` : '–';
+      const dl = el('dl', 'admin-facts');
+      for (const [k, v] of [['Installiert', u.current], ['Neueste', latest], ['Update-Modus', `${u.mode}: ${MODES[u.mode] || ''}`]]) dl.append(el('dt', null, k), el('dd', null, v));
+      if (u.url) {
+        const a = Object.assign(el('a', null, 'Release-Notizen'), { href: u.url, target: '_blank', rel: 'noopener' });
+        const dd = el('dd');
+        dd.appendChild(a);
+        dl.append(el('dt'), dd);
+      }
+      const st = u.status;
+      if (st) dl.append(el('dt', null, 'Letzter Lauf'), el('dd', null, `${STATES[st.state] || st.state}${st.to ? ` (${ver(st.from) || '?'} → ${ver(st.to)})` : ''}, ${formatDate(st.at)}`));
+      box.appendChild(dl);
+      if (st && st.log) {
+        const log = el('details');
+        log.append(el('summary', null, 'Protokoll des letzten Laufs'), el('pre', 'admin-log', st.log));
+        box.appendChild(log);
+      }
+      // Changing the mode means changing the host cron line, so it stays in the server .env.
+      box.appendChild(note('Modus ändern: UPDATE_MODE in der .env des Servers setzen und die passende Cron-Zeile aus scripts/server-update.sh eintragen, dann Container neu starten.'));
+      const busy = u.requested || (st && st.state === 'running');
+      if (u.mode === 'button' && u.available && !busy) {
+        const btn = el('button', 'primary', `Jetzt auf ${u.version} aktualisieren`);
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try { await adminApi.requestUpdate(); } catch (e) { btn.disabled = false; return alert(e.message); }
+          hide();
+          onUpdateRequested();
+        });
+        box.appendChild(btn);
+      } else if (busy) box.appendChild(note('Update läuft bzw. ist angefordert – Fortschritt im Banner oben.'));
+    }).catch((e) => { info.textContent = e.message; });
+    return box;
+  }
+
+  function renderUserSection() {
+    const box = el('div');
+    const list = el('div');
+    list.id = 'admin-user-list';
+    box.append(el('h4', null, 'Nutzer'), list);
+    async function refresh() {
+      const { users } = await adminApi.listUsers();
+      list.innerHTML = '';
+      for (const u of users) {
+        const row = el('div', 'invite-row');
+        row.appendChild(el('span', 'invite-status', `${u.username} (${u.email})${u.isAdmin ? ' – Admin' : ''}${u.verified ? '' : ' – E-Mail unbestätigt'}, seit ${formatDate(u.createdAt)}`));
+        if (!u.isAdmin) {
+          const del = el('button', 'danger', 'Löschen');
+          del.addEventListener('click', async () => {
+            if (!confirm(`Konto ${u.username} (${u.email}) mit allen eigenen Projekten endgültig löschen? Das lässt sich nicht rückgängig machen.`)) return;
+            try { await adminApi.deleteUser(u.id); } catch (e) { return alert(e.message); }
+            refresh();
+          });
+          row.appendChild(del);
+        }
+        list.appendChild(row);
+      }
+    }
+    refresh().catch((e) => list.appendChild(note(e.message)));
+    return box;
+  }
+
   function renderInviteSection() {
     const box = el('div');
     const createBtn = el('button', 'primary', '+ Neue Einladung erstellen');
@@ -140,53 +277,21 @@ export function setupProfileDialog({ currentUser, onLogout }) {
     return box;
   }
 
-  // Deletes the account plus every project in the user's own folder (server side).
-  function renderDeleteSection() {
-    const box = el('div');
-    box.appendChild(el('h4', null, 'Konto löschen'));
-    if (currentUser.isAdmin) {
-      box.appendChild(note('Das Admin-Konto kann nicht gelöscht werden (es besitzt die Hauptprojekte).'));
-      return box;
-    }
-    const password = pw('Passwort zur Bestätigung', 'current-password');
-    const msg = note('');
-    const btn = el('button', 'danger', 'Konto und alle eigenen Projekte endgültig löschen');
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!confirm('Konto, alle eigenen Projekte und Dateien endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
-      try {
-        await authApi.deleteAccount(password.value);
-        location.reload();
-      } catch (e) {
-        msg.textContent = e.message;
-      }
-    });
-    box.append(note('Löscht dein Konto und alle Projekte, die dir gehören. Für dich freigegebene Projekte anderer bleiben erhalten.'), password, btn, msg);
-    return box;
-  }
-
   function render() {
     body.innerHTML = '';
-    // 100 % lokal: kein Konto, also nichts zum Abmelden/Einladen/Löschen.
-    if (currentUser.localMode) return body.append(el('p', null, 'Lokaler Modus: nur dieser Rechner, ohne Anmeldung.'));
-    body.appendChild(el('p', null, `Angemeldet als ${currentUser.username} (${currentUser.email})${currentUser.isAdmin ? ' – Admin' : ''}.`));
-    const logoutBtn = el('button', 'danger', 'Abmelden');
-    logoutBtn.addEventListener('click', () => onLogout && onLogout());
-    body.appendChild(logoutBtn);
-    body.appendChild(renderPasswordSection());
-    body.appendChild(renderDownloadSection());
-    body.appendChild(renderDesktopSection());
-    if (currentUser.isAdmin) body.appendChild(renderInviteSection());
-    body.appendChild(renderDeleteSection());
+    body.append(renderUpdateSection(), renderUserSection(), renderInviteSection());
   }
 
   const show = () => {
+    if (!currentUser.isAdmin || currentUser.localMode) return;
     render();
     modal.classList.remove('hidden');
   };
   const hide = () => modal.classList.add('hidden');
-  const isOpen = () => !modal.classList.contains('hidden');
-  document.getElementById('btn-close-profile').addEventListener('click', hide);
+  document.getElementById('btn-close-admin').addEventListener('click', hide);
   modal.querySelector('.modal-backdrop').addEventListener('click', hide);
-  return { show, hide, isOpen };
+  const dashBtn = document.getElementById('btn-dash-admin');
+  dashBtn.classList.toggle('hidden', !currentUser.isAdmin || !!currentUser.localMode);
+  dashBtn.addEventListener('click', show);
+  return { show, hide };
 }

@@ -310,6 +310,10 @@ function setZotero(userId, zotero) {
   save(data);
 }
 
+function listUsers() {
+  return data.users.slice();
+}
+
 function deleteUser(id) {
   data.users = data.users.filter((u) => u.id !== id);
   for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
@@ -318,6 +322,7 @@ function deleteUser(id) {
 
 module.exports = {
   deleteUser,
+  listUsers,
   setZotero,
   findUserByEmail,
   findUserByUsername,

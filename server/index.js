@@ -357,6 +357,21 @@ app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin,
   res.json({ ok: true });
 });
 
+// --- Admin: accounts ---
+
+app.get('/api/admin/users', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  res.json({ users: auth.listUsers().map((u) => ({ ...auth.toPublicUser(u), verified: auth.isVerified(u) })) });
+});
+
+// Same as the user's own "Konto löschen", without the password (admin can't delete admins).
+app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  const user = auth.findUserById(req.params.id);
+  if (!user) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+  if (user.isAdmin) return res.status(400).json({ error: 'Admin-Konten können nicht gelöscht werden.' });
+  removeAccount(user.id);
+  res.json({ ok: true });
+});
+
 // --- Admin: server updates (like Nextcloud/Immich: banner for admins) ---
 // UPDATE_MODE per host: off | notify (banner only, default) | button (admin can request
 // the update) | auto (host cron installs nightly). Installing is always done by
@@ -475,6 +490,21 @@ app.post('/api/auth/change-password', limitLogin, async (req, res) => {
   }
 });
 
+// Account incl. all projects in projects/users/<id> (also trash/archive), its watchers and sockets.
+function removeAccount(userId) {
+  const ownDir = path.resolve(path.join(PROJECTS_DIR, 'users', userId));
+  for (const [root, entry] of watchersByRoot) {
+    if (isInside(ownDir, root)) {
+      entry.watcher.close();
+      watchersByRoot.delete(root);
+    }
+  }
+  if (wss) wss.clients.forEach((c) => c.userId === userId && c.close());
+  fs.rmSync(ownDir, { recursive: true, force: true });
+  state.purgeUser(userId, ownDir);
+  auth.deleteUser(userId);
+}
+
 // Delete own account incl. all projects in projects/users/<id> (also trash/archive).
 // The admin owns the top-level projects/ folder and can't delete itself.
 app.post('/api/auth/delete-account', limitLogin, async (req, res) => {
@@ -482,17 +512,7 @@ app.post('/api/auth/delete-account', limitLogin, async (req, res) => {
   if (!(await auth.verifyPassword(req.user, req.body.password))) {
     return res.status(400).json({ error: 'Passwort ist falsch.' });
   }
-  const ownDir = path.resolve(path.join(PROJECTS_DIR, 'users', req.user.id));
-  for (const [root, entry] of watchersByRoot) {
-    if (isInside(ownDir, root)) {
-      entry.watcher.close();
-      watchersByRoot.delete(root);
-    }
-  }
-  if (wss) wss.clients.forEach((c) => c.userId === req.user.id && c.close());
-  fs.rmSync(ownDir, { recursive: true, force: true });
-  state.purgeUser(req.user.id, ownDir);
-  auth.deleteUser(req.user.id);
+  removeAccount(req.user.id);
   req.session.destroy(() => {
     res.clearCookie('latex_ide_sid');
     res.json({ ok: true });

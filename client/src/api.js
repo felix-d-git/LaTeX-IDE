@@ -60,6 +60,8 @@ export const adminApi = {
   revokeInvite: (token) => req('DELETE', `/api/admin/invites/${encodeURIComponent(token)}`),
   updateStatus: () => req('GET', '/api/admin/update'),
   requestUpdate: () => req('POST', '/api/admin/update'),
+  listUsers: () => req('GET', '/api/admin/users'),
+  deleteUser: (id) => req('DELETE', `/api/admin/users/${encodeURIComponent(id)}`),
 };
 
 export const api = {
