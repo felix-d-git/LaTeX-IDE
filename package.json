@@ -1,6 +1,6 @@
 {
   "name": "latex-web-ide",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit; kompiliert per latexmk (Server oder Desktop-App).",
