@@ -3,8 +3,8 @@
 #   host - nothing in the image; a TeX Live installation is bind-mounted read-only
 #          at /data/texlive (the path it was installed to). Used on the Pi, where
 #          TeX Live 2025 lives on the SSD and the SD card stays free.
-# PANDOC=1 (default) installs pandoc for the Word/Markdown/HTML export. The image
-# published on ghcr.io is built with PANDOC=0 (docs/INSTALL-DOCKER.md).
+# PANDOC=1 (default) installs pandoc for the Word/Markdown/HTML export, also in the
+# image published on ghcr.io (sources of its static libs: docs/INSTALL-DOCKER.md).
 #
 # Two stages: npm ci with dev and optional packages (esbuild, @napi-rs/canvas) only
 # happens in the build stage, which is not part of the final image.

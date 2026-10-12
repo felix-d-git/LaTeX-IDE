@@ -1,11 +1,11 @@
-# Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, ohne pandoc) und
+# Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, mit pandoc) und
 # prueft, dass der Container startet, latexmk findet und die Lizenzdateien mitbringt.
 # Veroeffentlicht wird es unter ghcr.io/<owner>/latex-web-ide nur, wenn das Repo oeffentlich
 # ist (privat braeuchte jeder Nutzer einen Registry-Login, und das Paketkontingent reicht nicht
 # fuer ~5 GB), und nur bei einem regulaeren Release oder einem manuellen Start auf master.
 # :latest bekommt nur ein regulaeres Release.
-# PANDOC=0: pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL) mit, deren
-# Quellen sonst mitgeliefert werden muessten (docs/INSTALL-DOCKER.md).
+# pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL-2.0+) mit: deren Debian-Quellpakete
+# gehen als pandoc-sources-<tag>.tar ans Release, bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
 name: Container-Image
 
 on:
@@ -35,7 +35,7 @@ jobs:
           # Link auf den Tag bzw. Commit, nicht auf master; hoechstens 512 Zeichen.
           DESC="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Enthaelt Debian-Pakete unter eigenen Lizenzen (u. a. GPL, LGPL, AGPL), Liste unter /app/DEBIAN-PACKAGES.txt. Lizenzhinweise und Quellcode-Angebot: https://github.com/$GITHUB_REPOSITORY/blob/${TAG:-$GITHUB_SHA}/docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image"
           [ ${#DESC} -le 512 ] || { echo "Beschreibung zu lang (${#DESC} Zeichen)"; exit 1; }
-          docker build --build-arg PANDOC=0 \
+          docker build --build-arg PANDOC=1 \
             --label "org.opencontainers.image.version=$VER" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.description=$DESC" \
@@ -64,8 +64,7 @@ jobs:
             grep -q "Schriftliches Angebot" /app/docs/INSTALL-DOCKER.md || fail "Quellcode-Angebot fehlt"
             for p in @napi-rs @esbuild esbuild; do test ! -e /app/node_modules/$p || fail "node_modules/$p im Image"; done
             test ! -e /root/.npm || fail "/root/.npm im Image"
-            ! command -v pandoc >/dev/null || fail "pandoc im Image"
-            ! cut -f1 /app/DEBIAN-PACKAGES.txt | grep -qx pandoc || fail "pandoc in DEBIAN-PACKAGES.txt"
+            command -v pandoc >/dev/null || fail "pandoc fehlt"
             echo "Selbstpruefung ok"
           '
           # Geloeschte Dateien stecken weiter in tieferen Layern: jeden Layer einzeln durchsuchen.
@@ -99,13 +98,53 @@ jobs:
           sys.exit(1 if hits or missing or not layers else 0)
           '
 
-      - name: Paketliste an das Release haengen
-        if: env.PUBLISH == 'true' && github.event_name == 'release'
+      # Laeuft immer (auch privat), damit ein Fehler vor dem ersten Push auffaellt.
+      - name: pandoc-Quellen sammeln
+        run: |
+          TAG=${TAG:-v$(node -p "require('./package.json').version")}
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$TAG.txt"
+          # Quellpaket von pandoc + alles aus Built-Using/Static-Built-Using seiner Binaerpakete
+          python3 - "DEBIAN-PACKAGES-$TAG.txt" > pandoc-sources.txt <<'PY'
+          import re, sys
+          out = set()
+          for line in open(sys.argv[1]):
+              f = line.rstrip("\n").split("\t")
+              if len(f) == 6 and f[2] == "pandoc":
+                  out.add((f[2], f[3]))
+                  for field in f[4:]:
+                      out.update(re.findall(r"([a-z0-9][a-z0-9.+-]+) \(= ([^)]+)\)", field))
+          # bookworm: ~140 Haskell-Quellpakete; viel weniger heisst, das Format hat sich geaendert
+          if len(out) < 20:
+              sys.exit(f"nur {len(out)} Quellpakete gefunden")
+          for src, ver in sorted(out):
+              print(src, ver)
+          PY
+          wc -l pandoc-sources.txt
+          mkdir -p "$RUNNER_TEMP/src"
+          cp pandoc-sources.txt "$RUNNER_TEMP/src/SOURCES.txt"
+          # Erst das Archiv der Distribution, sonst snapshot.debian.org (debsnap)
+          docker run --rm -v "$RUNNER_TEMP/src:/out" debian:bookworm bash -euo pipefail -c '
+            sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null
+            cd /out
+            while read -r src ver; do
+              apt-get source -qq --download-only "$src=$ver" </dev/null >/dev/null \
+                || debsnap -f -d . "$src" "$ver" </dev/null \
+                || { echo "Quelle nicht gefunden: $src $ver"; exit 1; }
+            done < SOURCES.txt
+            n=$(ls *.dsc | wc -l)
+            [ "$n" -eq "$(wc -l < SOURCES.txt)" ] || { echo "$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete"; exit 1; }
+          '
+          tar -cf "pandoc-sources-$TAG.tar" -C "$RUNNER_TEMP/src" .
+          ls -lh "pandoc-sources-$TAG.tar"
+
+      - name: Paketliste und pandoc-Quellen an das Release haengen
+        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$TAG.txt"
-          gh release upload "$TAG" "DEBIAN-PACKAGES-$TAG.txt" --clobber
+        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$TAG.txt" "pandoc-sources-$TAG.tar" --clobber
 
       - name: Nach ghcr.io pushen
         if: env.PUBLISH == 'true'

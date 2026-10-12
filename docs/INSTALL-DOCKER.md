@@ -146,15 +146,12 @@ liegt das Image zusätzlich unter `ghcr.io/felix-d-git/latex-web-ide:<version>`
 (x86_64, TeX Live aus Debian). Solange es privat ist, gibt es kein fertiges
 Image – selbst bauen wie oben.
 
-**Ohne pandoc:** Das fertige Image enthält kein pandoc. Der Export nach Word,
-Markdown und HTML (File ▸ Download) ist dort nicht verfügbar und meldet „Pandoc
-ist auf dem Server nicht installiert“. Grund: Debians pandoc ist statisch mit
-rund 140 Haskell-Bibliotheken gelinkt (u. a. unter GPL-2.0+). Wer es weitergibt,
-muss den Quellcode all dieser Bibliotheken auffindbar bereitstellen. Wer den
-Export braucht, baut das Image selbst (`docker compose up -d --build` wie oben):
-Der lokale Build enthält pandoc (Build-Argument `PANDOC`, Standard `1`, mit `0`
-ohne pandoc). Ein Image, das man nur selbst baut und betreibt, wird nicht
-weitergegeben.
+**Mit pandoc:** Das fertige Image enthält pandoc für den Export nach Word,
+Markdown und HTML (File ▸ Download). Debians pandoc ist statisch mit rund 140
+Haskell-Bibliotheken gelinkt (u. a. unter GPL-2.0+). Deren Debian-Quellpakete
+liegen deshalb zu jedem Release mit veröffentlichtem Image als
+`pandoc-sources-<tag>.tar` bei den Release-Dateien (siehe unten). Beim eigenen
+Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit `0` ohne).
 
 ## Drittsoftware im Docker-Image
 
@@ -167,8 +164,8 @@ Lizenzen, u. a. unter GPL, LGPL und AGPL:
 - beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL,
   LPPL) mit ihren Abhängigkeiten, darunter Ghostscript/libgs (AGPL-3.0+),
   ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL)
-- nur in selbst gebauten Images (`PANDOC=1`): `pandoc` (GPL-2.0+) mit statisch
-  gelinkten Haskell-Bibliotheken
+- `pandoc` (GPL-2.0+) mit statisch gelinkten Haskell-Bibliotheken (fehlt bei
+  `PANDOC=0`)
 
 Copyright-Vermerke und Lizenzen der Pakete liegen im Image unter
 `/usr/share/doc/<paket>/copyright`, die Volltexte gängiger Lizenzen unter
@@ -188,7 +185,12 @@ docker run --rm ghcr.io/felix-d-git/latex-web-ide:<version> cat /app/DEBIAN-PACK
 ```
 
 Zu jedem Release mit veröffentlichtem Image liegt dieselbe Liste als
-`DEBIAN-PACKAGES-<tag>.txt` bei den Release-Dateien auf GitHub.
+`DEBIAN-PACKAGES-<tag>.txt` bei den Release-Dateien auf GitHub, dazu
+`pandoc-sources-<tag>.tar`: die Debian-Quellpakete (`.dsc`, `.orig.tar.*`,
+`.debian.tar.*`) von pandoc und aller unter Built-Using und Static-Built-Using
+von pandoc genannten Quellpakete, Liste in `SOURCES.txt`. Die Datei wird vor dem
+Image veröffentlicht und bleibt mindestens drei Jahre nach der letzten
+Verteilung des Images beim Release.
 
 Die Quellen genau dieser Versionen, auch der unter Built-Using und
 Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
