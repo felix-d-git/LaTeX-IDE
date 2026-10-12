@@ -1,0 +1,124 @@
+# Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, ohne pandoc) und
+# prueft, dass der Container startet, latexmk findet und die Lizenzdateien mitbringt.
+# Veroeffentlicht wird es unter ghcr.io/<owner>/latex-web-ide nur, wenn das Repo oeffentlich
+# ist (privat braeuchte jeder Nutzer einen Registry-Login, und das Paketkontingent reicht nicht
+# fuer ~5 GB), und nur bei einem regulaeren Release oder einem manuellen Start auf master.
+# :latest bekommt nur ein regulaeres Release.
+# PANDOC=0: pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL) mit, deren
+# Quellen sonst mitgeliefert werden muessten (docs/INSTALL-DOCKER.md).
+name: Container-Image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Paketliste als Release-Asset
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      PUBLISH: ${{ github.event.repository.private == false && ((github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image bauen
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_EVENT_NAME" = release ] && [ "v$VER" != "$TAG" ]; then
+            echo "Tag $TAG passt nicht zu package.json ($VER)"; exit 1
+          fi
+          # Link auf den Tag bzw. Commit, nicht auf master; hoechstens 512 Zeichen.
+          DESC="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Enthaelt Debian-Pakete unter eigenen Lizenzen (u. a. GPL, LGPL, AGPL), Liste unter /app/DEBIAN-PACKAGES.txt. Lizenzhinweise und Quellcode-Angebot: https://github.com/$GITHUB_REPOSITORY/blob/${TAG:-$GITHUB_SHA}/docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image"
+          [ ${#DESC} -le 512 ] || { echo "Beschreibung zu lang (${#DESC} Zeichen)"; exit 1; }
+          docker build --build-arg PANDOC=0 \
+            --label "org.opencontainers.image.version=$VER" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.description=$DESC" \
+            -t latex-web-ide:test .
+
+      - name: Container starten und pruefen
+        run: |
+          docker run -d --name ide -p 3077:3077 latex-web-ide:test
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3077/api/auth/me || true)
+            [ "$code" = "401" ] && break
+            sleep 2
+          done
+          docker logs ide
+          [ "$code" = "401" ] || { echo "Server antwortet nicht (HTTP $code)"; exit 1; }
+          docker exec ide latexmk -v
+
+      - name: Lizenzdateien und Inhalt pruefen
+        shell: bash   # mit pipefail: ein Fehler von docker save bricht ab
+        run: |
+          docker run --rm --user root latex-web-ide:test sh -c '
+            fail() { echo "Selbstpruefung: $*"; exit 1; }
+            test -s /app/DEBIAN-PACKAGES.txt || fail "DEBIAN-PACKAGES.txt fehlt oder ist leer"
+            test -s /app/LICENSE || fail "LICENSE fehlt"
+            test -s /app/THIRD_PARTY_NOTICES.md || fail "THIRD_PARTY_NOTICES.md fehlt"
+            grep -q "Schriftliches Angebot" /app/docs/INSTALL-DOCKER.md || fail "Quellcode-Angebot fehlt"
+            for p in @napi-rs @esbuild esbuild; do test ! -e /app/node_modules/$p || fail "node_modules/$p im Image"; done
+            test ! -e /root/.npm || fail "/root/.npm im Image"
+            ! command -v pandoc >/dev/null || fail "pandoc im Image"
+            ! cut -f1 /app/DEBIAN-PACKAGES.txt | grep -qx pandoc || fail "pandoc in DEBIAN-PACKAGES.txt"
+            echo "Selbstpruefung ok"
+          '
+          # Geloeschte Dateien stecken weiter in tieferen Layern: jeden Layer einzeln durchsuchen.
+          # Jeder Layer aus manifest.json muss gelesen worden sein (sonst z. B. unbekanntes Format).
+          docker save latex-web-ide:test | python3 -c '
+          import json, os, re, sys, tarfile
+          bad = re.compile(r"(^|/)(node_modules/(@napi-rs|@esbuild|esbuild)|root/\.npm)(/|$)")
+          hits, done, links, layers = set(), set(), {}, []
+          image = tarfile.open(fileobj=sys.stdin.buffer, mode="r|")
+          for member in image:
+              if member.issym():
+                  links[member.name] = os.path.normpath(os.path.join(os.path.dirname(member.name), member.linkname))
+              if not member.isfile():
+                  continue
+              f = image.extractfile(member)
+              if member.name == "manifest.json":
+                  layers = [l for m in json.load(f) for l in m["Layers"]]
+                  continue
+              try:
+                  hits.update(e.name for e in tarfile.open(fileobj=f, mode="r|*") if bad.search(e.name.replace(".wh.", "")))
+              except tarfile.ReadError as e:
+                  if str(e) != "empty file":
+                      continue  # config/index, kein Layer
+              done.add(member.name)
+          missing = sorted({l for l in layers if links.get(l, l) not in done})
+          for name in sorted(hits)[:20]:
+              print("In einem Layer:", name)
+          for name in missing or ([] if layers else ["manifest.json fehlt"]):
+              print("Nicht geprueft:", name)
+          print(len(set(layers)) - len(missing), "Layer geprueft")
+          sys.exit(1 if hits or missing or not layers else 0)
+          '
+
+      - name: Paketliste an das Release haengen
+        if: env.PUBLISH == 'true' && github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$TAG.txt"
+          gh release upload "$TAG" "DEBIAN-PACKAGES-$TAG.txt" --clobber
+
+      - name: Nach ghcr.io pushen
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          IMG=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          VER=$(node -p "require('./package.json').version")
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag latex-web-ide:test "$IMG:$VER"
+          docker push "$IMG:$VER"
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            docker tag latex-web-ide:test "$IMG:latest"
+            docker push "$IMG:latest"
+          fi
+          docker inspect --format '{{join .RepoDigests "\n"}}' latex-web-ide:test | tee -a "$GITHUB_STEP_SUMMARY"

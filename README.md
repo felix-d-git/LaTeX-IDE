@@ -61,8 +61,10 @@ können dann gelöscht werden.
   org.languagetool.server.HTTPServer --port 8081 --allow-origin '*'`. Leer =
   Server-LanguageTool.
 - `PANDOC` — Pfad zu Pandoc (GPL, läuft als externer Prozess) für
-  File ▸ Download ▸ Markdown/HTML. Im Docker-Image enthalten; ohne Pandoc
-  meldet der Export einen Fehler.
+  File ▸ Download ▸ Markdown/HTML. Im selbst gebauten Docker-Image enthalten,
+  nicht im fertigen Image von ghcr.io
+  ([docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#fertiges-image-nur-bei-öffentlichem-repository));
+  ohne Pandoc meldet der Export einen Fehler.
 - Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
   doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
 

@@ -92,6 +92,12 @@ docker compose -f docker-compose.pi.yml up -d --build
 - `DATA_KEY` getrennt von den Daten sichern (Passwortmanager): ohne ihn sind
   Daten und Backups unlesbar.
 - Limits per `.env`: `LATEX_MEM` (Standard 1g), `LATEX_CPUS`, `LATEX_TMPFS`.
+- Das Image `tailscale/tailscale` wird nur referenziert und beim Start von
+  Docker Hub geladen, es ist nicht Teil dieses Projekts. Für Konto und Funnel
+  gelten die [Nutzungsbedingungen von Tailscale](https://tailscale.com/terms)
+  und die Bedingungen des gewählten Tarifs. Der Verkehr aus dem Internet läuft
+  über die Funnel-Relay-Server von Tailscale (verschlüsselt, TLS endet erst im
+  Tailscale-Container).
 
 ## Eigenes TeX Live statt Debian-Paket
 
@@ -111,6 +117,16 @@ Eigene Anpassungen (Port, Speicherlimit, Proxy-Netz) gehören immer in
 
 ## Docker Desktop (Windows/macOS)
 
+Docker Desktop ist nur für Privatnutzung, Bildung, nicht-kommerzielle
+Open-Source-Projekte und kleine Unternehmen (unter 250 Beschäftigte und unter
+10 Mio. US-Dollar Jahresumsatz) kostenlos; größere Unternehmen und Behörden
+brauchen ein kostenpflichtiges Abo
+([Lizenzbedingungen](https://docs.docker.com/subscription/desktop-license/)).
+Kostenlose Alternativen: Docker Engine in WSL 2 (Windows),
+[Rancher Desktop](https://rancherdesktop.io/),
+[Podman Desktop](https://podman-desktop.io/) oder
+[Colima](https://github.com/abiosoft/colima) (macOS).
+
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installieren
    (unter Windows mit WSL 2) und starten.
 2. GitHub → Releases → neuestes Release → „Source code (zip)“ herunterladen und
@@ -127,37 +143,95 @@ Windows in Git Bash oder WSL.
 
 Jedes Release wird per CI gebaut und getestet. Ist das Repository öffentlich,
 liegt das Image zusätzlich unter `ghcr.io/felix-d-git/latex-web-ide:<version>`
-(x86_64). Solange es privat ist, gibt es kein fertiges Image – selbst bauen wie oben.
+(x86_64, TeX Live aus Debian). Solange es privat ist, gibt es kein fertiges
+Image – selbst bauen wie oben.
+
+**Ohne pandoc:** Das fertige Image enthält kein pandoc. Der Export nach Word,
+Markdown und HTML (File ▸ Download) ist dort nicht verfügbar und meldet „Pandoc
+ist auf dem Server nicht installiert“. Grund: Debians pandoc ist statisch mit
+rund 140 Haskell-Bibliotheken gelinkt (u. a. unter GPL-2.0+). Wer es weitergibt,
+muss den Quellcode all dieser Bibliotheken auffindbar bereitstellen. Wer den
+Export braucht, baut das Image selbst (`docker compose up -d --build` wie oben):
+Der lokale Build enthält pandoc (Build-Argument `PANDOC`, Standard `1`, mit `0`
+ohne pandoc). Ein Image, das man nur selbst baut und betreibt, wird nicht
+weitergegeben.
 
 ## Drittsoftware im Docker-Image
 
 Das Image enthält neben der IDE (AGPL-3.0-only) Debian-Pakete unter eigenen
-Lizenzen, u. a. unter GPL:
+Lizenzen, u. a. unter GPL, LGPL und AGPL:
 
-- Debian-Basissystem (`node:24-bookworm-slim`), z. B. bash, coreutils (GPL-2.0+/GPL-3.0+)
+- Debian-Basissystem (`node:24-bookworm-slim`), z. B. bash und coreutils
+  (GPL-3.0+), mawk (GPL-2.0), glibc und GMP (LGPL)
 - `perl` (GPL-1.0+ oder Artistic)
-- `pandoc` (GPL-2.0+)
-- beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL, LPPL)
+- beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL,
+  LPPL) mit ihren Abhängigkeiten, darunter Ghostscript/libgs (AGPL-3.0+),
+  ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL)
+- nur in selbst gebauten Images (`PANDOC=1`): `pandoc` (GPL-2.0+) mit statisch
+  gelinkten Haskell-Bibliotheken
 
-Die genauen Pakete und Versionen stehen im Image unter `/app/DEBIAN-PACKAGES.txt`
-(Spalten: Paket, Version, Quellpaket, Quellversion):
+Copyright-Vermerke und Lizenzen der Pakete liegen im Image unter
+`/usr/share/doc/<paket>/copyright`, die Volltexte gängiger Lizenzen unter
+`/usr/share/common-licenses/`, die Lizenz von Node.js unter `/usr/local/LICENSE`.
+Das Basisimage ist eine „slim“-Variante: Von `/usr/share/doc` bleiben nur die
+`copyright`- und `NOTICE`-Dateien, Handbücher, Manpages und der Inhalt der
+`texlive-*-doc`-Pakete fehlen. Vollständig sind sie in den Debian-Paketen und
+deren Quellen.
+
+Die genauen Pakete und Versionen stehen im Image unter `/app/DEBIAN-PACKAGES.txt`,
+tabulatorgetrennt mit den Spalten Paket, Version, Quellpaket, Quellversion,
+Built-Using und Static-Built-Using (die letzten beiden nennen weitere
+Quellpakete, die beim Bauen in das Paket eingeflossen sind, meist leer):
 
 ```bash
 docker run --rm ghcr.io/felix-d-git/latex-web-ide:<version> cat /app/DEBIAN-PACKAGES.txt
 ```
 
-Die Quellen genau dieser Versionen liegen unter <https://snapshot.debian.org>
+Zu jedem Release mit veröffentlichtem Image liegt dieselbe Liste als
+`DEBIAN-PACKAGES-<tag>.txt` bei den Release-Dateien auf GitHub.
+
+Die Quellen genau dieser Versionen, auch der unter Built-Using und
+Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
 (`https://snapshot.debian.org/package/<Quellpaket>/<Quellversion>/`).
 Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
 <https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
-`THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server.
+`THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
+Quellcode der IDE selbst liegt im Image unter `/app`.
 
-**Schriftliches Angebot:** Für jede veröffentlichte Version des Images stellt
-felix-d-git mindestens drei Jahre lang nach ihrer letzten Verteilung den
-vollständigen Quellcode der darin enthaltenen GPL-lizenzierten Programme auf
-Anfrage bereit, für höchstens die Kosten der Bereitstellung. Anfrage als
-GitHub-Issue unter <https://github.com/felix-d-git/latex-web-ide/issues> mit der
-Image-Version. Das Angebot gilt für jeden, der das Image erhalten hat.
+Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
+und LGPL-3.0 (jeweils §6 d) über diese Hinweise und snapshot.debian.org
+bereitgestellt. Das folgende Angebot gilt zusätzlich, vor allem für Teile unter
+GPL-2.0 wie mawk.
+
+**Schriftliches Angebot:** Für jede auf ghcr.io veröffentlichte Version des
+Images stellt felix-d-git jedem Dritten den vollständigen Quellcode aller darin
+enthaltenen Programme und Bibliotheken unter GPL, LGPL und AGPL (jeweils aller
+Versionen) bereit, einschließlich statisch eingebundener Bibliotheken: als
+Debian-Quellpakete (`.dsc`, `.orig.tar.*`, `.debian.tar.*`) per Download oder auf
+einem Datenträger zu Selbstkosten. Die Anfrage nennt Tag und Digest des Images
+(`docker inspect --format '{{index .RepoDigests 0}}' <image>`). Das Angebot gilt
+drei Jahre ab der letzten Verteilung der jeweiligen Version, auch wenn das
+Repository archiviert wird. Anfrage als GitHub-Issue unter
+<https://github.com/felix-d-git/latex-web-ide/issues>; ist das Repository
+archiviert, per E-Mail an die Adresse im GitHub-Profil von
+[felix-d-git](https://github.com/felix-d-git).
+
+## Hinweise für Betreiber
+
+- Lizenzdateien nicht entfernen: `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+  `DEBIAN-PACKAGES.txt` und `docs/` unter `/app` sowie
+  `/usr/share/doc/*/copyright`. `/licenses` zeigt `LICENSE` und
+  `THIRD_PARTY_NOTICES.md` auch ohne Anmeldung.
+- `UPDATE_REPO` (`.env` bzw. `.update.env`) zeigt standardmäßig auf dieses
+  Repository. Wer dort einen Fork einträgt, bezieht Code und Updates aus dem Fork
+  und ist für dessen Inhalt und Lizenzhinweise selbst verantwortlich.
+- Wer den Code ändert und den Server anderen über das Netz anbietet, muss diesen
+  Nutzern den Quellcode der geänderten Fassung anbieten (AGPL-3.0 §13), z. B.
+  per Link auf das eigene Repository.
+- Wer ein selbst gebautes Image weitergibt (z. B. in eine eigene Registry
+  pusht), verbreitet die enthaltene Drittsoftware selbst und muss deren
+  Quellcode wie oben bereitstellen, mit pandoc auch den der statisch gelinkten
+  Haskell-Bibliotheken.
 
 ## Datensicherung
 
