@@ -1386,3 +1386,7 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 .mcp-perms{ display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
 .mcp-project{ margin: 4px 0; }
 .mcp-project .mcp-perms{ margin-left: 22px; }
+
+/* Lizenz-/Quellcode-Hinweis unter dem Login */
+.auth-legal{ margin-top: 16px; text-align: center; }
+.auth-legal a{ color: var(--ol-primary-text); }

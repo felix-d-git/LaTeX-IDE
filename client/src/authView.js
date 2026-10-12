@@ -47,6 +47,13 @@ export function setupAuthView({ onAuthenticated }) {
   const body = document.getElementById('auth-body');
   const errorEl = document.getElementById('auth-error');
 
+  // AGPL §13: source and licenses reachable without login.
+  const link = (label, href) => Object.assign(document.createElement('a'), { textContent: label, href, target: '_blank', rel: 'noopener' });
+  const legal = note('AGPL-3.0-only · ');
+  legal.classList.add('auth-legal');
+  legal.append(link('Quellcode', '/source'), ' · ', link('Lizenzen', '/licenses'));
+  body.after(legal);
+
   const params = new URLSearchParams(location.search);
   let mode = params.has('invite') ? 'register' : params.has('reset') ? 'reset' : params.has('verify') ? 'verify' : 'login';
   const inviteToken = params.get('invite') || '';

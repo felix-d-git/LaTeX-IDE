@@ -1,6 +1,7 @@
 const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
+const legal = require('./server/lib/legal');
 
 const watch = process.argv.includes('--watch');
 
@@ -20,7 +21,20 @@ const options = {
   target: 'es2020',
   loader: { '.css': 'text' },
   // License notice in every copy of the bundle (pdf.js' @licstart header is not an esbuild legal comment).
-  banner: { js: '/*! latex-web-ide (AGPL-3.0-only). Licenses of bundled third-party code: /licenses */' },
+  banner: {
+    js: [
+      `/*! LaTeX Web IDE ${legal.VERSION} - ${legal.COPYRIGHT}`,
+      ` * AGPL-3.0-only, WITHOUT ANY WARRANTY. Source: ${legal.SOURCE_LINK}`,
+      ' * Includes third-party code, among others:',
+      ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0',
+      ' *   CodeMirror, Lezer - Copyright Marijn Haverbeke and others - MIT',
+      ' *   KaTeX - Copyright Khan Academy and other contributors - MIT',
+      ' *   Yjs, y-indexeddb - Copyright Kevin Jahns, RWTH Aachen University - MIT',
+      ' *   lib0, y-protocols, y-websocket, y-codemirror.next - Copyright Kevin Jahns - MIT',
+      ' * Full license texts and notices: /licenses',
+      ' */',
+    ].join('\n'),
+  },
 };
 
 async function run() {

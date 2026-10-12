@@ -12,6 +12,7 @@ const treeOps = require('./treeOps');
 const { buildTree, isTextFile, safeResolve, isIgnored } = require('./fsTree');
 const { searchProject } = require('./search');
 const { findMainCandidate } = require('./compile');
+const legal = require('./legal');
 
 const MAX_LINES = 400;
 const SECTION_RE = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*(?:\[[^\]]*\])?\s*\{([^}]*)/;
@@ -377,7 +378,13 @@ function createMcp(ctx) {
         return ok({
           protocolVersion: (params && params.protocolVersion) || '2025-03-26',
           capabilities: { tools: {} },
-          serverInfo: { name: 'latex-web-ide', version: ctx.version },
+          serverInfo: {
+            name: 'latex-web-ide',
+            title: 'LaTeX Web IDE',
+            version: ctx.version,
+            description: `AGPL-3.0-only. Quellcode: ${legal.SOURCE_LINK}`,
+            websiteUrl: legal.SOURCE_URL,
+          },
           instructions: 'LaTeX-Projekte lesen/prüfen/bearbeiten. Erst list_projects, dann gezielt outline/search/read_file statt ganze Dateien zu lesen. Kompilieren (compile) ist teuer und läuft asynchron - nur selten nutzen.',
         });
       }

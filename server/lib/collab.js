@@ -1,6 +1,9 @@
 // Live collaboration: one Y.Doc per (project root, text file), served over the
 // standard y-websocket protocol (sync + awareness), so y-websocket's
 // WebsocketProvider on the client talks to it unchanged.
+// Modelled on y-websocket's bin/utils.js (up to 2.x): Copyright (c) 2019
+// Kevin Jahns <kevin.jahns@protonmail.com>, MIT License (text: y-websocket
+// in THIRD_PARTY_NOTICES.md).
 //
 // The .tex file on disk stays the source for latexmk/search/history: every
 // change is written back (debounced). The Yjs state is persisted next to it
