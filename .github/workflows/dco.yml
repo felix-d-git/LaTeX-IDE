@@ -1,0 +1,30 @@
+# Jeder Commit eines Pull Requests braucht eine Zeile "Signed-off-by:"
+# (Developer Certificate of Origin 1.1, siehe CONTRIBUTING.md).
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  signoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Sign-off in allen Commits pruefen
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=$(git rev-list --no-merges "$BASE..$HEAD" | while read -r c; do
+            git log -1 --format=%B "$c" | grep -q '^Signed-off-by: ' || git log -1 --format='%h %s' "$c"
+          done)
+          if [ -n "$missing" ]; then
+            echo "Commits ohne Signed-off-by (git commit -s, nachholen: git rebase --signoff <Basis>):"
+            echo "$missing"
+            exit 1
+          fi

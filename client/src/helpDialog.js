@@ -6,7 +6,7 @@ const SEEN_KEY = 'latex-ide-onboarding-seen-v1';
 
 const SECTIONS = [
   ['Einführung', [
-    'Willkommen in der LaTeX Web IDE. Auf der Startseite legst du Projekte an, lädst ZIPs hoch oder öffnest vorhandene Projekte.',
+    'Willkommen bei LatexIDE. Auf der Startseite legst du Projekte an, lädst ZIPs hoch oder öffnest vorhandene Projekte.',
     'Im Projekt: links die Leiste mit Dateibaum, Suche, Review und Kommentaren; in der Mitte der Editor; rechts das PDF.',
     'Speichern passiert automatisch. Strg+S oder Strg+Enter kompiliert das Hauptdokument.',
     'Unten links findest du Hilfe (?), Einstellungen (Zahnrad) und dein Profil.',
@@ -53,7 +53,7 @@ const SECTIONS = [
   ]],
   // Letzter Reiter = Help ▸ About (AGPL §0/§5: Copyright, Gewährleistungsausschluss, Lizenz, Quellcode).
   ['Über & Lizenz', [
-    `LaTeX Web IDE ${version} – Copyright (C) 2026 felix-d-git.`,
+    `LatexIDE ${version} – Copyright (C) 2026 felix-d-git.`,
     'Freie Software ohne jede Gewährleistung. Weitergabe und Änderung sind unter der GNU Affero General Public License, ausschließlich Version 3 (AGPL-3.0-only), erlaubt.',
     '[Quellcode dieser Version](/source)',
     '[Lizenzen (AGPL & Drittanbieter)](/licenses): Lizenztext und Hinweise zur enthaltenen Fremdsoftware.',
@@ -84,7 +84,7 @@ export function setupHelpDialog() {
   let active = 0;
 
   function render() {
-    heading.textContent = active === ABOUT ? 'Über LaTeX Web IDE' : helpTitle;
+    heading.textContent = active === ABOUT ? 'Über LatexIDE' : helpTitle;
     tabs.innerHTML = '';
     SECTIONS.forEach(([title], i) => {
       const b = document.createElement('button');

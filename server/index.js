@@ -248,7 +248,7 @@ async function sendVerifyMail(req, user) {
   const token = auth.createVerifyToken(user.id);
   await mailer.sendMail({
     to: user.email,
-    subject: 'LaTeX Web IDE - E-Mail-Adresse bestätigen',
+    subject: 'LatexIDE - E-Mail-Adresse bestätigen',
     text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${baseUrl(req)}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
   });
 }
@@ -319,7 +319,7 @@ app.post('/api/auth/forgot-password', limitMail, async (req, res) => {
     const link = `${baseUrl(req)}/?reset=${token}`;
     await mailer.sendMail({
       to: user.email,
-      subject: 'LaTeX Web IDE - Passwort zurücksetzen',
+      subject: 'LatexIDE - Passwort zurücksetzen',
       text: `Zum Zurücksetzen deines Passworts auf diesen Link klicken (gültig 1 Stunde):\n${link}\n\nFalls du das nicht angefordert hast, ignoriere diese Mail.`,
     });
   }
@@ -1892,7 +1892,7 @@ bootstrapAdmin()
       }, 2000).unref();
     }
     server.listen(PORT, authMw.LOCAL_MODE ? '127.0.0.1' : undefined, () => {
-      console.log(`LaTeX Web IDE laeuft auf http://localhost:${PORT}`);
+      console.log(`LatexIDE laeuft auf http://localhost:${PORT}`);
       if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});

@@ -1,4 +1,4 @@
-# LaTeX Web IDE
+# LatexIDE
 
 Selbst gehostete LaTeX-Web-IDE mit Live-Zusammenarbeit: Mehrbenutzer-Server mit
 Weboberfläche und Desktop-App (Windows/macOS) mit lokaler Kopie und
@@ -30,11 +30,6 @@ Alles liegt unter [Releases](https://github.com/felix-d-git/latex-web-ide/releas
 - Setup und macOS-Paket installieren TeX Live 2025 bzw. MacTeX (~5 GB), falls
   noch keines da ist. Das Docker-Image bringt TeX Live 2022 aus Debian mit oder
   hängt ein eigenes ein.
-- Die Desktop-App kann statt `latexmk` auch
-  [Tectonic](https://tectonic-typesetting.github.io) nutzen
-  (`TEX_BACKEND=tectonic`, der Server startet damit nicht). Tectonic muss
-  dafür separat installiert sein und im `PATH` liegen; es lädt fehlende Pakete
-  selbst aus dem Internet nach.
 - Updates aller Varianten: [docs/UPDATES.md](docs/UPDATES.md).
 
 ### Öffentliches oder privates Repository

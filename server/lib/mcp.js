@@ -380,7 +380,7 @@ function createMcp(ctx) {
           capabilities: { tools: {} },
           serverInfo: {
             name: 'latex-web-ide',
-            title: 'LaTeX Web IDE',
+            title: 'LatexIDE',
             version: ctx.version,
             description: `AGPL-3.0-only. Quellcode: ${legal.SOURCE_LINK}`,
             websiteUrl: legal.SOURCE_URL,

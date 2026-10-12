@@ -15,7 +15,7 @@ const SOURCE_LINK = process.env.SOURCE_URL || `${SOURCE_URL}/tree/v${VERSION}`;
 // GET /licenses: eigener Hinweis, dann LICENSE und THIRD_PARTY_NOTICES.md (Klartext).
 function licensesText() {
   const header = [
-    `LaTeX Web IDE ${VERSION}`,
+    `LatexIDE ${VERSION}`,
     COPYRIGHT,
     '',
     'This program is free software: you can redistribute it and/or modify',

@@ -1,4 +1,4 @@
-# LaTeX Web IDE — Arbeitsregeln
+# LatexIDE — Arbeitsregeln
 
 - Persönliches (Server, Pfade, Konten) steht in `CLAUDE.local.md` (gitignored).
 - Branches: `master` = einziger Arbeitsbranch (Mehrbenutzer-Version seit 27.09.2026), Änderungen von Mitwirkenden per Pull Request; `legacy-local` = alte Einzelplatz-Version.

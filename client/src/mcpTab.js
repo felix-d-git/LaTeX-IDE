@@ -45,7 +45,7 @@ function copyField(value, label = 'Kopieren', multiline = false) {
 // Prompt the user pastes into Claude Code / Codex so the agent sets up the connector itself.
 function setupPrompt(token) {
   const url = `${location.origin}/mcp`;
-  return `Richte den MCP-Server meiner LaTeX-Web-IDE als Connector ein (Streamable HTTP, Authentifizierung per Bearer-Token).
+  return `Richte den MCP-Server meines LatexIDE-Servers als Connector ein (Streamable HTTP, Authentifizierung per Bearer-Token).
 
 URL: ${url}
 Header: Authorization: Bearer ${token}

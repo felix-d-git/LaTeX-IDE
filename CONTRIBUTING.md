@@ -14,8 +14,12 @@ Beitrag unter dieser Lizenz einbringen darfst.
 - Ein Contributor License Agreement (CLA) gibt es nicht; das Urheberrecht an
   deinem Beitrag bleibt bei dir. Der Maintainer kann das für künftige Beiträge
   ändern; bereits angenommene Beiträge bleiben davon unberührt.
-- Optional: Sign-off nach dem [Developer Certificate of Origin 1.1](https://developercertificate.org/)
-  mit `git commit -s` (Zeile `Signed-off-by: Name <E-Mail>`).
+- Jeder Commit braucht ein Sign-off nach dem
+  [Developer Certificate of Origin 1.1](https://developercertificate.org/):
+  `git commit -s` (Zeile `Signed-off-by: Name <E-Mail>`). Damit bestätigst du,
+  dass du den Beitrag einbringen darfst. Der Check „DCO“ prüft das bei jedem
+  Pull Request; fehlende Sign-offs nachholen mit
+  `git rebase --signoff <Basis>` und erneutem Push.
 - Fremden Code nur mit kompatibler Lizenz übernehmen und Herkunft samt
   Copyright-Zeile im Kopfkommentar der Datei nennen.
 
