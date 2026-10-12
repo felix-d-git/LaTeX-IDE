@@ -1,10 +1,9 @@
 /* =====================================================================
-   Overleaf-Redesign-Nachbau — Maße/Farben aus OVERLEAF_UI_SPEC.md (R1-R9).
-   Horizontale Aufteilung bewusst über flex-Prozente (nicht über die
-   gemessenen Absolut-px), weil die Messung bei 1243x755 entstand und
-   dieser Rechner ein anderes Seitenverhältnis fährt: die Proportionen
-   sind die Vorgabe, nicht die Pixelbreiten. Vertikale Chrome-Höhen
-   (40/36/32/28/24) sind dagegen 1:1 übernommen.
+   Oberfläche der IDE — Farben/Maße als Tokens in :root.
+   Horizontale Aufteilung bewusst über flex-Prozente statt fester
+   Pixelbreiten, damit das Layout bei jedem Seitenverhältnis passt: die
+   Proportionen sind die Vorgabe, nicht die Pixelbreiten. Vertikale
+   Chrome-Höhen sind dagegen feste px-Werte.
    ===================================================================== */
 
 :root{
@@ -148,7 +147,7 @@ html, body, #app {
   background: transparent; color: var(--ol-text);
   font: 700 14px/20px var(--ol-font); cursor: pointer;
 }
-/* bewusst ohne Flächenrückmeldung — so gemessen (R3, Block 3) */
+/* bewusst ohne Flächenrückmeldung beim Hover */
 #active-project-label:hover{ background: transparent; }
 #active-project-label .project-name{
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 20px;
@@ -558,7 +557,7 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
    R6 — PDF-Spalte
    --------------------------------------------------------------- */
 
-/* overflow bleibt sichtbar, damit die SyncTeX-Pille wie gemessen 15px über
+/* overflow bleibt sichtbar, damit die SyncTeX-Pille 15px über
    die Panelkante in die Editor-Spalte ragen kann (R1). Geclippt wird
    stattdessen in #pdf-container, das ohnehin scrollt. */
 #pdf-pane{
@@ -689,10 +688,8 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 #btn-sync-to-pdf .ol-icon, #btn-sync-to-code .ol-icon{ width: 16px; height: 16px; }
 
 /* Log-/Fehler-Overlay (R1/R6) */
-/* Abweichung von R6/CSS-Patch (`inset:0`): das Overlay beginnt erst unter der
-   PDF-Toolbar, damit Recompile/Download aus der Log-Ansicht heraus erreichbar
-   bleiben. Der geöffnete Zustand war im Original nicht vermessen (R6,
-   Unsicherheit 3), die Messung widerspricht dem also nicht. */
+/* Bewusst nicht `inset:0`: das Overlay beginnt erst unter der PDF-Toolbar,
+   damit Recompile/Download aus der Log-Ansicht heraus erreichbar bleiben. */
 #log-panel{
   position: absolute; inset: var(--ol-pdf-toolbar-h) 0 0 0; max-height: none;
   background: var(--ol-surface-alt); z-index: var(--z-log);
@@ -723,7 +720,7 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
   background: var(--ol-surface-alt); font: 400 11px/18px var(--ol-font-mono);
 }
 @media (max-width: 800px){ #shortcuts-grid{ grid-template-columns: 1fr; } }
-/* Overleaf-Log: Tabs mit Zählern, Karten mit farbigem Kopf, Fuß, Back-to-PDF-Pille. */
+/* Log-Ansicht: Tabs mit Zählern, Karten mit farbigem Kopf, Fuß, Back-to-PDF-Pille. */
 #log-tabs{ display: flex; gap: 4px; }
 .log-tab{
   height: 28px; padding: 0 10px; border: 0; border-radius: var(--ol-r-pill);
@@ -892,7 +889,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   box-shadow: var(--ol-shadow);
 }
 .dialog-box.modal-lg{ max-width: 960px; }
-/* Overleaf: Dialog gleitet in .3s von oben ein (Bootstrap .modal.fade). */
+/* Dialog gleitet in .3s von oben ein (wie Bootstrap .modal.fade). */
 .dialog-box{ animation: dialog-in .3s ease-out; }
 @keyframes dialog-in{ from{ transform: translateY(-50px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce){ .dialog-box{ animation: none; } }
@@ -1233,7 +1230,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 #app.layout-focus #resizer-sidebar{ display: none; }
 
 /* ---------------------------------------------------------------
-   Dunkelmodus (nicht Teil der Messung — nur Token-Umbelegung,
+   Dunkelmodus (nur Token-Umbelegung,
    Settings > Appearance schaltet data-theme um)
    --------------------------------------------------------------- */
 
@@ -1276,7 +1273,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 }
 :root[data-theme="dark"] .dash-search{ background: var(--ol-surface-alt); }
 
-/* Overleaf-Fokusring: 2px weiß, 3px #366cbf, 5px #97b6e5 - nur bei Tastaturfokus. */
+/* Fokusring nur bei Tastaturfokus. */
 :focus-visible{
   outline: none;
   box-shadow: 0 0 0 2px #fff, 0 0 0 3px #366cbf, 0 0 0 5px #97b6e5;

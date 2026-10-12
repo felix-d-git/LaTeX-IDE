@@ -572,7 +572,7 @@ async function openProjectByRoot(root) {
 }
 
 // --- Kompilieren (R6: Zustand steckt im Button und im Badge, keine
-//     eigene Statuszeile - die gibt es im Original nicht) ----------------
+//     eigene Statuszeile) ------------------------------------------------
 
 let autoCompile = localStorage.getItem('latex-ide-autocompile') === '1';
 
@@ -770,7 +770,7 @@ const menuCtx = {
 
 setupMenuBar(menuCtx);
 
-// Overleaf-Kontextmenü im Editor statt des Browser-Standardmenüs.
+// Eigenes Kontextmenü im Editor statt des Browser-Standardmenüs.
 editorMgr.view.dom.addEventListener('contextmenu', (e) => {
   if (!editorMgr.getActivePath()) return;
   e.preventDefault();

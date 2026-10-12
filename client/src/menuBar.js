@@ -236,7 +236,7 @@ export function setupLayoutMenu(ctx) {
 }
 
 // R3: rechtsbündiges Projekt-Dropdown am Projekttitel; dupliziert bewusst
-// Teile des File-Menüs, genau wie im Original.
+// Teile des File-Menüs.
 export function setupProjectMenu(ctx) {
   const btn = document.getElementById('active-project-label');
   btn.addEventListener('click', (e) => {
