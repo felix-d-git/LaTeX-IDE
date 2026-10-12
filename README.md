@@ -1,6 +1,6 @@
 # LaTeX Web IDE
 
-Overleaf-artige LaTeX-Umgebung zum Selbsthosten: Mehrbenutzer-Server mit
+Selbst gehostete LaTeX-Web-IDE mit Live-Zusammenarbeit: Mehrbenutzer-Server mit
 Weboberfläche und Desktop-App (Windows/macOS) mit lokaler Kopie und
 Offline-Kompilieren. Kompiliert mit einer echten TeX-Live-Installation
 (`latexmk`) statt eines Cloud-Compilers.
@@ -30,6 +30,11 @@ Alles liegt unter [Releases](https://github.com/felix-d-git/latex-web-ide/releas
 - Setup und macOS-Paket installieren TeX Live 2025 bzw. MacTeX (~5 GB), falls
   noch keines da ist. Das Docker-Image bringt TeX Live 2022 aus Debian mit oder
   hängt ein eigenes ein.
+- Die Desktop-App kann statt `latexmk` auch
+  [Tectonic](https://tectonic-typesetting.github.io) nutzen
+  (`TEX_BACKEND=tectonic`, der Server startet damit nicht). Tectonic muss
+  dafür separat installiert sein und im `PATH` liegen; es lädt fehlende Pakete
+  selbst aus dem Internet nach.
 - Updates aller Varianten: [docs/UPDATES.md](docs/UPDATES.md).
 
 ### Öffentliches oder privates Repository
@@ -49,10 +54,16 @@ können dann gelöscht werden.
 ### Optionale Dienste (`.env`)
 
 - `LANGUAGETOOL_URL` — eigener [LanguageTool](https://languagetool.org)-Server
-  (LGPL, z. B. Docker-Image `erikvl87/languagetool`), etwa
+  (LGPL, z. B. das inoffizielle Docker-Image `erikvl87/languagetool`), etwa
   `http://languagetool:8010`. Dann bietet Einstellungen ▸ Spelling die
   Grammatikprüfung an; ohne Eintrag ist sie aus. Texte gehen nur an diesen
-  Server.
+  Server. Die öffentliche API `api.languagetool.org` ist dafür ungeeignet und
+  nicht voreingestellt: Ihre
+  [Bedingungen](https://dev.languagetool.org/public-http-api) (Stand
+  Oktober 2026) erlauben höchstens 20 KB Text pro Anfrage, untersagen
+  automatisierte Anfragen und verlangen einen sichtbaren Link auf
+  LanguageTool; die Texte gingen zudem an die LanguageTooler GmbH. Aktuelle
+  Grenzen dort prüfen.
 - LanguageTool auf dem eigenen Rechner: Einstellungen ▸ Spelling ▸
   „LanguageTool-URL (eigener Rechner)“, z. B. `http://localhost:8081`. Der
   Browser (Web-UI und Desktop-App) fragt dann `<URL>/v2/check` direkt an, der
@@ -67,6 +78,9 @@ können dann gelöscht werden.
   ohne Pandoc meldet der Export einen Fehler.
 - Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
   doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
+  Der Zotero-API-Key wird auf dem Server gespeichert (`auth-data.json` im
+  Datenordner) und nur für Abrufe bei `api.zotero.org` verwendet; beim Anlegen
+  nur Lesezugriff erteilen.
 
 ### Verschluesselte Daten (optional)
 
@@ -176,3 +190,34 @@ Zielmaschine).
   Portweiterleitung/echter Domain steht - Google OAuth verlangt eine
   öffentlich erreichbare HTTPS-Redirect-URI, die auf reinem `localhost` nicht
   funktioniert.
+
+## Lizenz
+
+Copyright (C) 2026 felix-d-git
+
+Freie Software unter der GNU Affero General Public License, ausschließlich
+Version 3 (`AGPL-3.0-only`), siehe [LICENSE](LICENSE). Sie wird OHNE JEDE
+GEWÄHRLEISTUNG bereitgestellt (Abschnitte 15 und 16 der Lizenz). Das gilt für
+alle Versionen, Tags und Commits dieses Repositorys, auch für die vor Einführung
+der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
+
+- Drittkomponenten und ihre Lizenzen:
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), im laufenden Programm unter
+  `/licenses` (Help ▸ Licenses). Software im Docker-Image:
+  [docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image).
+- Quellcode: Jede Instanz verweist unter `/source` (Help ▸ Source code) auf
+  ihren Quellcode, standardmäßig auf den Tag ihrer Version in diesem
+  Repository. Wer eine veränderte Fassung betreibt oder weitergibt, setzt
+  `SOURCE_URL` auf den eigenen Quellcode (AGPL Abschnitt 13 bzw. 6, siehe
+  `.env.example`).
+- Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Marken
+
+Overleaf ist eine Marke der Digital Science UK Limited. Dieses Projekt ist eine
+unabhängige Eigenentwicklung, kein Fork von Overleaf, und steht in keiner
+Verbindung zu Overleaf oder Digital Science. Zotero ist eine eingetragene Marke
+der Corporation for Digital Scholarship; die IDE greift nur über die
+Zotero-Web-API auf Bibliotheken zu und steht in keiner Verbindung zur
+Corporation for Digital Scholarship. Weitere genannte Namen können Marken
+ihrer jeweiligen Inhaber sein.

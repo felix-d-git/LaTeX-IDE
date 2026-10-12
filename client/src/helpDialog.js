@@ -1,5 +1,7 @@
 // Help page: first tab is the onboarding tour, the rest explain the areas.
 // Opens once automatically for every new browser (localStorage flag).
+import { version } from '../../package.json';
+
 const SEEN_KEY = 'latex-ide-onboarding-seen-v1';
 
 const SECTIONS = [
@@ -32,6 +34,7 @@ const SECTIONS = [
     'Beschreibung vergeben und unter „Personal Library“ „Allow library access“ (Lesen) aktivieren; speichern und den angezeigten Schlüssel kopieren.',
     'Auf derselben Seite steht „Your userID for use in API calls“ – diese Zahl ist die Library-ID. Bei einer Gruppenbibliothek ist es die Zahl aus der Gruppen-URL (zotero.org/groups/<ID>/…), Bibliothek = „Gruppe“.',
     'In der IDE: Einstellungen ▸ References: Library-ID und API-Key eintragen, „Zotero-Zugang speichern“.',
+    'Der API-Key wird auf dem Server gespeichert, der damit deine Bibliothek bei zotero.org abruft – nur Lesezugriff erteilen.',
     'Danach Neue Datei ▸ References ▸ Zotero: „Aus Zotero importieren“ legt die .bib-Datei im Projekt an.',
   ]],
   ['Offline & Desktop-App', [
@@ -48,13 +51,20 @@ const SECTIONS = [
   ['Tastenkürzel', [
     'Alle Tastenkürzel lassen sich unter Einstellungen → Editor → „Tastenkürzel bearbeiten…“ ansehen und ändern.',
   ]],
+  // Letzter Reiter = Help ▸ About (AGPL §0/§5: Copyright, Gewährleistungsausschluss, Lizenz, Quellcode).
+  ['Über & Lizenz', [
+    `LaTeX Web IDE ${version} – Copyright (C) 2026 felix-d-git.`,
+    'Freie Software ohne jede Gewährleistung. Weitergabe und Änderung sind unter der GNU Affero General Public License, ausschließlich Version 3 (AGPL-3.0-only), erlaubt.',
+    '[Quellcode dieser Version](/source)',
+    '[Lizenzen (AGPL & Drittanbieter)](/licenses): Lizenztext und Hinweise zur enthaltenen Fremdsoftware.',
+  ]],
 ];
 
-// Text mit [Label](https://…)-Links in ein Element schreiben (target=_blank, noopener).
+// Text mit [Label](https://…)- oder [Label](/pfad)-Links in ein Element schreiben (target=_blank, noopener).
 export function linkify(el, text) {
   el.textContent = '';
   let last = 0;
-  for (const m of text.matchAll(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g)) {
+  for (const m of text.matchAll(/\[([^\]]+)\]\((https:\/\/[^)\s]+|\/(?!\/)[^)\s]*)\)/g)) {
     el.append(text.slice(last, m.index));
     const a = Object.assign(document.createElement('a'), { textContent: m[1], href: m[2], target: '_blank', rel: 'noopener' });
     el.append(a);
@@ -68,9 +78,13 @@ export function setupHelpDialog() {
   const modal = document.getElementById('help-dialog');
   const tabs = document.getElementById('help-tabs');
   const body = document.getElementById('help-body');
+  const heading = modal.querySelector('.dialog-header h3');
+  const helpTitle = heading.textContent;
+  const ABOUT = SECTIONS.length - 1;
   let active = 0;
 
   function render() {
+    heading.textContent = active === ABOUT ? 'Über LaTeX Web IDE' : helpTitle;
     tabs.innerHTML = '';
     SECTIONS.forEach(([title], i) => {
       const b = document.createElement('button');
@@ -106,5 +120,5 @@ export function setupHelpDialog() {
   try { seen = !!localStorage.getItem(SEEN_KEY); } catch {}
   if (!seen) show(0);
 
-  return { show, hide, isOpen };
+  return { show, hide, isOpen, showAbout: () => show(ABOUT) };
 }

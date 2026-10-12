@@ -78,7 +78,11 @@ export function setupProfileDialog({ currentUser, onLogout, onShowAdmin }) {
   function renderDownloadSection() {
     const box = el('div');
     const list = el('div');
-    box.append(el('h4', null, 'Desktop-App herunterladen'), list);
+    // Gleiche Version wie dieser Server, also gilt sein Quellcode-Link auch für die Installer.
+    const link = (text, href) => Object.assign(el('a', null, text), { href, target: '_blank', rel: 'noopener' });
+    const legal = note('Freie Software (AGPL-3.0-only) · ');
+    legal.append(link('Quellcode', '/source'), ' · ', link('Lizenzen', '/licenses'));
+    box.append(el('h4', null, 'Desktop-App herunterladen'), list, legal);
     authApi.desktopRelease().then(
       (rel) => {
         const links = [['windows', 'Windows'], ['macos', 'macOS']].filter(([os]) => rel[os]);

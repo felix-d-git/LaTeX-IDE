@@ -164,9 +164,10 @@ export function setupMenuBar(ctx) {
         { type: 'divider' },
         // Neutrale LaTeX-Doku (kein Bezug auf fremde Marken im veröffentlichten Tool).
         { label: 'Documentation', onClick: () => window.open('https://en.wikibooks.org/wiki/LaTeX', '_blank', 'noopener') },
-        // AGPL-3.0 §13: users of the hosted version must be able to get the source.
-        { label: 'Source code (AGPL-3.0)', onClick: () => window.open('https://github.com/felix-d-git/latex-web-ide', '_blank', 'noopener') },
-        { label: 'Third-party licenses', onClick: () => window.open('/licenses', '_blank', 'noopener') },
+        // AGPL-3.0 §13: users of the hosted version must be able to get the source (/source -> SOURCE_URL).
+        { label: 'Source code (AGPL-3.0-only)', onClick: () => window.open('/source', '_blank', 'noopener') },
+        { label: 'Licenses (AGPL & third-party)', onClick: () => window.open('/licenses', '_blank', 'noopener') },
+        { label: 'About LaTeX Web IDE', onClick: () => ctx.onShowAbout() },
       ],
     },
   ];

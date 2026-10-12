@@ -744,6 +744,7 @@ const menuCtx = {
   onShowShortcuts: () => shortcutsReference.show(),
   onShowSettings: () => settingsDialog.show(),
   onShowHelp: () => helpDialog.show(),
+  onShowAbout: () => helpDialog.showAbout(),
   onAddComment: () => commentsPanel.triggerAddComment(),
   getPdfPath: () => pdfViewer.getCurrentPath(),
   onZoom: (delta) => pdfViewer.zoom(delta),

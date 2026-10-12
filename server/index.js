@@ -33,6 +33,7 @@ const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
+const legal = require('./lib/legal');
 
 const RAW_MIME = {
   '.png': 'image/png',
@@ -75,12 +76,11 @@ app.use(authMw.checkCsrf);
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/dist', express.static(path.join(__dirname, '..', 'client', 'dist')));
 app.use('/katex', express.static(path.join(__dirname, '..', 'node_modules', 'katex', 'dist')));
-// Lizenzhinweise (MIT/BSD-Pflicht auch für das an den Browser gelieferte Bundle), ohne Login.
+// Lizenzhinweise (MIT/BSD-Pflicht auch für das an den Browser gelieferte Bundle) und Quellcode (AGPL §13), ohne Login.
 app.get('/licenses', (req, res) => {
-  const root = path.join(__dirname, '..');
-  const text = ['LICENSE', 'THIRD_PARTY_NOTICES.md'].map((f) => fs.readFileSync(path.join(root, f), 'utf8'));
-  res.type('text/plain; charset=utf-8').send(text.join('\n\n' + '='.repeat(72) + '\n\n'));
+  res.type('text/plain; charset=utf-8').send(legal.licensesText());
 });
+app.get('/source', (req, res) => res.redirect(legal.SOURCE_LINK));
 
 // Fehlende/gesperrte Datei beim Streamen: 404 statt unbehandeltem Stream-Fehler (Server-Absturz).
 function streamFile(res, abs) {
@@ -383,7 +383,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
 // the update) | auto (host cron installs nightly). Installing is always done by
 // scripts/server-update.sh on the host; "button" only drops a request file it picks up.
 const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
-const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/latex-web-ide';
+const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/latex-web-ide
 // Mit Vault ist DATA_DIR tmpfs im Container → Marker in VAULT_DIR, das der Host sieht
 // (vault.js ignoriert dort Dateien, die kein Eintrag sind).
 const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
