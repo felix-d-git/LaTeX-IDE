@@ -15,7 +15,7 @@ const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
-const { syncFolder, moveDir } = require('./lib/localSync');
+const { syncFolder, copyDirs, removeDirs, caseInsensitive } = require('./lib/localSync');
 const legal = require('./lib/legal');
 const os = require('os');
 const { spawn, execFileSync } = require('child_process');
@@ -191,12 +191,12 @@ app.get('/desktop-callback', (req, res) => {
 });
 
 app.get('/api/desktop/info', (req, res) => {
-  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
+  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION, syncWarnings: [...syncWarnings.values()] });
 });
 
 // --- local copy folder (settings) ---
-// Moves all owned project folders to a new location: copy, verify count + size, only then
-// delete the old ones. Sync is paused meanwhile.
+// Moves all owned project folders to a new location: copy, verify count + size, switch to the
+// new folder, only then delete the old ones. Sync is paused meanwhile.
 app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
   const dir = String((req.body && req.body.dir) || '').trim();
   if (process.env.LATEX_IDE_LOCAL) return res.status(409).json({ error: 'Ordner ist per Umgebungsvariable LATEX_IDE_LOCAL festgelegt.' });
@@ -214,7 +214,7 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
     await syncing; // let a running sync finish, then wait for queued per-project syncs
     await syncLock;
     const names = owned.map((p) => path.basename(localDirOf(p)));
-    const moved = moveDir(LOCAL_DIR, target, names);
+    const moved = copyDirs(LOCAL_DIR, target, names);
     const old = LOCAL_DIR;
     LOCAL_DIR = target;
     config = { ...config, localDir: target };
@@ -223,7 +223,9 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
       current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
       writeJson(path.join(MIRROR_DIR, 'current.json'), current);
     }
-    res.json({ ok: true, localDir: target, moved });
+    const left = removeDirs(old, moved);
+    if (left.length) console.error(`Alter Ordner nicht vollständig entfernt (${old}): ${left.join(', ')}`);
+    res.json({ ok: true, localDir: target, moved: moved.length, left, oldDir: old });
   } catch (e) {
     res.status(500).json({ error: e.message });
   } finally {
@@ -343,6 +345,9 @@ const syncKey = (id) => String(id).replace(/[^\w-]/g, '_');
 const ownedEntry = (projectId) => owned.find((p) => p.projectId === projectId);
 const localDirOf = (p) => path.join(LOCAL_DIR, p.name.replace(/[<>:"/\\|?*]/g, '_'));
 
+// Per project: last sync problems the user should know about (shown under Settings -> Lokale Kopie).
+const syncWarnings = new Map(); // projectId -> text
+
 // One sync at a time: the periodic run and a compile must not touch a folder together.
 let syncLock = Promise.resolve();
 function syncOwned(p) {
@@ -357,8 +362,7 @@ async function syncOwnedNow(p) {
     if (!res.ok) throw new Error(`${what} fehlgeschlagen (HTTP ${res.status})`);
     return res;
   };
-  const dir = localDirOf(p);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = localDirOf(p); // syncFolder creates it; a missing folder means "download only"
   const r = await syncFolder(dir, path.join(SYNC_DIR, syncKey(p.projectId) + '.json'), {
     manifest: () => remoteJson(`/api/collab/manifest?${q}`),
     download: async (rel) => Buffer.from(await (await need(await remote(`/api/raw?${q}&path=${encodeURIComponent(rel)}`), rel)).arrayBuffer()),
@@ -367,6 +371,15 @@ async function syncOwnedNow(p) {
     remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
   });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
+  const warn = [];
+  if (r.heldBack.length) {
+    warn.push(`${r.heldBack.length} lokal fehlende Dateien wurden NICHT auf dem Server gelöscht (Sicherheitsgrenze): ${r.heldBack.slice(0, 5).join(', ')}${r.heldBack.length > 5 ? ', …' : ''}. Absichtlich gelöscht? Dann bitte in der Weboberfläche löschen.`);
+  }
+  if (r.skipped.length) warn.push(`Dateinamen, die sich nur in Groß-/Kleinschreibung unterscheiden, werden nicht offline abgeglichen: ${r.skipped.join(', ')}`);
+  if (warn.length) {
+    syncWarnings.set(p.projectId, `${p.name}: ${warn.join(' ')}`);
+    console.error(`Sync ${p.name}: ${warn.join(' ')}`);
+  } else syncWarnings.delete(p.projectId);
   return { ...r, dir };
 }
 
@@ -459,9 +472,12 @@ async function syncMirror() {
       })
     );
   }
+  // Case-insensitive disk: "kapitel.tex" -> "Kapitel.tex" on the server is the same local file,
+  // which was just downloaded under the new name - only forget the old index entry.
+  const folded = caseInsensitive(dir) ? new Set([...wanted].map((r) => r.toLowerCase())) : null;
   for (const rel of Object.keys(index)) {
     if (wanted.has(rel)) continue;
-    fs.rmSync(inside(dir, rel), { force: true });
+    if (!folded || !folded.has(rel.toLowerCase())) fs.rmSync(inside(dir, rel), { force: true });
     delete index[rel];
   }
   writeJson(indexPath, index);

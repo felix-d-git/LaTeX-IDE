@@ -417,11 +417,20 @@ verschieben? Der alte Ordner bleibt danach leer. Der Zielordner muss leer oder n
       const d = r ? await r.json().catch(() => ({})) : {};
       btn.disabled = false;
       if (r && r.ok) desktopInfo.localDir = d.localDir;
-      msg.textContent = r && r.ok ?`Fertig: ${d.moved} Projekt(e) nach ${d.localDir} verschoben.` : `Fehler: ${d.error || 'Keine Antwort'}`;
+      const left = d.left && d.left.length ? ` Im alten Ordner ${d.oldDir} ist noch etwas übrig (${d.left.join(', ')}) - bitte von Hand löschen.` : '';
+      msg.textContent = r && r.ok ? `Fertig: ${d.moved} Projekt(e) nach ${d.localDir} verschoben.${left}` : `Fehler: ${d.error || 'Keine Antwort'}`;
     });
     wrap.appendChild(field('Ordner der lokalen Kopie', input));
     wrap.appendChild(btn);
     wrap.appendChild(msg);
+    // Sync problems of the last run (held-back deletions, case-only name clashes), fetched fresh.
+    const warnings = document.createElement('div');
+    wrap.appendChild(warnings);
+    fetch('/api/desktop/info').then((r) => (r.ok ? r.json() : null)).then((d) => {
+      for (const text of (d && d.syncWarnings) || []) {
+        warnings.appendChild(Object.assign(document.createElement('p'), { className: 'settings-inert-note', textContent: `⚠ ${text}` }));
+      }
+    }).catch(() => {});
     return wrap;
   }
 
