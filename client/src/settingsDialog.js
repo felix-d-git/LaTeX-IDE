@@ -349,6 +349,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
       'Speichern, dann Neue Datei ▸ References ▸ Zotero.',
     ]) zHelp.appendChild(linkify(document.createElement('li'), s));
     wrap.appendChild(zHelp);
+    wrap.appendChild(note('Der API-Key wird auf dem Server gespeichert und nur für Abrufe bei api.zotero.org verwendet. Zotero ist eine Marke der Corporation for Digital Scholarship; dieses Projekt steht in keiner Verbindung dazu.'));
     wrap.appendChild(field('Zotero-Bibliothek', zType));
     wrap.appendChild(field('Zotero User-/Gruppen-ID (leer = Zugang löschen)', zId));
     wrap.appendChild(field('Zotero API-Key', zKey));

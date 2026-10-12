@@ -210,11 +210,10 @@ Versionen) bereit, einschließlich statisch eingebundener Bibliotheken: als
 Debian-Quellpakete (`.dsc`, `.orig.tar.*`, `.debian.tar.*`) per Download oder auf
 einem Datenträger zu Selbstkosten. Die Anfrage nennt Tag und Digest des Images
 (`docker inspect --format '{{index .RepoDigests 0}}' <image>`). Das Angebot gilt
-drei Jahre ab der letzten Verteilung der jeweiligen Version, auch wenn das
-Repository archiviert wird. Anfrage als GitHub-Issue unter
-<https://github.com/felix-d-git/latex-web-ide/issues>; ist das Repository
-archiviert, per E-Mail an die Adresse im GitHub-Profil von
-[felix-d-git](https://github.com/felix-d-git).
+drei Jahre ab der letzten Verteilung der jeweiligen Version. Anfrage als
+GitHub-Issue unter <https://github.com/felix-d-git/latex-web-ide/issues>; das
+Repository bleibt dafür mindestens bis zum Ende dieser Frist öffentlich und nimmt
+Issues an.
 
 ## Hinweise für Betreiber
 

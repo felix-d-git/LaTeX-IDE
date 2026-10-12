@@ -1,8 +1,8 @@
 # LaTeX Web IDE — Arbeitsregeln
 
 - Persönliches (Server, Pfade, Konten) steht in `CLAUDE.local.md` (gitignored).
-- Branches: `master` = Mehrbenutzer-Version (seit 27.09.2026), `multiuser` = Vorab-Stand zum Testen (ab 0.3.0, master folgt nach Freigabe), `legacy-local` = alte Einzelplatz-Version.
-- TeX-Backend per `TEX_BACKEND` (`latexmk` Standard, `tectonic`): tectonic nur in der Desktop-App, `server/index.js` verweigert den Start damit (liest Dateien außerhalb des Projekts). TeX läuft nur als externer Prozess (Lizenz: AGPL-3.0 + bloße Zusammenstellung).
+- Branches: `master` = einziger Arbeitsbranch (Mehrbenutzer-Version seit 27.09.2026), Änderungen von Mitwirkenden per Pull Request; `legacy-local` = alte Einzelplatz-Version.
+- TeX-Backend per `TEX_BACKEND` (`latexmk` Standard, `tectonic`): tectonic nur in der Desktop-App, `server/index.js` verweigert den Start damit (liest Dateien außerhalb des Projekts). TeX läuft nur als externer Prozess (Lizenz: AGPL-3.0-only + bloße Zusammenstellung).
 - Installer bauen: `installer\build-release.ps1`; Inno Setup per `$env:ISCC` (auch portabel), Ausgabe `installer\out\` (gitignored).
 - Desktop-App: `server/desktop.js` (Port 3178, `LATEX_IDE_DATA`), kompiliert lokal gegen einen Spiegel; Installer unter `installer/`. Server-Adresse aus `REMOTE_URL` → `server.json` im App-Ordner (kein Default; fehlt sie, beendet sich die App).
 - Selbsthosten: `docker-compose.yml` (generisch, `TEXLIVE=apt` = Debian-texlive-full im Image) oder Windows-Installer-Option „Eigener Server" (`LatexIDE-Server.cmd`, `.env` im App-Ordner). Anleitung im README.

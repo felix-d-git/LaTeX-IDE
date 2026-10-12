@@ -900,6 +900,11 @@ app.post('/api/import/zotero', limitToken, async (req, res) => {
       const { data, headers: h } = await fetchUrl(`${base}&start=${start}`, headers);
       total = Number(h['total-results']) || 0;
       parts.push(data.toString('utf8').trim());
+      const backoff = Number(h.backoff) || 0;
+      if (backoff && start + 100 < total) {
+        if (backoff > 30) throw new Error(`Zotero bittet um ${backoff} s Pause, bitte später erneut importieren.`);
+        await new Promise((r) => setTimeout(r, backoff * 1000));
+      }
     }
     const name = String(req.body.name || 'zotero.bib').trim();
     if (!/\.bib$/i.test(name)) return res.status(400).json({ error: 'Dateiname muss auf .bib enden.' });
