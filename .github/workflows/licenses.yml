@@ -1,0 +1,29 @@
+# Prueft bei jedem Push und Pull Request, dass THIRD_PARTY_NOTICES.md zu
+# package-lock.json passt. Schlaegt auch fehl, wenn ein Prod-Paket fehlt oder keinen
+# Lizenztext hat oder pdfjs-dist/katex nicht die Version haben, fuer die die
+# Zusatzhinweise in scripts/licenses.js geprueft wurden. Neu erzeugen:
+# node scripts/licenses.js
+name: Licenses
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  notices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+
+      - name: THIRD_PARTY_NOTICES.md pruefen
+        run: node scripts/licenses.js --check
