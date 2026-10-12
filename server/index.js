@@ -12,7 +12,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
+const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, isUtf8, decodeCp1252, NOT_UTF8 } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -209,6 +209,7 @@ function ensureWatcher(root) {
     // Edited on disk outside the IDE -> fold into the live doc; clients get it via Yjs.
     // ponytail: an external edit landing within the 500ms persist window of a live edit
     // wins over that edit (last writer); fine for occasional external tools.
+    if (msg.type === 'fileNotUtf8') return collab.dropDoc(root, msg.path);
     if (msg.type === 'fileChanged') collab.applyExternalText(root, msg.path, msg.content);
     if (msg.type === 'fileDeleted') collab.onPathMoved(root, msg.path, null);
     broadcast(root, msg);
@@ -741,7 +742,7 @@ app.get('/api/collab/epoch', (req, res) => {
     safeResolve(root, req.query.path);
     res.json({ projectId: projectIdOf(root), epoch: collab.getEpoch(root, req.query.path) });
   } catch (e) {
-    res.status(404).json({ error: e.message });
+    res.status(e.notUtf8 ? 415 : 404).json({ error: e.message, notUtf8: !!e.notUtf8 });
   }
 });
 
@@ -781,6 +782,13 @@ app.get('/api/collab/owned', (req, res) => {
   res.json({ projects: list });
 });
 
+// New bytes of a text file on disk -> open editors. Not UTF-8 (e.g. Latin-1):
+// the live doc can't hold it, so it is dropped instead of filled with U+FFFD.
+function liveUpdate(root, rel, buf) {
+  if (isUtf8(buf)) collab.applyExternalText(root, rel, buf.toString('utf8'));
+  else collab.dropDoc(root, rel);
+}
+
 // Desktop sync upload/delete of one file (bytes as body) in an owned project.
 app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
   const root = requireSyncRoot(req, res);
@@ -793,7 +801,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(buf).digest('hex'));
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
-    if (isTextFile(rel)) collab.applyExternalText(root, rel, buf.toString('utf8'));
+    if (isTextFile(rel)) liveUpdate(root, rel, buf);
     safeSnapshot(root, { trigger: 'autosave' });
     res.json({ ok: true });
   } catch (e) {
@@ -880,7 +888,9 @@ function appendOrUpload(root, dir, name, text, replace = false) {
     // Bestehende .bib ergänzen, auch wenn sie gerade live bearbeitet wird.
     collab.flushRoot(root);
     const relPath = path.relative(root, abs).split(path.sep).join('/');
-    const content = replace ? text : fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
+    const old = fs.readFileSync(abs);
+    if (!replace && !isUtf8(old)) throw new Error(NOT_UTF8);
+    const content = replace ? text : old.toString('utf8').replace(/\s*$/, '\n\n') + text;
     state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
@@ -1305,6 +1315,27 @@ app.put('/api/file', (req, res) => {
   }
 });
 
+// Latin-1/Windows-1252 file -> UTF-8, so it can be edited live. The old bytes are kept
+// as a version in the history first; inputenc in the same file is switched to utf8.
+app.post('/api/file/convert-utf8', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  try {
+    const rel = String(req.body.path || '');
+    if (!isTextFile(rel) || isIgnored(rel.split('/')[0])) throw new Error('Keine Textdatei.');
+    const abs = safeResolve(root, rel);
+    const buf = fs.readFileSync(abs);
+    if (isUtf8(buf)) return res.json({ ok: true, converted: false });
+    history.snapshot(root, { label: `Vor UTF-8-Umwandlung: ${rel}`, trigger: 'restore' });
+    const text = decodeCp1252(buf).replace(/(\\usepackage\s*\[)(?:latin1|latin9|ansinew|cp1252)(\]\s*\{inputenc\})/g, '$1utf8$2');
+    state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(text).digest('hex'));
+    fs.writeFileSync(abs, text, 'utf8');
+    res.json({ ok: true, converted: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post('/api/tree/folder', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
@@ -1380,7 +1411,7 @@ app.post('/api/tree/upload', (req, res) => {
     const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
     // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
     if (req.body.overwrite && isTextFile(relPath)) {
-      collab.applyExternalText(root, relPath, Buffer.from(req.body.content, 'base64').toString('utf8'));
+      liveUpdate(root, relPath, Buffer.from(req.body.content, 'base64'));
     }
     res.json({ ok: true, path: relPath });
   } catch (e) {
@@ -1755,13 +1786,13 @@ app.post('/api/history/restore', (req, res) => {
   try {
     if (!id || !file || !isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('id und Textdatei sind erforderlich.');
     const abs = safeResolve(root, file);
-    const content = history.readSnapshotFile(root, id, file);
-    if (content === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
+    const buf = history.readSnapshotBuffer(root, id, file); // bytes, so a Latin-1 file stays intact
+    if (buf === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
     collab.flushRoot(root);
     history.snapshot(root, { trigger: 'restore' }); // aktuellen Stand sichern
-    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
-    fs.writeFileSync(abs, content, 'utf8');
-    collab.applyExternalText(root, file, content); // live fuer alle offenen Editoren
+    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(buf).digest('hex'));
+    fs.writeFileSync(abs, buf);
+    liveUpdate(root, file, buf); // live fuer alle offenen Editoren
     const entry = safeSnapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
     res.json({ ok: true, entry });
   } catch (e) {

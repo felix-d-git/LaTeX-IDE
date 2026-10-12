@@ -9,7 +9,7 @@ const auth = require('./auth');
 const collab = require('./collab');
 const comments = require('./comments');
 const treeOps = require('./treeOps');
-const { buildTree, isTextFile, safeResolve, isIgnored } = require('./fsTree');
+const { buildTree, isTextFile, safeResolve, isIgnored, decodeCp1252 } = require('./fsTree');
 const { searchProject } = require('./search');
 const { findMainCandidate } = require('./compile');
 const legal = require('./legal');
@@ -50,6 +50,8 @@ function readText(root, rel) {
   try {
     return collab.readText(root, rel);
   } catch (e) {
+    // Latin-1 file: reading is harmless (outline/grep over all files keep working), editing is refused.
+    if (e.notUtf8) return decodeCp1252(fs.readFileSync(safeResolve(root, rel)));
     throw new Error(e.notFound ? `Datei nicht gefunden: ${rel}` : e.message);
   }
 }

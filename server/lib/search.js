@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { buildTree, isTextFile } = require('./fsTree');
+const { buildTree, isTextFile, readUtf8OrNull } = require('./fsTree');
 
 function flattenFiles(nodes, out = []) {
   for (const n of nodes) {
@@ -46,9 +46,15 @@ function replaceInProject(root, query, replacement, opts = {}) {
   const files = flattenFiles(buildTree(root));
   let totalReplacements = 0;
   const changedFiles = [];
+  const skippedFiles = []; // not UTF-8: writing them back would destroy every umlaut
   for (const relPath of files) {
     const abs = path.join(root, relPath);
-    const content = fs.readFileSync(abs, 'utf8');
+    const content = readUtf8OrNull(abs);
+    if (content === null) {
+      if (re.test(fs.readFileSync(abs, 'latin1'))) skippedFiles.push(relPath);
+      re.lastIndex = 0;
+      continue;
+    }
     let count = 0;
     const newContent = content.replace(re, (...args) => {
       count++;
@@ -60,7 +66,7 @@ function replaceInProject(root, query, replacement, opts = {}) {
       changedFiles.push({ file: relPath, count });
     }
   }
-  return { totalReplacements, changedFiles };
+  return { totalReplacements, changedFiles, skippedFiles };
 }
 
 // Labels aus .tex und Bib-Keys aus .bib für \ref{}/\cite{}-Vorschläge und

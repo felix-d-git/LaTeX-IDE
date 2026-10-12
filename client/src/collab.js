@@ -175,9 +175,10 @@ async function createSession(path) {
 
   provider.on('connection-close', (ev) => {
     const code = ev && ev.code;
-    if (code === 4409) {
+    if (code === 4409 || code === 4415) {
       // Server re-created this doc (state lost) - our cache belongs to the old
-      // identity and would duplicate the text if merged.
+      // identity and would duplicate the text if merged. 4415: the file is no
+      // longer UTF-8; reopening asks to convert it.
       // ponytail: unsynced offline edits in that old cache are dropped here.
       closeSession(path);
       indexedDB.deleteDatabase(dbName);

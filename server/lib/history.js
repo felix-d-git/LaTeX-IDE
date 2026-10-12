@@ -66,7 +66,12 @@ function walkTextFiles(root, relDir = '', out = []) {
 function sameFiles(root, prev, files) {
   if (prev.files.length !== files.length || prev.files.some((f, i) => f !== files[i])) return false;
   try {
-    return files.every((f) => readSnapshotFile(root, prev.id, f) === readCurrentFile(root, f));
+    // bytes, not decoded text: changes inside a Latin-1 file must count too
+    return files.every((f) => {
+      const a = readSnapshotBuffer(root, prev.id, f);
+      const b = readBuffer(path.join(root, f));
+      return a && b ? a.equals(b) : a === b;
+    });
   } catch {
     return false; // unreadable counts as changed
   }
@@ -131,6 +136,14 @@ function addLabel(root, id, name) {
   return entry;
 }
 
+function readBuffer(abs) {
+  return fs.existsSync(abs) ? fs.readFileSync(abs) : null;
+}
+
+function readSnapshotBuffer(root, id, relPath) {
+  return readBuffer(path.join(historyRoot(root), SNAPSHOTS_DIR, id, relPath));
+}
+
 function readSnapshotFile(root, id, relPath) {
   const abs = path.join(historyRoot(root), SNAPSHOTS_DIR, id, relPath);
   if (!fs.existsSync(abs)) return null; // file did not exist yet at this snapshot
@@ -157,4 +170,4 @@ function diffBetween(root, fromId, toId, relPath) {
   return diffLines(oldContent, newContent);
 }
 
-module.exports = { snapshot, readSnapshotFile, list, getEntry, addLabel, diffBetween, HISTORY_DIR };
+module.exports = { snapshot, readSnapshotFile, readSnapshotBuffer, list, getEntry, addLabel, diffBetween, HISTORY_DIR };

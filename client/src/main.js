@@ -326,6 +326,22 @@ function scheduleOutlineRefresh() {
   outlineTimer = setTimeout(() => outline && outline.render(), 400);
 }
 
+// Older Latin-1 files can't be edited live (umlauts would be lost); offer a one-time conversion.
+async function offerUtf8Conversion(path, line, message) {
+  const ok = confirm(
+    `${path}: ${message}\n\nJetzt nach UTF-8 umwandeln? Der bisherige Stand bleibt im Verlauf erhalten, ` +
+      `\\usepackage[latin1]{inputenc} in dieser Datei wird auf utf8 umgestellt. ` +
+      `Steht inputenc in einer anderen Datei, dort ebenfalls umstellen bzw. alle Latin-1-Dateien umwandeln.`
+  );
+  if (!ok) return;
+  try {
+    await api.convertUtf8(path);
+  } catch (e) {
+    return alert(`Umwandeln fehlgeschlagen: ${e.message}`);
+  }
+  return openFile(path, line);
+}
+
 async function openFile(path, line) {
   const kind = fileKind(path);
   if (!openOrder.includes(path)) openOrder.push(path);
@@ -334,9 +350,10 @@ async function openFile(path, line) {
     try {
       await openSession(path);
     } catch (e) {
-      alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
       openOrder = openOrder.filter((p) => p !== path);
       renderTabbar();
+      if (e.status === 415 && e.data && e.data.notUtf8) return offerUtf8Conversion(path, line, e.message);
+      alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
       return;
     }
     editorMgr.openFile(path);

@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { diffLines } = require('diff');
-const { isIgnored, isTextFile } = require('./fsTree');
+const { isIgnored, isTextFile, isUtf8 } = require('./fsTree');
 const { selfWrittenHashes } = require('../state');
 const { OUT_DIR } = require('./compile');
 
@@ -51,7 +51,13 @@ function startWatcher(root, broadcast) {
 
     let content;
     try {
-      content = fs.readFileSync(absPath, 'utf8');
+      const buf = fs.readFileSync(absPath);
+      // Saved as Latin-1 outside the IDE: no fileChanged with U+FFFD replacement characters.
+      if (!isUtf8(buf)) {
+        lastContent.delete(relPath);
+        return broadcast({ type: 'fileNotUtf8', path: relPath });
+      }
+      content = buf.toString('utf8');
     } catch (e) {
       return;
     }

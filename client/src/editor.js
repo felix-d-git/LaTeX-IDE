@@ -157,9 +157,13 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   function buildState(path) {
     const session = getSession(path);
     const initialComments = getInitialComments ? getInitialComments(path) : [];
+    const text = session.ytext.toString();
     return EditorState.create({
-      doc: session.ytext.toString(),
+      doc: text,
       extensions: [
+        // CR from an older cached doc (the server strips them on load): count it as a
+        // character, so CodeMirror offsets match the Y.Text 1:1 until the sync removes it.
+        text.includes('\r') ? EditorState.lineSeparator.of('\n') : [],
         basicSetup,
         yCollab(session.ytext, session.awareness, { undoManager: session.undoManager }),
         conflictField,

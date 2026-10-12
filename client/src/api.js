@@ -126,6 +126,7 @@ export const api = {
   uploadFile: (dir, name, contentBase64, overwrite = false) =>
     req('POST', '/api/tree/upload', { dir, name, content: contentBase64, overwrite }),
   collabEpoch: (relPath) => req('GET', `/api/collab/epoch?path=${encodeURIComponent(relPath)}`),
+  convertUtf8: (relPath) => req('POST', '/api/file/convert-utf8', { path: relPath }),
   compile: (overrides) => req('POST', '/api/compile', overrides ? { overrides } : undefined),
   clearCache: () => req('POST', '/api/compile/clear-cache'),
   getComments: () => req('GET', '/api/comments'),
