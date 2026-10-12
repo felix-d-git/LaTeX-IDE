@@ -77,11 +77,9 @@ const basicSetup = [
   ]),
 ];
 
-// R5: Editorfläche nach den gemessenen Werten — 12px/19.2px Monospace,
-// Zeilen-Padding 0 2px 0 6px, Gutter im Systemgrau statt CodeMirrors
-// Fremdton (#f0f0f0/#dcdcdc werden laut R10 bewusst NICHT übernommen),
-// "scroll past end" als 50vh statt der gemessenen Konstante 626.806px.
-const overleafTheme = EditorView.theme(
+// Editorfläche: Monospace, Gutter im Systemgrau statt CodeMirrors eigenem
+// Grau, "scroll past end" als 50vh Innenabstand unten.
+const editorTheme = EditorView.theme(
   {
     '&': { fontSize: '12px', backgroundColor: 'var(--ol-surface)', color: 'var(--ol-text)' },
     '.cm-scroller': {
@@ -151,7 +149,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   function emptyState() {
     return EditorState.create({
       doc: '% Datei aus dem Dateibaum links öffnen…',
-      extensions: [overleafTheme],
+      extensions: [editorTheme],
     });
   }
 
@@ -165,7 +163,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
         basicSetup,
         yCollab(session.ytext, session.awareness, { undoManager: session.undoManager }),
         conflictField,
-        overleafTheme,
+        editorTheme,
         // Suchen/Ersetzen-Leiste am unteren Rand des Editors (Strg+F), arbeitet
         // auf der gerade offenen Datei - die Projektsuche in der Rail sucht
         // dagegen dateiübergreifend und kann nicht ersetzen.

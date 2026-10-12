@@ -1,7 +1,6 @@
 // Gemeinsames Dropdown-System für Menüleiste, Projekt-/Layout-/Zoom-Menü und
-// die Kontextmenüs im Dateibaum — Maße/Verhalten nach OVERLEAF_UI_SPEC.md R2:
-// 240px Mindestbreite (Kontextmenüs 160), 36px-Zeilen, 4px Radius, 28px
-// Icon-Slot, Kürzel rechtsbündig, Submenü öffnet bei Hover.
+// die Kontextmenüs im Dateibaum: fester Icon-Slot, Kürzel rechtsbündig,
+// Submenü öffnet bei Hover.
 
 const ICON = (name) =>
   `<svg class="ol-icon"><use href="#i-${name}"></use></svg>`;
