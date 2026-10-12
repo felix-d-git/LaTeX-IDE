@@ -1,0 +1,41 @@
+LatexIDE Desktop - License notes for the Windows setup
+========================================================
+
+LatexIDE
+--------
+Copyright (C) 2026 felix-d-git
+GNU Affero General Public License, version 3 only (AGPL-3.0-only), see
+LICENSE. WITHOUT ANY WARRANTY. You do not have to accept the license to
+install or run LatexIDE (AGPL-3.0 section 9).
+Source code of this version: https://github.com/felix-d-git/latex-web-ide/tree/{{TAG}}
+
+Node.js
+-------
+Bundled as a prebuilt binary (folder "node\"). License: MIT (Node.js
+itself); node\LICENSE also contains the licenses of its built-in
+components, including OpenSSL (Apache-2.0), ICU (Unicode License V3), V8,
+libuv and npm (Artistic License 2.0).
+
+TeX Live / Tectonic
+-------------------
+NOT included. LatexIDE only runs the TeX system as an external program
+found via PATH (default: latexmk); TEX_BACKEND=tectonic selects Tectonic
+instead (desktop app only, install it separately). If no TeX system is
+found, the setup downloads TeX Live 2025 from a TUG mirror
+(ftp.tu-chemnitz.de) and installs it locally. TeX Live consists of
+packages under free licenses (mostly LPPL); see
+https://www.tug.org/texlive/LICENSE.TL and the license files in the
+TeX Live installation.
+
+Third-party npm packages
+------------------------
+- in the installation folder: THIRD_PARTY_NOTICES.md
+- in the app: address /licenses ("Help" menu)
+- online: https://github.com/felix-d-git/latex-web-ide/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
+
+German version (also covers the macOS package): LICENSES-INSTALLER.txt
+
+Setup
+-----
+Created with Inno Setup. Copyright (C) 1997-2026 Jordan Russell,
+Portions Copyright (C) 2000-2026 Martijn Laan, https://jrsoftware.org/

@@ -18,6 +18,11 @@
 AppId={{8C9C6F8E-6A5B-4B2E-9E2A-6E7C6D3B7A11}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppPublisher=felix-d-git
+AppPublisherURL=https://github.com/felix-d-git/latex-web-ide
+AppSupportURL=https://github.com/felix-d-git/latex-web-ide
+AppUpdatesURL=https://github.com/felix-d-git/latex-web-ide
+AppCopyright=Copyright (C) 2026 felix-d-git - AGPL-3.0-only
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -27,14 +32,21 @@ OutputBaseFilename=LatexIDE-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-LicenseFile=..\LICENSES-INSTALLER.txt
+; Nur Hinweisseite, keine Zustimmung: die AGPL muss nicht angenommen werden (Abschnitt 9).
+; build-release.ps1 erzeugt die Dateien im Staging (Quell-Link dieser Version).
+InfoBeforeFile={#StagingDir}\LICENSES-INSTALLER.txt
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; InfoBeforeFile: "{#StagingDir}\LICENSES-INSTALLER-en.txt"
 
 [Tasks]
 Name: "desktopicon"; Description: "Desktop-Verknuepfung anlegen"; GroupDescription: "Zusaetzliche Symbole:"; Flags: unchecked
+
+[InstallDelete]
+; Sonst bleiben bei Updates entfernte Pakete liegen (bis 0.5.0 z. B. @napi-rs/canvas mit Skia).
+; node_modules enthaelt keine Nutzerdaten (.env liegt direkt in {app}, Daten unter {localappdata}\LatexIDE).
+Type: filesandordirs; Name: "{app}\node_modules"
 
 [Files]
 Source: "{#StagingDir}\*"; DestDir: "{app}"; Excludes: "\node_modules\.cache\*"; Flags: recursesubdirs createallsubdirs ignoreversion

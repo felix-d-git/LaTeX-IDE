@@ -2,13 +2,16 @@
 <#
   Baut die Desktop-Release fuer LatexIDE:
    1. Staging-Ordner installer\out\staging zusammenstellen (Client ohne dist,
-      Server, package.json/-lock, build.js) und dort npm ci / node build.js /
-      npm prune --omit=dev ausfuehren.
+      Server, package.json/-lock, build.js, LICENSE, THIRD_PARTY_NOTICES.md,
+      Windows-Starter, install-texlive.ps1; LICENSES-INSTALLER*.txt aus der
+      Vorlage mit Quell-Link .../tree/v<version>) und dort npm ci /
+      node build.js / npm prune --omit=dev --omit=optional ausfuehren,
+      danach ungenutzte pdfjs-dist-Teile loeschen.
    2. Offizielles Node 24 LTS win-x64 ZIP laden (SHA256 gegen SHASUMS256.txt
-      pruefen) und nach staging\node entpacken (inkl. LICENSE).
-   3. Windows-Installer per Inno Setup (ISCC.exe) bauen, falls vorhanden.
+      pruefen) und nach staging\node entpacken (inkl. LICENSE, sonst Abbruch).
+   3. Windows-Installer per Inno Setup 6/7 (ISCC.exe) bauen, falls vorhanden.
    4. Zusaetzlich installer\out\LatexIDE-macOS.zip erzeugen (Staging ohne
-      Windows-Node, dafuer mit installer\macos\install.command).
+      Windows-Node und Windows-Dateien, dafuer mit installer\macos\install.command).
 
   Nutzung:
     powershell -File installer\build-release.ps1              # voller Build
@@ -28,6 +31,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $InstallerDir = $PSScriptRoot
 $OutDir = Join-Path $InstallerDir 'out'
 $StagingDir = Join-Path $OutDir 'staging'
+$AppVersion = (Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).version
 
 function Write-Step($msg) {
     Write-Host "=== $msg ===" -ForegroundColor Cyan
@@ -70,6 +74,19 @@ function Copy-ToStaging($relSource, $relDest, [string[]]$excludeDirs = @()) {
     }
 }
 
+# Lizenzhinweise aus der Vorlage: {{TAG}} -> v<version>, damit der Quell-Link auf genau diesen Stand zeigt.
+function Write-LicenseNotice($relSource, $relDest) {
+    $src = Join-Path $RepoRoot $relSource
+    $dst = Join-Path $StagingDir $relDest
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Erzeuge $relSource -> installer\out\staging\$relDest ({{TAG}} = v$AppVersion)"
+        return
+    }
+    $text = [IO.File]::ReadAllText($src)
+    if (-not $text.Contains('{{TAG}}')) { throw "$relSource enthaelt keinen Platzhalter {{TAG}}." }
+    [IO.File]::WriteAllText($dst, $text.Replace('{{TAG}}', "v$AppVersion"), [Text.UTF8Encoding]::new($false))
+}
+
 Copy-ToStaging 'client' 'client' -excludeDirs @('dist')
 Copy-ToStaging 'server' 'server'
 Copy-ToStaging 'package.json' 'package.json'
@@ -77,6 +94,8 @@ Copy-ToStaging 'package-lock.json' 'package-lock.json'
 Copy-ToStaging 'build.js' 'build.js'
 Copy-ToStaging 'LICENSE' 'LICENSE'
 Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
+Write-LicenseNotice (Join-Path 'installer' 'LICENSES-INSTALLER.txt') 'LICENSES-INSTALLER.txt'
+Write-LicenseNotice (Join-Path 'installer\windows' 'LICENSES-INSTALLER-en.txt') 'LICENSES-INSTALLER-en.txt'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE.cmd') 'LatexIDE.cmd'
 Copy-ToStaging (Join-Path 'installer\windows' 'LatexIDE-Server.cmd') 'LatexIDE-Server.cmd'
@@ -108,6 +127,14 @@ try {
     Write-Step "npm prune --omit=dev --omit=optional"
     npm prune --omit=dev --omit=optional
     if ($LASTEXITCODE -ne 0) { throw "npm prune fehlgeschlagen (Exit $LASTEXITCODE)" }
+
+    # pdf.js ist in bundle.js gebuendelt, den Worker kopiert build.js; der Server laedt pdfjs-dist nicht.
+    # Ungenutzte Teile raus, u. a. pdf.sandbox* mit QuickJS (MIT, ohne Lizenztext im Paket). LICENSE bleibt.
+    Write-Step "Ungenutzte pdfjs-dist-Dateien entfernen"
+    $PdfjsDir = Join-Path $StagingDir 'node_modules\pdfjs-dist'
+    $PdfjsUnused = @('cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'build\pdf.sandbox*') |
+        ForEach-Object { Join-Path $PdfjsDir $_ }
+    Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 } finally {
     Pop-Location
 }
@@ -148,7 +175,7 @@ if (Test-Path $NodeDestDir) { Remove-Item -Path $NodeDestDir -Recurse -Force }
 Copy-Item -Path $NodeSrcDir.FullName -Destination $NodeDestDir -Recurse -Force
 
 if (-not (Test-Path (Join-Path $NodeDestDir 'LICENSE'))) {
-    Write-Warning "LICENSE-Datei nicht im Node-ZIP gefunden - bitte manuell pruefen."
+    throw "LICENSE-Datei nicht im Node-ZIP gefunden - ohne sie darf Node.js nicht mitgeliefert werden."
 }
 if (-not (Test-Path (Join-Path $NodeDestDir 'node.exe'))) {
     throw "node.exe nicht im entpackten Node-Ordner gefunden."
@@ -170,14 +197,13 @@ $IsccCandidates = @(
 $Iscc = $IsccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
 if ($Iscc) {
-    $AppVersion = (Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).version
     & $Iscc "/DMyAppVersion=$AppVersion" (Join-Path $InstallerDir 'windows\LatexIDE.iss')
     if ($LASTEXITCODE -ne 0) { throw "ISCC.exe fehlgeschlagen (Exit $LASTEXITCODE)" }
     Write-Host "Installer erzeugt unter installer\out\LatexIDE-Setup.exe"
 } else {
-    Write-Warning "Inno Setup 6 (ISCC.exe) nicht gefunden. Bitte installieren:"
+    Write-Warning "Inno Setup 6/7 (ISCC.exe) nicht gefunden. Bitte installieren:"
     Write-Warning "  https://jrsoftware.org/isdl.php"
-    Write-Warning "Erwartete Pfade: `"${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe`" oder `"$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe`""
+    Write-Warning "Gesucht: Umgebungsvariable ISCC, sonst $($IsccCandidates[1..($IsccCandidates.Count - 1)] -join ', ')"
     Write-Warning "Staging-Ordner ist fertig unter: $StagingDir - Installer-Build wird uebersprungen."
 }
 
@@ -191,7 +217,7 @@ if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 
 Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
-    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd', 'LatexIDE-Lokal.vbs')) { return }
+    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd', 'LatexIDE-Lokal.vbs', 'LICENSES-INSTALLER-en.txt')) { return }
     $dst = Join-Path $MacStagingDir $_.Name
     if ($_.PSIsContainer) {
         Copy-Item -Path $_.FullName -Destination $dst -Recurse -Force
@@ -200,7 +226,6 @@ Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
     }
 }
 Copy-Item -Path (Join-Path $InstallerDir 'macos\install.command') -Destination (Join-Path $MacStagingDir 'install.command') -Force
-Copy-Item -Path (Join-Path $InstallerDir 'LICENSES-INSTALLER.txt') -Destination (Join-Path $MacStagingDir 'LICENSES-INSTALLER.txt') -Force
 
 $MacZipPath = Join-Path $OutDir 'LatexIDE-macOS.zip'
 if (Test-Path $MacZipPath) { Remove-Item -Path $MacZipPath -Force }
