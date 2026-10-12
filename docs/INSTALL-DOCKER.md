@@ -187,8 +187,9 @@ docker run --rm ghcr.io/felix-d-git/latex-web-ide:<version> cat /app/DEBIAN-PACK
 Zu jedem Release mit veröffentlichtem Image liegt dieselbe Liste als
 `DEBIAN-PACKAGES-<tag>.txt` bei den Release-Dateien auf GitHub, dazu
 `pandoc-sources-<tag>.tar`: die Debian-Quellpakete (`.dsc`, `.orig.tar.*`,
-`.debian.tar.*`) von pandoc und aller unter Built-Using und Static-Built-Using
-von pandoc genannten Quellpakete, Liste in `SOURCES.txt`. Die Datei wird vor dem
+`.debian.tar.*`) von pandoc, ghc und aller Haskell-Bibliotheken, gegen die pandoc laut
+offizieller Debian-buildinfo gebaut wurde (`libghc-*-dev`), Liste in
+`SOURCES.txt`. Die Datei wird vor dem
 Image veröffentlicht und bleibt mindestens drei Jahre nach der letzten
 Verteilung des Images beim Release.
 

@@ -104,22 +104,8 @@ jobs:
           TAG=${TAG:-v$(node -p "require('./package.json').version")}
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$TAG.txt"
-          # Quellpaket von pandoc + alles aus Built-Using/Static-Built-Using seiner Binaerpakete
-          python3 - "DEBIAN-PACKAGES-$TAG.txt" > pandoc-sources.txt <<'PY'
-          import re, sys
-          out = set()
-          for line in open(sys.argv[1]):
-              f = line.rstrip("\n").split("\t")
-              if len(f) == 6 and f[2] == "pandoc":
-                  out.add((f[2], f[3]))
-                  for field in f[4:]:
-                      out.update(re.findall(r"([a-z0-9][a-z0-9.+-]+) \(= ([^)]+)\)", field))
-          # bookworm: ~140 Haskell-Quellpakete; viel weniger heisst, das Format hat sich geaendert
-          if len(out) < 20:
-              sys.exit(f"nur {len(out)} Quellpakete gefunden")
-          for src, ver in sorted(out):
-              print(src, ver)
-          PY
+          # pandoc + statisch gelinkte Haskell-Bibliotheken laut offizieller buildinfo
+          python3 scripts/pandoc-sources.py "DEBIAN-PACKAGES-$TAG.txt" > pandoc-sources.txt
           wc -l pandoc-sources.txt
           mkdir -p "$RUNNER_TEMP/src"
           cp pandoc-sources.txt "$RUNNER_TEMP/src/SOURCES.txt"
