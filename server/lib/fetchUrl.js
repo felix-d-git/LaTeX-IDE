@@ -57,7 +57,12 @@ function get(url, hops, headers) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         if (hops >= MAX_REDIRECTS) return reject(new Error('Zu viele Weiterleitungen.'));
-        const next = new URL(res.headers.location, u);
+        let next;
+        try {
+          next = new URL(res.headers.location, u);
+        } catch {
+          return reject(new Error('Server leitet auf eine ungültige Adresse weiter.'));
+        }
         // API keys only to the host they were meant for; Accept (DOI content negotiation) may follow.
         const keep = next.host === u.host ? headers : headers.Accept ? { Accept: headers.Accept } : {};
         return resolve(get(next.href, hops + 1, keep));

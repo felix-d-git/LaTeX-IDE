@@ -21,7 +21,18 @@ function startWatcher(root, broadcast) {
       return parts.some((part) => isIgnored(part));
     },
     ignoreInitial: true,
+    ignorePermissionErrors: true, // unreadable subfolders: skip instead of 'error'
     awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+  });
+
+  // Without a listener an 'error' (inotify limit ENOSPC, EMFILE ...) ends the process.
+  // External edits are then no longer picked up live; log each code once per project.
+  const reportedCodes = new Set();
+  watcher.on('error', (err) => {
+    const code = (err && err.code) || 'UNKNOWN';
+    if (reportedCodes.has(code)) return;
+    reportedCodes.add(code);
+    console.error(`[watcher] ${root}: ${(err && err.message) || err}`);
   });
 
   const lastContent = new Map();

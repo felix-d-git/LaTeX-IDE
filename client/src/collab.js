@@ -18,7 +18,7 @@ let projectId = null;
 let me = { name: 'Ich', color: COLORS[0] };
 const sessions = new Map(); // path -> session
 const opening = new Map(); // path -> Promise<session>
-let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {} };
+let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {}, onTooLarge: () => {} };
 
 const store = {
   get(k, fallback) {
@@ -122,6 +122,8 @@ async function createSession(path) {
 
   const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, {
     params: { epoch },
+    // 1009 = message over the server's limit: reconnecting would just resend the same update.
+    shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500),
   });
   provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
   const undoManager = new Y.UndoManager(ytext);
@@ -185,6 +187,8 @@ async function createSession(path) {
     } else if (code === 4404) {
       closeSession(path);
       hooks.onGone(path);
+    } else if (code === 1009) {
+      hooks.onTooLarge(path);
     }
   });
 

@@ -70,7 +70,9 @@ können dann gelöscht werden.
   File ▸ Download ▸ Markdown/HTML. Im selbst gebauten Docker-Image enthalten,
   nicht im fertigen Image von ghcr.io
   ([docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#fertiges-image-nur-bei-öffentlichem-repository));
-  ohne Pandoc meldet der Export einen Fehler.
+  ohne Pandoc meldet der Export einen Fehler. Benötigt Pandoc ≥ 2.15
+  (`--sandbox`); Debian 11 und Ubuntu 22.04 liefern ältere Versionen, dann
+  Pandoc von pandoc.org installieren.
 - Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
   doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
   Der Zotero-API-Key wird auf dem Server gespeichert (`auth-data.json` im

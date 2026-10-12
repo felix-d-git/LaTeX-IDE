@@ -857,6 +857,8 @@ configureCollab({
     renderTabbar();
     loadTree();
   },
+  onTooLarge: (path) =>
+    alert(`Die letzte Änderung in ${path} ist zu groß für die Live-Synchronisierung (max. 20 MB) und wurde NICHT auf dem Server gespeichert. Bitte rückgängig machen (Strg+Z) oder die Datei über „Hochladen“ ersetzen.`),
 });
 // Offline = the banner, nothing else: alerts that only say "server unreachable" are dropped.
 const nativeAlert = window.alert.bind(window);

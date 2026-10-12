@@ -205,9 +205,13 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
   if (target === LOCAL_DIR) return res.json({ ok: true, localDir: LOCAL_DIR, moved: 0 });
   const rel = (a, b) => b === a || b.startsWith(a + path.sep);
   if (rel(LOCAL_DIR, target) || rel(target, LOCAL_DIR)) return res.status(400).json({ error: 'Alter und neuer Ordner dürfen sich nicht überschneiden.' });
-  if (fs.existsSync(target) && (!fs.statSync(target).isDirectory() || fs.readdirSync(target).length)) {
-    return res.status(400).json({ error: 'Der Zielordner muss leer oder neu sein.' });
+  let taken;
+  try {
+    taken = fs.existsSync(target) && (!fs.statSync(target).isDirectory() || fs.readdirSync(target).length > 0);
+  } catch (e) {
+    return res.status(400).json({ error: `Zielordner nicht lesbar (${e.code || e.message}).` });
   }
+  if (taken) return res.status(400).json({ error: 'Der Zielordner muss leer oder neu sein.' });
   if (moving) return res.status(409).json({ error: 'Verschieben läuft bereits.' });
   moving = true;
   try {
@@ -628,6 +632,17 @@ const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
 
 // Answers from the offline copy; false = not applicable (other route/project).
 function serveLocal(req, res) {
+  try {
+    return serveLocalNow(req, res);
+  } catch (e) {
+    // e.g. an unreadable folder in the local copy: answer instead of ending the app
+    console.error('[offline]', req.method, req.originalUrl, e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+    return true;
+  }
+}
+
+function serveLocalNow(req, res) {
   if (serveOfflineProjects(req, res)) return true;
   const c = offlineCopy();
   if (!c || req.method !== 'GET' || !LOCAL_GETS.has(req.baseUrl + req.path)) return false;
@@ -714,6 +729,16 @@ app.get('/licenses', (req, res) => {
   res.type('text/plain; charset=utf-8').send(legal.licensesText());
 });
 app.get('/source', (req, res) => res.redirect(legal.SOURCE_LINK));
+
+// Last in the chain: route errors as JSON. Express 4 doesn't pass on rejected
+// promises from async handlers, those are caught in the handlers themselves.
+app.use((err, req, res, next) => {
+  console.error('[route]', req.method, req.path, err);
+  if (res.headersSent) return next(err);
+  res.status(err.status || err.statusCode || 500).json({ error: err.message || String(err) });
+});
+// Safety net: a forgotten rejection is logged instead of ending the desktop app.
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 
 // --- websockets (/ws, /yjs) ---
 

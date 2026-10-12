@@ -104,7 +104,9 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
 }
 
 async function verifyPassword(user, password) {
-  return bcrypt.compare(password || '', user.passwordHash);
+  // bcrypt.compare throws on non-strings (malformed request body).
+  if (typeof password !== 'string' || typeof user.passwordHash !== 'string') return false;
+  return bcrypt.compare(password, user.passwordHash);
 }
 
 async function setPassword(user, newPassword) {
