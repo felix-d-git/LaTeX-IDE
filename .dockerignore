@@ -34,3 +34,8 @@ CLAUDE.local.md
 STATUS.md
 .claude
 *.bundle
+DEBIAN-PACKAGES*.txt
+OVERLEAF_UI_SPEC*.md
+NotebookLM-Grundlagen.md
+AUTOCOMPLETE_PLAN.md
+ui-measure.js
