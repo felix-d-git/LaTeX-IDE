@@ -95,6 +95,10 @@ else
             exit 1
         fi
     fi
+    # installer -pkg zeigt die Lizenzseite des MacTeX-Pakets nicht an.
+    echo "Hinweis: MacTeX ist nicht Teil von LatexIDE; jede Komponente hat ihre eigene Lizenz."
+    echo "  TeX Live: https://www.tug.org/texlive/LICENSE.TL"
+    echo "  MacTeX:   https://www.tug.org/mactex/"
     echo "Lade $MACTEX_PKG (mehrere GB, kann lange dauern)..."
     curl -fL -o "$TMP_DIR/$MACTEX_PKG" "$MACTEX_BASE/$MACTEX_PKG"
     echo "Installiere MacTeX (Administrator-Passwort erforderlich)..."

@@ -3,24 +3,29 @@ LatexIDE Desktop - Lizenzhinweise zum Installer
 
 LatexIDE selbst
 ---------------
-GNU Affero General Public License v3.0 (AGPL-3.0-only), siehe LICENSE.
-Quellcode: https://github.com/felix-d-git/latex-web-ide
-
-TeX Live, MacTeX und Tectonic sind eigenstaendige Programme (bloße
-Zusammenstellung, GPL-3.0 §5 / AGPL-3.0 §5). LatexIDE startet sie nur als
-externe Prozesse und bindet keinen ihrer Programmteile ein; sie lassen sich
-durch ein anderes TeX-System ersetzen (Umgebungsvariable TEX_BACKEND).
+Copyright (C) 2026 felix-d-git
+GNU Affero General Public License, nur Version 3 (AGPL-3.0-only), siehe
+LICENSE. OHNE JEDE GEWAEHRLEISTUNG. Zum Installieren und Nutzen muss die
+Lizenz nicht angenommen werden (AGPL-3.0 Abschnitt 9).
+Quellcode dieser Version: https://github.com/felix-d-git/latex-web-ide/tree/{{TAG}}
 
 Node.js
 -------
-Wird als vorkompilierte Binary mitgeliefert (Ordner "node\" bzw. "node/").
-Lizenz: MIT-artige Node.js-Lizenz, siehe LICENSE-Datei im mitgelieferten
-Node-Ordner. Quelle: https://nodejs.org/
+Windows: wird als vorkompilierte Binary mitgeliefert (Ordner "node\").
+Lizenz: MIT (Node.js selbst); node\LICENSE enthaelt ausserdem die Lizenzen
+der eingebauten Komponenten, u. a. OpenSSL (Apache-2.0), ICU (Unicode
+License V3), V8, libuv und npm (Artistic License 2.0).
+macOS: wird NICHT mitgeliefert. install.command laedt das offizielle
+Node.js-Paket von https://nodejs.org/ (SHA256-geprueft); dessen Lizenz
+liegt danach unter ~/Applications/LatexIDE/node/LICENSE.
 
-TeX Live / MacTeX
-------------------
-Wird NICHT mitgeliefert. Der Installer laedt TeX Live (Windows) bzw.
-MacTeX (macOS) waehrend der Installation direkt von einem offiziellen
+TeX Live / MacTeX / Tectonic
+----------------------------
+Wird NICHT mitgeliefert. LatexIDE ruft das TeX-System nur als externes
+Programm ueber den PATH auf (Standard: latexmk); TEX_BACKEND=tectonic
+waehlt stattdessen Tectonic (nur Desktop-App, separat zu installieren).
+Fehlt ein TeX-System, laedt der Installer TeX Live (Windows) bzw. MacTeX
+(macOS) waehrend der Installation direkt von einem offiziellen
 CTAN-/TUG-Spiegelserver (ftp.tu-chemnitz.de, historisches TeX Live 2025)
 herunter und installiert es lokal. TeX Live/MacTeX stehen unter freien
 Lizenzen der jeweiligen Pakete (ueberwiegend LPPL, teils andere freie
@@ -29,5 +34,12 @@ die Lizenzdateien innerhalb der TeX-Live-Installation.
 
 App-Abhaengigkeiten
 --------------------
-Siehe THIRD_PARTY_NOTICES.md im Projekt-Repository fuer die Liste der
-verwendeten npm-Pakete und deren Lizenzen.
+Liste der verwendeten npm-Pakete und ihrer Lizenztexte:
+- im Installationsordner: THIRD_PARTY_NOTICES.md
+- in der App: Adresse /licenses (Menue "Help")
+- online: https://github.com/felix-d-git/latex-web-ide/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
+
+Windows-Setup
+-------------
+Erstellt mit Inno Setup. Copyright (C) 1997-2026 Jordan Russell,
+Portions Copyright (C) 2000-2026 Martijn Laan, https://jrsoftware.org/
