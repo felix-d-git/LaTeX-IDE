@@ -344,6 +344,10 @@ app.use('/api', (req, res, next) => {
 // --- local compile ---
 
 let current = readJson(path.join(MIRROR_DIR, 'current.json'), null); // { projectId, dir, mainFile, settings, owned }
+// Project the client last opened (from /api/projects/open and /api/tree). Offline answers
+// (local copy, mirror, cache) must belong to the project the window shows, not to `current`.
+let activeProjectId = current && current.projectId;
+const wantedProject = (req) => req.get('x-project-id') || req.query.pid || activeProjectId;
 const wordCounts = new Map();
 
 // --- offline copy of owned projects ---
@@ -441,13 +445,18 @@ setTimeout(syncAll, 2000);
 
 // Bring the mirror of the active project up to date: fetch changed files,
 // drop removed ones. Offline: keep using the last mirror.
-async function syncMirror() {
+async function syncMirror(want) {
   let man;
   try {
     man = await remoteJson('/api/collab/manifest');
   } catch (e) {
-    if (e instanceof Offline && current) return current;
-    throw e;
+    if (!(e instanceof Offline)) throw e;
+    const c = offlineProject(want);
+    if (c) {
+      if (c !== current) writeJson(path.join(MIRROR_DIR, 'current.json'), (current = c));
+      return c;
+    }
+    throw Object.assign(new Error('Offline: Dieses Projekt liegt nicht lokal vor - Kompilieren erst wieder mit Verbindung zum Server.'), { status: 503, offline: true });
   }
   // Own project: compile straight in the offline copy (after a two-way sync).
   if (!ownedEntry(man.projectId)) await refreshOwned(); // new project or first run after login
@@ -458,7 +467,7 @@ async function syncMirror() {
     writeJson(path.join(MIRROR_DIR, 'current.json'), current);
     return current;
   }
-  const dir = path.join(MIRROR_DIR, String(man.projectId).replace(/[^\w-]/g, '_'));
+  const dir = path.join(MIRROR_DIR, syncKey(man.projectId));
   fs.mkdirSync(dir, { recursive: true });
   const indexPath = path.join(dir, '.mirror.json');
   const index = readJson(indexPath, {}); // rel -> sha1 of what we wrote
@@ -501,7 +510,7 @@ let compileChain = Promise.resolve();
 
 app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
   const run = compileChain.then(async () => {
-    const proj = await syncMirror();
+    const proj = await syncMirror(wantedProject(req));
     if (!proj.mainFile) return { status: 400, body: { error: 'Keine .tex-Hauptdatei gefunden.' } };
     // Open editor texts are newer than the server copy (or the server is unreachable).
     // They reach the server through Yjs, so the next sync takes the server's version.
@@ -525,12 +534,13 @@ app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
   compileChain = run.catch(() => {});
   run.then(
     ({ status, body }) => res.status(status).json(body),
-    (e) => res.status(e.status || 500).json({ error: e.message })
+    (e) => res.status(e.status || 500).json({ error: e.message, offline: e.offline })
   );
 });
 
-function requireCurrent(res) {
-  if (!current) {
+function requireCurrent(req, res) {
+  // PDF/SyncTeX of the last compiled project only for the window that shows it.
+  if (!current || current.projectId !== wantedProject(req)) {
     res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
     return null;
   }
@@ -538,14 +548,14 @@ function requireCurrent(res) {
 }
 
 app.post('/api/compile/clear-cache', (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   fs.rmSync(path.join(proj.dir, OUT_DIR), { recursive: true, force: true });
   res.json({ ok: true });
 });
 
 app.get('/api/pdf', (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   try {
     const abs = inside(proj.dir, req.query.path);
@@ -570,7 +580,7 @@ function mainPdf(proj) {
 }
 
 app.get('/api/synctex/forward', ah(async (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   const { file, line } = req.query;
   const pdf = mainPdf(proj);
@@ -584,7 +594,7 @@ app.get('/api/synctex/forward', ah(async (req, res) => {
 }));
 
 app.get('/api/synctex/inverse', ah(async (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   const { page, x, y } = req.query;
   const pdf = mainPdf(proj);
@@ -642,13 +652,23 @@ function serveOfflineProjects(req, res) {
   const mainFile = findMainCandidate(dir);
   current = { projectId: p.projectId, dir, mainFile, settings: {}, owned: true };
   writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+  activeProjectId = p.projectId;
   offlineOpened = p.name;
   res.json({ activeRoot: dir, mainFile, startFile: pickStartFile(dir), projectId: p.projectId, role: 'owner' });
   return true;
 }
 
-function offlineCopy() {
-  return !online && current && current.owned && fs.existsSync(current.dir) ? current : null;
+// Offline: the local copy (own project) or the last mirror of project `want` - never another project's.
+function offlineProject(want) {
+  if (current && current.projectId === want && fs.existsSync(current.dir)) return current;
+  const own = ownedEntry(want);
+  const dir = own && localDirOf(own);
+  return dir && fs.existsSync(dir) ? { projectId: want, dir, mainFile: findMainCandidate(dir), settings: {}, owned: true } : null;
+}
+
+function offlineCopy(req) {
+  const c = !online && offlineProject(wantedProject(req));
+  return c && c.owned ? c : null;
 }
 
 const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
@@ -656,7 +676,7 @@ const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
 // Answers from the offline copy; false = not applicable (other route/project).
 function serveLocal(req, res) {
   if (serveOfflineProjects(req, res)) return true;
-  const c = offlineCopy();
+  const c = offlineCopy(req);
   if (!c || req.method !== 'GET' || !LOCAL_GETS.has(req.baseUrl + req.path)) return false;
   res.setHeader('X-Offline', '1');
   if (req.baseUrl + req.path === '/api/tree') {
@@ -680,10 +700,12 @@ function serveLocal(req, res) {
 
 // --- everything else: forward to the server, cache GETs for offline use ---
 
-// ponytail: cache key is the URL only - the server's "active project" is
-// per user, so offline you see the last project's tree/comments; fine as
-// long as offline work stays within one project.
-const cacheFile = (url) => path.join(CACHE_DIR, crypto.createHash('sha1').update(url).digest('hex') + '.json');
+// Project-bound answers (tree, comments, role, settings) are cached per project; the project
+// list and account/desktop data are the same for every project.
+const cacheFile = (url, projectId) => {
+  const key = projectId && !/^\/api\/(projects|auth|desktop)\//.test(url) ? `${projectId} ${url}` : url;
+  return path.join(CACHE_DIR, crypto.createHash('sha1').update(key).digest('hex') + '.json');
+};
 const checkedOwn = new Set();
 const FORWARD_REQ = ['content-type', 'accept', 'x-project-id'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
@@ -699,10 +721,12 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
     const buf = Buffer.from(await r.arrayBuffer());
     if (r.status === 401) return res.status(401).json({ error: 'Desktop-Anmeldung abgelaufen.', desktopLogin: true });
     for (const h of FORWARD_RES) if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
-    if (req.method === 'GET' && r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
-      writeJson(cacheFile(url), { contentType: r.headers.get('content-type'), body: buf.toString('utf8') });
+    if (req.method === 'POST' && r.ok && req.path === '/projects/open') {
+      try {
+        activeProjectId = JSON.parse(buf.toString('utf8')).projectId || activeProjectId;
+      } catch {}
     }
-    // Remember which own project is open, so offline the tree comes from its copy.
+    // Remember which project is open, so offline tree/files/compile come from its copy or mirror.
     if (req.method === 'GET' && r.ok && req.path === '/tree') {
       try {
         const { projectId, mainFile } = JSON.parse(buf.toString('utf8'));
@@ -712,17 +736,23 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
           await refreshOwned().catch(() => {});
         }
         const own = ownedEntry(projectId);
-        if (own && (!current || current.projectId !== projectId)) {
-          current = { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true };
+        if (projectId && (!current || current.projectId !== projectId)) {
+          current = own
+            ? { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true }
+            : { projectId, dir: path.join(MIRROR_DIR, syncKey(projectId)), mainFile, settings: {}, owned: false };
           writeJson(path.join(MIRROR_DIR, 'current.json'), current);
         }
+        if (projectId) activeProjectId = projectId;
       } catch {}
+    }
+    if (req.method === 'GET' && r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
+      writeJson(cacheFile(url, wantedProject(req)), { contentType: r.headers.get('content-type'), body: buf.toString('utf8') });
     }
     res.status(r.status).end(buf);
   } catch (e) {
     if (!(e instanceof Offline)) return res.status(500).json({ error: e.message });
     if (serveLocal(req, res)) return;
-    const cached = req.method === 'GET' && readJson(cacheFile(url), null);
+    const cached = req.method === 'GET' && readJson(cacheFile(url, wantedProject(req)), null);
     if (!cached) return res.status(503).json({ error: 'Server nicht erreichbar (offline).', offline: true });
     res.setHeader('Content-Type', cached.contentType);
     res.setHeader('X-Offline', '1');

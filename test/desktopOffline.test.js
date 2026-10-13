@@ -133,3 +133,42 @@ test('#50: Server kennzeichnet seine Antworten mit X-Latex-IDE', async () => {
     await s.stop();
   }
 });
+
+test('#49: offline nach Wechsel in ein geteiltes Projekt - Baum, Cache und Kompilieren bleiben beim geteilten Projekt', async () => {
+  const state = { active: 'Thesis', down: false };
+  const remote = await startRemote(state);
+  const d = await startDesktop(remote.url);
+  try {
+    // Own project Thesis first, then the shared project S (never compiled there).
+    await d.call('POST', '/api/projects/open', { body: { root: '/thesis' } });
+    assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'Thesis');
+    assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'Thesis' })).json.project, 'Thesis');
+    await d.call('POST', '/api/projects/open', { pid: 'Thesis', body: { root: '/shared' } });
+    assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'users/u2/Shared');
+    assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'users/u2/Shared' })).json.project, 'users/u2/Shared');
+
+    state.down = true;
+    const tree = await d.call('GET', '/api/tree', { pid: 'users/u2/Shared' });
+    assert.strictEqual(tree.json.projectId, 'users/u2/Shared', 'Baum kommt nicht aus der lokalen Kopie von Thesis');
+    assert.ok(tree.offline);
+    assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'users/u2/Shared' })).json.project, 'users/u2/Shared');
+    assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'Thesis' })).json.project, 'Thesis', 'Cache pro Projekt');
+    const raw = await d.call('GET', '/api/file?path=main.tex', { pid: 'users/u2/Shared' });
+    assert.notStrictEqual(raw.json && raw.json.content, 'THESIS');
+
+    const c = await d.call('POST', '/api/compile', { pid: 'users/u2/Shared', body: { overrides: { 'main.tex': 'TEXT AUS DEM GETEILTEN PROJEKT' } } });
+    assert.strictEqual(c.status, 503);
+    assert.strictEqual(c.json.offline, true);
+    assert.strictEqual(fs.readFileSync(path.join(d.local, 'Thesis', 'main.tex'), 'utf8'), 'THESIS', 'lokale Kopie von Thesis unverändert');
+
+    // PDF of the last compiled project is not handed to a window of another project.
+    assert.strictEqual((await d.call('GET', '/api/pdf?path=main.pdf', { pid: 'Thesis' })).status, 400);
+
+    // The own project still works offline from its copy.
+    const own = await d.call('GET', '/api/file?path=main.tex', { pid: 'Thesis' });
+    assert.strictEqual(own.json.content, 'THESIS');
+  } finally {
+    await d.stop();
+    await remote.close();
+  }
+});
