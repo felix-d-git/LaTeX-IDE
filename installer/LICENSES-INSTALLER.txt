@@ -7,7 +7,7 @@ Copyright (C) 2026 felix-d-git
 GNU Affero General Public License, nur Version 3 (AGPL-3.0-only), siehe
 LICENSE. OHNE JEDE GEWAEHRLEISTUNG. Zum Installieren und Nutzen muss die
 Lizenz nicht angenommen werden (AGPL-3.0 Abschnitt 9).
-Quellcode dieser Version: https://github.com/felix-d-git/latex-web-ide/tree/{{TAG}}
+Quellcode dieser Version: https://github.com/{{REPO}}/tree/{{TAG}}
 
 Node.js
 -------
@@ -37,7 +37,7 @@ App-Abhaengigkeiten
 Liste der verwendeten npm-Pakete und ihrer Lizenztexte:
 - im Installationsordner: THIRD_PARTY_NOTICES.md
 - in der App: Adresse /licenses (Menue "Help")
-- online: https://github.com/felix-d-git/latex-web-ide/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
+- online: https://github.com/{{REPO}}/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
 
 Windows-Setup
 -------------

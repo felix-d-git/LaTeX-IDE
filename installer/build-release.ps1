@@ -29,12 +29,18 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue' # PS 5.1: Fortschrittsbalken bremst Downloads stark aus
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $InstallerDir = $PSScriptRoot
 $OutDir = Join-Path $InstallerDir 'out'
 $StagingDir = Join-Path $OutDir 'staging'
 $AppVersion = (Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).version
+# {{REPO}} in den Lizenzhinweisen: Actions-Repo (Fork), sonst repository.url aus package.json.
+$AppRepo = $env:GITHUB_REPOSITORY
+if (-not $AppRepo) {
+    $AppRepo = ((Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).repository.url -replace '^git\+', '' -replace '^https?://github\.com/', '' -replace '\.git$', '')
+}
 
 function Write-Step($msg) {
     Write-Host "=== $msg ===" -ForegroundColor Cyan
@@ -87,7 +93,7 @@ function Write-LicenseNotice($relSource, $relDest) {
     }
     $text = [IO.File]::ReadAllText($src)
     if (-not $text.Contains('{{TAG}}')) { throw "$relSource enthaelt keinen Platzhalter {{TAG}}." }
-    [IO.File]::WriteAllText($dst, $text.Replace('{{TAG}}', "v$AppVersion"), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($dst, $text.Replace('{{TAG}}', "v$AppVersion").Replace('{{REPO}}', $AppRepo), [Text.UTF8Encoding]::new($false))
 }
 
 Copy-ToStaging 'client' 'client' -excludeDirs @('dist')
