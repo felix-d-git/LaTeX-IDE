@@ -23,7 +23,7 @@
 - Braucht TeX Live 2025 (`latexmk`, `synctex`) im PATH.
 
 ## Tests gegen den laufenden Server
-- „Aktives Projekt" liegt pro Benutzer global in `workspace.json`. Läuft eine echte Browsersitzung, nie auf 3077 Projekt wechseln oder kompilieren → Autosave schreibt sonst womöglich in den falschen Pfad.
+- Projekt gilt pro Fenster (`X-Project-Id` / `?pid=`, ws `subscribe`); „zuletzt geöffnet" liegt pro Benutzer in `workspace.json` und gilt nur für Clients ohne pid. Läuft eine echte Browsersitzung, trotzdem nie auf 3077 Projekte öffnen oder kompilieren → Wegwerf-Instanz nutzen.
 - Stattdessen Wegwerf-Instanz: `client/`, `server/`, `package.json`, `build.js` nach `%LOCALAPPDATA%\Temp\latex-wegwerf\` kopieren, `node_modules` als Junction, pro Lauf frisches `DATA_DIR`, `PORT=3099`. Ohne `.env` greift der Fallback-Admin `admin` / `bitte-sofort-aendern`. Tests: `t_server.js` (API/Yjs), `t_desktop.js` (Desktop-Proxy), `t_browser.js` (Playwright, 2 Nutzer, Offline-Konflikt).
 - Login-Limiter (10/15 min pro IP) schlägt bei wiederholten Testläufen zu → Wegwerf-Server neu starten.
 - Aufräumen: **zuerst** die Junction per `cmd /c rmdir …\node_modules` entfernen, dann den Ordner löschen, sonst geht das echte `node_modules` mit.

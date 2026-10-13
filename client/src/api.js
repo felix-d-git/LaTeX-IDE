@@ -5,8 +5,7 @@ function getCookie(name) {
 
 const MUTATING = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
-// Project this window shows: sent along so the server refuses (409 projectSwitched) when another
-// window/device switched the user's active project meanwhile.
+// Project this window shows: the server resolves every request against it (not the user's last opened one).
 let projectId = null;
 export function setProjectId(id) {
   projectId = id || null;
@@ -19,7 +18,7 @@ export function withPid(url) {
   return projectId ? `${url}${url.includes('?') ? '&' : '?'}pid=${encodeURIComponent(projectId)}` : url;
 }
 const pidHeader = () => (projectId ? { 'X-Project-Id': projectId } : {});
-const switchedCheck = (data) => data && data.projectSwitched && window.dispatchEvent(new CustomEvent('lide-project-switched'));
+const goneCheck = (data) => data && data.projectGone && window.dispatchEvent(new CustomEvent('lide-project-gone'));
 
 async function req(method, url, body) {
   const headers = { ...(body ? { 'Content-Type': 'application/json' } : {}), ...pidHeader() };
@@ -35,7 +34,7 @@ async function req(method, url, body) {
   const data = await res.json().catch(() => ({}));
   // Desktop app: answers from cache/local copy (or none at all) mean the server is unreachable.
   window.dispatchEvent(new CustomEvent('lide-offline', { detail: res.headers.get('X-Offline') === '1' || !!data.offline }));
-  switchedCheck(data);
+  goneCheck(data);
   if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
@@ -136,7 +135,7 @@ export const api = {
       body: JSON.stringify({ path: relPath, targetDir, overwrite: !!overwrite }),
     });
     const data = await res.json().catch(() => ({}));
-    switchedCheck(data);
+    goneCheck(data);
     if (res.status === 409 && data.conflict) return { conflict: true };
     if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
     return data;

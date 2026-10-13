@@ -118,7 +118,7 @@ function maybeAutocompile(root, userId) {
   lastAutocompileAt.set(root, Date.now());
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return;
-  const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && state.getActiveRoot(c.userId) === root).map((c) => c.userId))];
+  const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && wsRoot(c) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
   for (const u of users) runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
 }
@@ -127,9 +127,32 @@ function maybeAutocompile(root, userId) {
 // broadcasts and file watchers must be scoped per project root instead of
 // the single global watcher/broadcast-to-everyone the tool used as a
 // single-user MVP. Each ws client only receives events for the root that is
-// currently that connection's user's active project (looked up live, not
-// cached, so switching projects takes effect immediately).
+// project the window subscribed to ({type:'subscribe', projectId}), so several
+// windows of one account can work in different projects at the same time.
 const watchersByRoot = new Map(); // root -> { watcher, refCount }
+
+// ws.root: undefined = never subscribed (old client: follows the user's last opened project),
+// null = subscribed to nothing (project gone), else the subscribed root.
+const wsRoot = (c) => (c.root === undefined ? state.getActiveRoot(c.userId) : c.root);
+
+function wsSubscribe(ws, root) {
+  if (wsRoot(ws) === root && ws.root !== undefined) return;
+  if (ws.root) releaseWatcher(ws.root);
+  ws.root = root;
+  if (root) ensureWatcher(root);
+}
+
+// The project is gone for the windows showing it (moved, archived, deleted, share revoked):
+// tell them and stop their events. userId = only that user's windows.
+function kickRoot(root, userId) {
+  if (!wss) return;
+  const data = JSON.stringify({ type: 'projectGone', projectId: projectIdOf(root) });
+  wss.clients.forEach((c) => {
+    if (c.root !== root || (userId && c.userId !== userId)) return;
+    if (c.readyState === 1) c.send(data);
+    wsSubscribe(c, null);
+  });
+}
 
 // onlyUserId: restrict to one user's connections (per-user compile events).
 function broadcast(root, msg, onlyUserId) {
@@ -138,7 +161,7 @@ function broadcast(root, msg, onlyUserId) {
   const data = JSON.stringify({ ...msg, projectId: projectIdOf(root) });
   wss.clients.forEach((client) => {
     if (onlyUserId && client.userId !== onlyUserId) return;
-    if (client.readyState === 1 && client.userId && state.getActiveRoot(client.userId) === root) {
+    if (client.readyState === 1 && client.userId && wsRoot(client) === root) {
       client.send(data);
     }
   });
@@ -152,33 +175,32 @@ function pathMoved(root, oldRel, newRel) {
   if (comments.movePath(root, oldRel, newRel)) broadcast(root, { type: 'commentsChanged', path: newRel || oldRel });
 }
 
-function requireRoot(req, res) {
-  const root = state.getActiveRoot(req.user.id);
-  if (!root || !fs.existsSync(root)) {
-    res.status(400).json({ error: 'Kein aktives Projekt geoeffnet.' });
-    return null;
+// The window's project: X-Project-Id / ?pid= (path below projects/), else the user's last opened one.
+// ponytail: opening a project (POST /api/projects/open) only moves "last opened"; windows keep their pid.
+function windowRoot(req) {
+  const user = req.user;
+  const pid = req.get('X-Project-Id') || req.query.pid;
+  const gone = (status, error) => ({ status, body: { error, projectGone: true } });
+  if (!pid) {
+    const root = state.getActiveRoot(user.id);
+    if (!root || !fs.existsSync(root)) return { status: 400, body: { error: 'Kein aktives Projekt geoeffnet.' } };
+    if (!canAccessRoot(user, root)) return gone(403, 'Kein Zugriff mehr auf dieses Projekt.');
+    return { root };
   }
-  // Access can be revoked (share removed) while the project is still "active".
-  if (!canAccessRoot(req.user, root)) {
-    res.status(403).json({ error: 'Kein Zugriff mehr auf dieses Projekt.' });
-    return null;
-  }
-  if (projectMismatch(req, root)) {
-    projectSwitchedRes(res);
-    return null;
-  }
-  return root;
+  const active = state.getActiveRoot(user.id);
+  // The last opened project may lie outside projects/ (admin opened an arbitrary folder).
+  let root = active && String(pid) === projectIdOf(active) ? active : path.resolve(PROJECTS_DIR, String(pid));
+  if (root !== active && (!isInside(PROJECTS_DIR, root) || root === path.resolve(PROJECTS_DIR))) return gone(404, 'Projekt nicht gefunden.');
+  if (!fs.existsSync(root) || isParked(root)) return gone(404, 'Dieses Projekt ist nicht mehr verfügbar.');
+  // Access can be revoked (share removed) while a window still shows the project.
+  if (!canAccessRoot(user, root)) return gone(403, 'Kein Zugriff mehr auf dieses Projekt.');
+  return { root };
 }
 
-// The active project is per user, not per window: a window that still shows another project
-// sends its X-Project-Id (or ?pid=) and gets 409 instead of acting on the wrong project.
-// ponytail: stage 1 only; one project per window (resolve the root from pid) is the follow-up.
-function projectMismatch(req, root) {
-  const pid = req.get('X-Project-Id') || req.query.pid;
-  return !!pid && pid !== projectIdOf(root);
-}
-function projectSwitchedRes(res) {
-  res.status(409).json({ error: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.', projectSwitched: true });
+function requireRoot(req, res) {
+  const r = windowRoot(req);
+  if (!r.root) res.status(r.status).json(r.body);
+  return r.root || null;
 }
 
 // Desktop offline copy syncs every project the user owns, not just the active
@@ -233,6 +255,7 @@ const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split
 // Owner moved a project folder: per-root state, the label and its watcher go along. Users who had
 // it open follow a rename; into trash/archive it's dropped as their active project.
 function projectMoved(req, projectsDir, oldRoot, newRoot) {
+  kickRoot(path.resolve(oldRoot));
   state.moveRoot(oldRoot, newRoot, isParked(newRoot) ? null : newRoot);
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
   const w = watchersByRoot.get(path.resolve(oldRoot));
@@ -528,9 +551,8 @@ app.use('/api', authMw.requireAuth);
 const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
-  const active = state.getActiveRoot(req.user.id);
-  if (active && projectMismatch(req, active)) return projectSwitchedRes(res);
-  if (roleOf(req.user, active) === 'reviewer') {
+  const { root } = windowRoot(req); // errors are answered by the route itself
+  if (root && roleOf(req.user, root) === 'reviewer') {
     return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
   }
   next();
@@ -808,6 +830,7 @@ app.delete('/api/share/:userId', (req, res) => {
   const key = path.resolve(root);
   state.setShares(key, state.getShares(key).filter((id) => id !== req.params.userId));
   state.setRole(key, req.params.userId, 'editor');
+  kickRoot(key, req.params.userId);
   if (req.params.userId === req.user.id) return res.json({ ok: true });
   res.json(shareInfo(root, req.user));
 });
@@ -2036,16 +2059,39 @@ async function handleUpgrade(req, socket, head) {
   yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly));
 }
 
-wss.on('connection', async (ws, req) => {
-  const userId = await authMw.getUserIdFromUpgradeRequest(req).catch((e) => {
-    console.error('[ws]', e);
-    return null;
+wss.on('connection', (ws, req) => {
+  // The first message (subscribe) can arrive while the session is still being looked up.
+  const ready = authMw
+    .getUserIdFromUpgradeRequest(req)
+    .catch((e) => {
+      console.error('[ws]', e);
+      return null;
+    })
+    .then((userId) => {
+      if (!userId) return ws.close();
+      ws.userId = userId;
+    });
+  ws.on('message', async (data) => {
+    await ready;
+    if (!ws.userId) return;
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!msg || msg.type !== 'subscribe') return;
+    const user = auth.findUserById(ws.userId);
+    const r = user && msg.projectId ? windowRoot({ user, get: () => String(msg.projectId), query: {} }) : {};
+    if (msg.projectId && !r.root) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'projectGone', projectId: String(msg.projectId) }));
+      return wsSubscribe(ws, null);
+    }
+    wsSubscribe(ws, r.root || null);
   });
-  if (!userId) {
-    ws.close();
-    return;
-  }
-  ws.userId = userId;
+  ws.on('close', () => {
+    if (ws.root) releaseWatcher(ws.root);
+  });
 });
 
 // Creates the admin account on first boot (no users.json yet) from

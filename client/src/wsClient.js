@@ -1,5 +1,13 @@
+let ws;
+let subscribed = null;
+
+// Tell the server which project this window shows (events are filtered per project).
+export function wsSubscribe(projectId) {
+  subscribed = projectId || null;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'subscribe', projectId: subscribed }));
+}
+
 export function connectWs(handlers) {
-  let ws;
   let retryDelay = 1000;
 
   function connect() {
@@ -10,7 +18,10 @@ export function connectWs(handlers) {
       const handler = handlers[msg.type];
       if (handler) handler(msg);
     };
-    ws.onopen = () => { retryDelay = 1000; };
+    ws.onopen = () => {
+      retryDelay = 1000;
+      if (subscribed) wsSubscribe(subscribed);
+    };
     ws.onclose = () => {
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 1.5, 10000);

@@ -1,6 +1,6 @@
 import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
-import { connectWs } from './wsClient.js';
+import { connectWs, wsSubscribe } from './wsClient.js';
 import { renderTree, resetTreeSelection } from './fileTree.js';
 import { createEditorManager } from './editor.js';
 import {
@@ -547,14 +547,11 @@ async function setMainFile(path) {
 
 let currentProjectId = null;
 let treeSeq = 0;
-// allowSwitch: only when this window opens a project. Otherwise another project coming back means
-// another window switched the user's active project -> ask instead of silently following.
-async function loadTree({ allowSwitch = false } = {}) {
+async function loadTree() {
   const seq = ++treeSeq;
   const { tree, mainFile: mf, projectId } = await api.getTree();
   // A slower, older answer (e.g. old project, requested before an open) must not undo a newer one.
   if (seq !== treeSeq) return;
-  if (projectId !== currentProjectId && currentProjectId && !allowSwitch) return showProjectSwitched();
   if (projectId !== currentProjectId) {
     // Other project: tabs of the previous one point at files that don't exist here.
     for (const p of [...openOrder]) closeAnyTab(p);
@@ -573,32 +570,31 @@ async function loadTree({ allowSwitch = false } = {}) {
 async function loadProject(root, projectId) {
   document.getElementById('project-switched')?.remove();
   setProjectId(projectId);
+  wsSubscribe(projectId);
   activeProjectRoot = root;
   resetTreeSelection();
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
   els.projectButton.title = root;
-  await Promise.all([loadTree({ allowSwitch: true }), commentsManager.loadAll(), applyRole()]);
+  await Promise.all([loadTree(), commentsManager.loadAll(), applyRole()]);
 }
 
-// Server refused a request (409 projectSwitched) or the tree came back for another project.
-function showProjectSwitched() {
+// Server says this window's project is gone (moved, archived, deleted, share revoked).
+function showProjectGone() {
   if (document.getElementById('project-switched') || !activeProjectRoot) return;
   const bar = document.createElement('div');
   bar.id = 'project-switched';
   bar.setAttribute('role', 'alert');
-  bar.appendChild(Object.assign(document.createElement('span'), { textContent: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.' }));
-  const here = Object.assign(document.createElement('button'), { textContent: 'Hier weiterarbeiten' });
-  here.addEventListener('click', () => openProjectByRoot(activeProjectRoot));
+  bar.appendChild(Object.assign(document.createElement('span'), { textContent: 'Dieses Projekt ist nicht mehr verfügbar (verschoben, archiviert, gelöscht oder Zugriff entzogen).' }));
   const home = Object.assign(document.createElement('button'), { textContent: 'Zur Übersicht' });
   home.addEventListener('click', () => {
     bar.remove();
     projectsView.show();
   });
-  bar.append(here, home);
+  bar.append(home);
   document.body.appendChild(bar);
 }
-window.addEventListener('lide-project-switched', showProjectSwitched);
+window.addEventListener('lide-project-gone', showProjectGone);
 
 async function applyRole() {
   let role = 'owner';

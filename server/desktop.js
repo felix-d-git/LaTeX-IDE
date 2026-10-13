@@ -448,7 +448,7 @@ setTimeout(syncAll, 2000);
 async function syncMirror(want) {
   let man;
   try {
-    man = await remoteJson('/api/collab/manifest');
+    man = await remoteJson('/api/collab/manifest' + (want ? '?pid=' + encodeURIComponent(want) : ''));
   } catch (e) {
     if (!(e instanceof Offline)) throw e;
     const c = offlineProject(want);
