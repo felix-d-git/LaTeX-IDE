@@ -40,9 +40,14 @@ function walkLocal(dir) {
   return out;
 }
 
-function conflictName(rel) {
+// taken(name) -> true if that name already exists (locally or on the server): a second conflict
+// on the same file gets a counter instead of overwriting the first conflict copy.
+function conflictName(rel, taken = () => false) {
   const ext = path.posix.extname(rel);
-  return `${rel.slice(0, rel.length - ext.length)}.offline-konflikt${ext}`;
+  const base = `${rel.slice(0, rel.length - ext.length)}.offline-konflikt`;
+  let name = `${base}${ext}`;
+  for (let n = 2; taken(name); n++) name = `${base}-${n}${ext}`;
+  return name;
 }
 
 // Windows/macOS folders usually ignore case: "Kapitel1.tex" and "kapitel1.tex" are one file there.
@@ -120,7 +125,9 @@ async function syncFolder(dir, indexPath, io) {
     warning = `${dels.length} Dateien fehlten in der lokalen Kopie. Sie wurden nicht auf dem Server gelöscht, sondern neu heruntergeladen. Absichtlich gelöscht? Dann bitte im Web-IDE löschen.`;
   }
   const conflicts = [];
+  const errors = [];
   for (const { rel, s, l, act } of plan) {
+    try {
     let got = s; // hash of what we now have locally = the next sync's base
     // Base = hash of the bytes actually written: the file may change between manifest and download.
     const pull = async () => {
@@ -133,7 +140,7 @@ async function syncFolder(dir, indexPath, io) {
     else if (act === 'upload') await io.upload(rel, fs.readFileSync(abs(rel)));
     else if (act === 'deleteRemote') await io.remove(rel);
     else if (act === 'conflict') {
-      const copy = conflictName(rel);
+      const copy = conflictName(rel, (n) => server.has(n) || index[n] !== undefined || fs.existsSync(abs(n)));
       const mine = fs.readFileSync(abs(rel));
       write(copy, mine);
       await io.upload(copy, mine);
@@ -143,9 +150,13 @@ async function syncFolder(dir, indexPath, io) {
     }
     if (act === 'deleteLocal' || act === 'deleteRemote' || (act === 'same' && !s)) delete index[rel];
     else index[rel] = act === 'upload' ? l : got;
+    } catch (e) {
+      if (e.fatal) throw e; // server unreachable: abort like before
+      errors.push(`${rel}: ${e.message}`); // index entry of this file stays as it was
+    }
   }
   writeJson(indexPath, index);
-  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts, warning, skipped };
+  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts, warning, skipped, errors };
 }
 
 function readJson(file, fallback) {
@@ -210,7 +221,7 @@ function moveDir(src, dst, names, commit) {
   return { moved: todo.length, failed };
 }
 
-module.exports = { syncFolder, decide, conflictName, moveDir };
+module.exports = { syncFolder, decide, conflictName, moveDir, sha1 };
 
 if (require.main === module) {
   const assert = require('assert');
