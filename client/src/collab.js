@@ -62,7 +62,19 @@ export function getMe() {
 export function setCollabProject(id) {
   if (id === projectId) return;
   closeAllSessions();
+  prewarmedAt.clear();
   projectId = id;
+}
+
+// Track a position in a file across later local/remote edits; returns () => current index (or null).
+export function trackPosition(path, index) {
+  const s = sessions.get(path);
+  if (!s) return () => null;
+  const rel = Y.createRelativePositionFromTypeIndex(s.ytext, index);
+  return () => {
+    const a = Y.createAbsolutePositionFromRelativePosition(rel, s.ydoc);
+    return a ? a.index : null;
+  };
 }
 
 export function getSession(path) {
@@ -102,6 +114,29 @@ export function openSession(path) {
   return opening.get(path);
 }
 
+// BroadcastChannel per epoch: tabs with a different doc identity must not merge (text would double).
+function newProvider(pid, path, epoch, ydoc, opts = {}) {
+  const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, { params: { epoch }, connect: false, ...opts });
+  provider.bcChannel += '#' + epoch;
+  provider.connect();
+  return provider;
+}
+
+// Unsynced offline edits would vanish with the old cache (4404 renamed/deleted, 4409 new epoch):
+// keep the local text as <name>.offline-konflikt<ext> (same name as server/lib/localSync.js).
+async function rescueOffline(path, text) {
+  const i = path.lastIndexOf('/');
+  const base = path.slice(i + 1);
+  const dot = base.lastIndexOf('.');
+  const name = (dot > 0 ? base.slice(0, dot) : base) + '.offline-konflikt' + (dot > 0 ? base.slice(dot) : '');
+  try {
+    await api.uploadFile(path.slice(0, Math.max(i, 0)), name, btoa(unescape(encodeURIComponent(text))), true);
+    alert(`Offline-Änderungen an "${path}" konnten nicht mehr zusammengeführt werden und wurden als "${name}" gesichert.`);
+  } catch (e) {
+    alert(`Offline-Änderungen an "${path}" gingen verloren (Sicherung fehlgeschlagen: ${e.message}).`);
+  }
+}
+
 async function createSession(path) {
   const pid = projectId;
   const epochKey = `lide-epoch:${pid}:${path}`;
@@ -128,11 +163,8 @@ async function createSession(path) {
   await idb.whenSynced;
   const hasLocal = ydoc.store.clients.size > 0;
 
-  const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, {
-    params: { epoch },
-    // 1009 = message too large: retrying would resend the same update forever.
-    shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500),
-  });
+  // 1009 = message too large: retrying would resend the same update forever.
+  const provider = newProvider(pid, path, epoch, ydoc, { shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500) });
   provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
   const undoManager = createUndoManager(ydoc);
 
@@ -161,7 +193,9 @@ async function createSession(path) {
   ytext.observe((event, tr) => {
     if (tr.local && !provider.synced) {
       for (const [a, b] of deltaRanges(event.delta)) s.pending.push([rel(a), rel(b)]);
-      store.set(pendingKey, s.pending);
+      // serialising the whole list per keystroke is slow and eats the localStorage quota
+      clearTimeout(s.pendingTimer);
+      s.pendingTimer = setTimeout(() => store.set(pendingKey, s.pending), 300);
     } else if (tr.origin === provider && s.resync) {
       for (const [a, b] of deltaRanges(event.delta)) s.resync.push([rel(a), rel(b)]);
     }
@@ -177,17 +211,19 @@ async function createSession(path) {
     detectConflicts(s);
     s.resync = null;
     s.pending = [];
+    clearTimeout(s.pendingTimer);
     store.set(pendingKey, null);
     store.set(conflictKey, s.conflicts);
   });
 
   provider.on('connection-close', (ev) => {
     const code = ev && ev.code;
+    if ((code === 4409 || code === 4404) && s.pending.length) rescueOffline(path, ytext.toString());
     if (code === 4409 || code === 4403) {
       // 4409: Server re-created this doc (state lost) - our cache belongs to the old
       // identity and would duplicate the text if merged.
       // 4403: Reviewer change rejected - the cache holds text the server never took.
-      // ponytail: unsynced offline edits in that old cache are dropped here.
+      // unsynced offline edits (4409) are saved as <name>.offline-konflikt.<ext> above
       closeSession(path);
       indexedDB.deleteDatabase(dbName);
       store.set(pendingKey, null);
@@ -308,9 +344,16 @@ export function resolveConflict(path, id) {
 // Desktop app: pull every text file's doc into IndexedDB while online, so
 // files never opened on this device can still be edited offline.
 // 4 files in parallel, one WebSocket each.
-export async function prewarm(paths) {
-  const queue = [...paths];
-  await Promise.all(Array.from({ length: 4 }, () => prewarmWorker(queue)));
+// Every tree event calls this: a run in progress is reused, files warmed in the last minute are skipped.
+let prewarming = null;
+const prewarmedAt = new Map();
+export function prewarm(paths) {
+  if (prewarming) return prewarming;
+  const now = Date.now();
+  const queue = paths.filter((p) => now - (prewarmedAt.get(p) || 0) > 60000);
+  for (const p of queue) prewarmedAt.set(p, now);
+  prewarming = Promise.all(Array.from({ length: 4 }, () => prewarmWorker(queue))).finally(() => (prewarming = null));
+  return prewarming;
 }
 
 async function prewarmWorker(queue) {
@@ -325,7 +368,7 @@ async function prewarmWorker(queue) {
       const ydoc = new Y.Doc();
       const idb = new IndexeddbPersistence(`latex-ide:${pid}:${path}:${r.epoch}`, ydoc);
       await idb.whenSynced;
-      const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, { params: { epoch: r.epoch } });
+      const provider = newProvider(pid, path, r.epoch, ydoc);
       await new Promise((resolve) => {
         provider.once('sync', resolve);
         setTimeout(resolve, 10000);

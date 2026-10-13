@@ -62,12 +62,14 @@ function pickStartFile(root) {
 }
 
 const TEXT_EXTENSIONS = new Set([
-  '.tex', '.ltx', '.bib', '.sty', '.cls', '.bst', '.bbx', '.cbx', '.lbx', '.dbx', '.def', '.dtx', '.ins', '.clo', '.cfg',
-  '.tikz', '.pgf', '.csv', '.dat', '.lua', '.txt', '.md',
+  '.tex', '.ltx', '.bib', '.sty', '.cls', '.bst', '.bbx', '.cbx', '.lbx', '.dbx', '.def', '.dtx', '.ins', '.clo', '.cfg', '.fd',
+  '.tikz', '.pgf', '.csv', '.tsv', '.dat', '.lua', '.txt', '.md',
 ]);
+const TEXT_BASENAMES = new Set(['.latexmkrc', 'latexmkrc']); // no extension (path.extname('.latexmkrc') === '')
 
 function isTextFile(relPath) {
-  return TEXT_EXTENSIONS.has(path.extname(relPath).toLowerCase());
+  const base = path.posix.basename(String(relPath).replace(/\\/g, '/')).toLowerCase();
+  return TEXT_EXTENSIONS.has(path.extname(base)) || TEXT_BASENAMES.has(base);
 }
 
 function safeResolve(root, relPath) {

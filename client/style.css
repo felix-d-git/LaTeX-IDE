@@ -660,11 +660,11 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 #pdf-container{
   position: absolute; inset: var(--ol-pdf-toolbar-h) 0 0 0;
   overflow: auto;
-  display: flex; flex-direction: column; align-items: center;
+  display: flex; flex-direction: column;
   padding: 12px 0; gap: 12px;
 }
-#pdf-empty{ color: var(--ol-text-muted); margin-top: 40px; font-size: var(--ol-fs-sm); }
-.pdf-page{ position: relative; background: #fff; box-shadow: var(--ol-page-shadow); }
+#pdf-empty{ align-self: center; color: var(--ol-text-muted); margin-top: 40px; font-size: var(--ol-fs-sm); }
+.pdf-page{ position: relative; flex: none; margin: 0 auto; background: #fff; box-shadow: var(--ol-page-shadow); }
 .pdf-page canvas{ display: block; }
 .pdf-sync-marker{
   position: absolute;
