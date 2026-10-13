@@ -198,15 +198,25 @@ function sharedRootsFor(userId) {
   return Object.keys(workspace.sharesByRoot).filter((r) => workspace.sharesByRoot[r].includes(userId));
 }
 
-// Project renamed: carry its per-root settings/main file/shares over.
+// Project folder moved (rename, trash, archive, restore): carry its per-root settings/main file/shares
+// over. Leftovers of an earlier project at the target are dropped first, never mixed in.
 function moveRoot(oldRoot, newRoot) {
   oldRoot = rk(oldRoot);
   newRoot = rk(newRoot);
+  if (oldRoot === newRoot) return;
   for (const k of ROOT_MAPS) {
+    delete workspace[k][newRoot];
     if (workspace[k][oldRoot] === undefined) continue;
     workspace[k][newRoot] = workspace[k][oldRoot];
     delete workspace[k][oldRoot];
   }
+  saveWorkspace(workspace);
+}
+
+// Project deleted, or a new one created at a path an old one used: forget everything per-root.
+function dropRoot(root) {
+  root = rk(root);
+  for (const k of ROOT_MAPS) delete workspace[k][root];
   saveWorkspace(workspace);
 }
 
@@ -326,6 +336,7 @@ module.exports = {
   getShares,
   setShares,
   sharedRootsFor,
+  dropRoot,
   getRole,
   setRole,
   getShareLinks,

@@ -190,10 +190,34 @@ function canManageRoot(user, root) {
   return user.isAdmin || ownerIdOf(root) === user.id;
 }
 
+// In the owner's trash or archive: members keep their share (back after restore), but no access meanwhile.
+function isParked(root) {
+  return [projects.TRASH_DIRNAME, projects.ARCHIVE_DIRNAME].includes(path.basename(path.dirname(path.resolve(root))));
+}
+
 function canAccessRoot(user, root) {
   if (!user || !root) return false;
   if (canManageRoot(user, root)) return true;
-  return state.getShares(path.resolve(root)).includes(user.id);
+  return !isParked(root) && state.getShares(path.resolve(root)).includes(user.id);
+}
+
+function sharedRootsOf(userId) {
+  return state.sharedRootsFor(userId).filter((r) => !isParked(r));
+}
+
+// Label key of an own project: folder name, '.trash/<name>', '.archive/<name>'.
+const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split(path.sep).join('/');
+
+// Owner moved a project folder: per-root state and the label go along.
+function projectMoved(req, projectsDir, oldRoot, newRoot) {
+  state.moveRoot(oldRoot, newRoot);
+  state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
+}
+
+// New project folder (create/copy/import) or permanently deleted one: no leftovers of an earlier project at that path.
+function projectFresh(req, projectsDir, root) {
+  state.dropRoot(root);
+  state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, root), null);
 }
 
 // 'owner' | 'editor' | 'reviewer' (read + comment only) | null
@@ -459,7 +483,7 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 // Projects a user can reach (own + shared) as { id, name, shared }; id = stable project id used in MCP tokens.
 function mcpProjects(user) {
   const own = projects.listProjects(userProjectsDir(user)).filter((p) => !(user.isAdmin && p.name === 'users')).map((p) => p.root);
-  const shared = state.sharedRootsFor(user.id).filter((r) => fs.existsSync(r));
+  const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
 app.post('/mcp',ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
@@ -725,7 +749,7 @@ app.delete('/api/share/link/:role', (req, res) => {
 
 app.post('/api/share/join', limitToken, (req, res) => {
   const link = typeof req.body.token === 'string' && state.findShareLink(req.body.token);
-  if (!link || !fs.existsSync(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  if (!link || !fs.existsSync(link.root) || isParked(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
   if (!auth.isVerified(req.user)) return res.status(403).json({ error: 'Bitte zuerst die E-Mail-Adresse bestätigen.' });
   if (!canManageRoot(req.user, link.root)) {
     const ids = state.getShares(link.root);
@@ -850,7 +874,7 @@ app.get('/api/import/projects', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const own = projects.listProjects(userProjectsDir(req.user)).filter((p) => !(req.user.isAdmin && p.name === 'users')).map((p) => p.root);
-  const roots = [...own, ...state.sharedRootsFor(req.user.id)]
+  const roots = [...own, ...sharedRootsOf(req.user.id)]
     .map((r) => path.resolve(r))
     .filter((r) => r !== path.resolve(root) && importSourceRoot(req, projectIdOf(r)));
   res.json({ projects: roots.map((r) => ({ id: projectIdOf(r), name: path.basename(r) })) });
@@ -1007,8 +1031,7 @@ app.get('/api/projects/list', (req, res) => {
     activeRoot: state.getActiveRoot(req.user.id),
     recentRoots: state.getRecentRoots(req.user.id),
     localProjects: projects.listProjects(projectsDir).filter((p) => !(req.user.isAdmin && p.name === 'users')),
-    sharedProjects: state
-      .sharedRootsFor(req.user.id)
+    sharedProjects: sharedRootsOf(req.user.id)
       .filter((root) => fs.existsSync(root))
       .map((root) => {
         const owner = auth.findUserById(ownerIdOf(root));
@@ -1056,7 +1079,9 @@ app.post('/api/projects/open', (req, res) => {
 
 app.post('/api/projects/create', (req, res) => {
   try {
-    const root = projects.createProject(userProjectsDir(req.user), req.body.name || '');
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.createProject(projectsDir, req.body.name || '');
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1074,8 +1099,7 @@ app.post('/api/projects/rename', (req, res) => {
     collab.flushRoot(root);
     // ponytail: members who have this project open keep the old path until they reopen it from the dashboard.
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
-    state.moveRoot(path.resolve(root), path.resolve(newRoot));
-    state.moveLabelKey(req.user.id, oldName, path.basename(newRoot));
+    projectMoved(req, projectsDir, root, path.resolve(newRoot));
     res.json({ root: newRoot });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1084,7 +1108,9 @@ app.post('/api/projects/rename', (req, res) => {
 
 app.post('/api/projects/copy', (req, res) => {
   try {
-    const root = projects.copyProject(userProjectsDir(req.user), req.body.name, req.body.newName);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1099,7 +1125,8 @@ app.post('/api/projects/archive', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses archiviert wird.' });
   }
   try {
-    projects.archiveProject(projectsDir, name);
+    collab.flushRoot(root);
+    projectMoved(req, projectsDir, root, path.resolve(projects.archiveProject(projectsDir, name)));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1108,7 +1135,9 @@ app.post('/api/projects/archive', (req, res) => {
 
 app.post('/api/projects/unarchive', (req, res) => {
   try {
-    const root = projects.unarchiveProject(userProjectsDir(req.user), req.body.name);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.unarchiveProject(projectsDir, req.body.name);
+    projectMoved(req, projectsDir, path.resolve(projectsDir, projects.ARCHIVE_DIRNAME, req.body.name), path.resolve(root));
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1119,7 +1148,9 @@ app.post('/api/projects/unarchive', (req, res) => {
 app.post('/api/projects/upload-zip', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Keine Zip-Datei empfangen.' });
   try {
-    const root = projects.importZip(userProjectsDir(req.user), String(req.query.name || ''), req.body);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body);
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1137,7 +1168,7 @@ app.get('/api/projects/download/zip', (req, res) => {
     return res.status(400).json({ error: 'Ungültige Auswahl.' });
   }
   const dir = userProjectsDir(req.user);
-  const shared = state.sharedRootsFor(req.user.id).map((r) => path.resolve(r));
+  const shared = sharedRootsOf(req.user.id).map((r) => path.resolve(r));
   const list = [];
   try {
     for (const it of items) {
@@ -1258,7 +1289,8 @@ app.post('/api/projects/trash', (req, res) => {
   // An archived project can't be open; it may share its name with an active one.
   if (from === 'archive') {
     try {
-      projects.trashArchivedProject(projectsDir, name);
+      const dest = projects.trashArchivedProject(projectsDir, name);
+      projectMoved(req, projectsDir, path.resolve(projectsDir, projects.ARCHIVE_DIRNAME, name), path.resolve(dest));
       return res.json({ ok: true });
     } catch (e) {
       return res.status(400).json({ error: e.message });
@@ -1269,7 +1301,8 @@ app.post('/api/projects/trash', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });
   }
   try {
-    projects.trashProject(projectsDir, name);
+    collab.flushRoot(root);
+    projectMoved(req, projectsDir, root, path.resolve(projects.trashProject(projectsDir, name)));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1278,7 +1311,9 @@ app.post('/api/projects/trash', (req, res) => {
 
 app.post('/api/projects/restore', (req, res) => {
   try {
-    const root = projects.restoreProject(userProjectsDir(req.user), req.body.name);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.restoreProject(projectsDir, req.body.name);
+    projectMoved(req, projectsDir, path.resolve(projectsDir, projects.TRASH_DIRNAME, req.body.name), path.resolve(root));
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1287,8 +1322,9 @@ app.post('/api/projects/restore', (req, res) => {
 
 app.delete('/api/projects/trash/:name', (req, res) => {
   try {
-    projects.deleteProjectPermanently(userProjectsDir(req.user), req.params.name);
-    state.moveLabelKey(req.user.id, req.params.name, null);
+    const projectsDir = userProjectsDir(req.user);
+    projects.deleteProjectPermanently(projectsDir, req.params.name);
+    projectFresh(req, projectsDir, path.resolve(projectsDir, projects.TRASH_DIRNAME, req.params.name));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });

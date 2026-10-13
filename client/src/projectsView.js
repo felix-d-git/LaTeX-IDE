@@ -67,7 +67,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   let labelColor = null;
   let visibleKeys = [];
   const isShared = (p) => !!p.owner;
-  const keyOf = (p) => (isShared(p) ? p.root : p.name);
+  const keyOf = (p) => p.key || (isShared(p) ? p.root : p.name);
   let sortKey = 'lastModified';
   let sortDir = -1; // -1 desc, 1 asc
 
