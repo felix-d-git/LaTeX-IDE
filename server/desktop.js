@@ -154,6 +154,8 @@ async function remoteJson(pathAndQuery) {
 // --- app ---
 
 const app = express();
+// Express 4 does not catch rejected promises from async handlers (crash in Node >= 15).
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // DNS rebinding / other local sites: only our own origin may talk to us.
 app.use((req, res, next) => {
@@ -197,7 +199,7 @@ app.get('/api/desktop/info', (req, res) => {
 // --- local copy folder (settings) ---
 // Moves all owned project folders to a new location: copy, verify count + size, only then
 // delete the old ones. Sync is paused meanwhile.
-app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
+app.post('/api/desktop/local-dir', express.json(), ah(async (req, res) => {
   const dir = String((req.body && req.body.dir) || '').trim();
   if (process.env.LATEX_IDE_LOCAL) return res.status(409).json({ error: 'Ordner ist per Umgebungsvariable LATEX_IDE_LOCAL festgelegt.' });
   if (!dir || !path.isAbsolute(dir)) return res.status(400).json({ error: 'Bitte einen absoluten Pfad angeben.' });
@@ -235,7 +237,7 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
   } finally {
     moving = false;
   }
-});
+}));
 
 // --- auto-update from the server ---
 // The server offers the desktop build of its own version (fetched from GitHub,
@@ -252,7 +254,7 @@ function newer(a, b) {
 const UPDATE_OS = { win32: 'windows', darwin: 'macos' }[process.platform];
 
 let latest = null; // version offered by the server
-app.get('/api/desktop/update', async (req, res) => {
+app.get('/api/desktop/update', ah(async (req, res) => {
   try {
     if (!config.token) throw new Error('nicht angemeldet');
     const rel = await remoteJson('/api/desktop/release');
@@ -261,13 +263,13 @@ app.get('/api/desktop/update', async (req, res) => {
   } catch (e) {
     res.json({ available: false, current: APP_VERSION, error: e.message }); // offline / no release yet: stay quiet
   }
-});
+}));
 
 // Windows: downloads the setup to Temp, starts it silently (keeps the chosen dirs, restarts the app)
 // and exits, so the installer can replace node.exe and the server files.
 // macOS: unpacks the ZIP over ~/Applications/LatexIDE/app (node/ and install.json stay) and
 // restarts via the LatexIDE.command starter that install.command created one level up.
-app.post('/api/desktop/update/install', async (req, res) => {
+app.post('/api/desktop/update/install', ah(async (req, res) => {
   if (!latest) return res.status(400).json({ error: 'Kein Update bekannt.' });
   try {
     const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
@@ -301,7 +303,7 @@ app.post('/api/desktop/update/install', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 // Only forgets the token locally - the server-side entry can be revoked in
 // the web UI (Profil → Verbundene Desktop-Apps).
@@ -311,7 +313,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // Lokaler LanguageTool (nur Loopback): der Proxy umgeht CORS/Mixed Content des Browsers.
-app.post('/api/languagetool-local', express.json({ limit: '2mb' }), async (req, res) => {
+app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (req, res) => {
   let u;
   try { u = new URL(String(req.body.url)); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
   if (!/^https?:$/.test(u.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) {
@@ -330,7 +332,7 @@ app.post('/api/languagetool-local', express.json({ limit: '2mb' }), async (req, 
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 app.use('/api', (req, res, next) => {
   if (!config.token) return res.status(401).json({ error: 'Desktop-App nicht angemeldet.', desktopLogin: true });
@@ -565,7 +567,7 @@ function mainPdf(proj) {
   return fs.existsSync(abs) ? abs : null;
 }
 
-app.get('/api/synctex/forward', async (req, res) => {
+app.get('/api/synctex/forward', ah(async (req, res) => {
   const proj = requireCurrent(res);
   if (!proj) return;
   const { file, line } = req.query;
@@ -577,9 +579,9 @@ app.get('/api/synctex/forward', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
-app.get('/api/synctex/inverse', async (req, res) => {
+app.get('/api/synctex/inverse', ah(async (req, res) => {
   const proj = requireCurrent(res);
   if (!proj) return;
   const { page, x, y } = req.query;
@@ -593,7 +595,7 @@ app.get('/api/synctex/inverse', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // --- offline: tree/files of the own project straight from the local copy ---
 
@@ -684,7 +686,7 @@ const checkedOwn = new Set();
 const FORWARD_REQ = ['content-type', 'accept'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
 
-app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, res) => {
+app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req, res) => {
   if (serveLocal(req, res)) return; // known offline: don't wait for the remote timeout
   const url = req.originalUrl;
   const headers = {};
@@ -724,7 +726,7 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, r
     res.setHeader('X-Offline', '1');
     res.end(cached.body);
   }
-});
+}));
 
 // --- static client ---
 
@@ -737,6 +739,12 @@ app.get('/licenses', (req, res) => {
   res.type('text/plain; charset=utf-8').send(legal.licensesText());
 });
 app.get('/source', (req, res) => res.redirect(legal.SOURCE_LINK));
+
+app.use((err, req, res, next) => {
+  console.error('[route]', req.method, req.path, err);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.message || String(err) });
+});
 
 // --- websockets (/ws, /yjs) ---
 
@@ -759,6 +767,8 @@ server.on('upgrade', (req, socket, head) => {
   proxy.ws(req, socket, head, { headers: { authorization: `Bearer ${config.token}`, origin: new URL(REMOTE).origin } });
   socket.on('data', scheduleSync);
 });
+
+process.on('unhandledRejection', (e) => console.error('[desktop] unbehandelte Promise-Ablehnung:', e));
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`LaTeX IDE Desktop: http://localhost:${PORT}  (Server: ${REMOTE}, Daten: ${DATA})`);

@@ -26,11 +26,17 @@ function pandoc(args, input, cwd) {
   return new Promise((resolve, reject) => {
     const child = execFile(PANDOC, args, { cwd, encoding: 'buffer', maxBuffer: 200 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
       if (err) {
-        err.message = err.code === 'ENOENT' ? 'Pandoc ist auf dem Server nicht installiert.' : String(stderr || err.message).trim();
+        const errText = stderr && stderr.length ? stderr.toString('utf8').trim() : '';
+        if (err.code === 'ENOENT') err.message = 'Pandoc ist auf dem Server nicht installiert.';
+        else if (/Unknown option --sandbox/i.test(errText)) err.message = 'Pandoc ist zu alt (benötigt ≥ 2.15 für --sandbox).';
+        else err.message = errText || err.message || 'Pandoc ist fehlgeschlagen.';
         return reject(err);
       }
       resolve(stdout);
     });
+    // EPIPE when pandoc exits before reading all input; without a listener it ends the server.
+    // The real error arrives in the callback above.
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 }

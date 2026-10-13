@@ -234,6 +234,10 @@ Issues an.
   pusht), verbreitet die enthaltene Drittsoftware selbst und muss deren
   Quellcode wie oben bereitstellen, mit pandoc auch den der statisch gelinkten
   Haskell-Bibliotheken.
+- Große Projekte (viele Dateien/Ordner) brauchen genug inotify-Watches auf dem
+  Host, sonst erkennt der Server externe Dateiänderungen nicht mehr live (Log:
+  `[watcher] … ENOSPC`): `sysctl -w fs.inotify.max_user_watches=524288`,
+  dauerhaft per Datei unter `/etc/sysctl.d/`.
 
 ## Datensicherung
 

@@ -18,6 +18,7 @@ let projectId = null;
 let me = { name: 'Ich', color: COLORS[0] };
 const sessions = new Map(); // path -> session
 const opening = new Map(); // path -> Promise<session>
+let maxPayload = 64 * 1024 * 1024; // server's WebSocket limit, updated from /api/collab/epoch
 let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {} };
 
 const store = {
@@ -106,6 +107,7 @@ async function createSession(path) {
     // Server answers for the *active* project - a project switch in between would mix caches.
     if (r.projectId !== pid) throw Object.assign(new Error('Projekt wurde gewechselt.'), { status: 409 });
     epoch = r.epoch;
+    if (r.maxPayload) maxPayload = r.maxPayload;
     store.set(epochKey, epoch);
   } catch (e) {
     // real server answer (404, 403) - not an offline situation; the desktop app answers 503 {offline}
@@ -122,6 +124,8 @@ async function createSession(path) {
 
   const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, {
     params: { epoch },
+    // 1009 = message too large: retrying would resend the same update forever.
+    shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500),
   });
   provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
   const undoManager = new Y.UndoManager(ytext);
@@ -185,6 +189,18 @@ async function createSession(path) {
     } else if (code === 4404) {
       closeSession(path);
       hooks.onGone(path);
+    } else if (code === 1009) {
+      alert(
+        `Diese Änderung ist zu groß für die Live-Synchronisierung (max. ${Math.round(maxPayload / 1048576)} MB) und wurde NICHT auf dem Server gespeichert. ` +
+          'Bitte rückgängig machen (Strg+Z) oder die Datei über Hochladen ersetzen.',
+      );
+      // Stays disconnected (banner shows "offline") until the document fits again, e.g. after Strg+Z.
+      const retry = () => {
+        if (Y.encodeStateAsUpdate(ydoc).length >= maxPayload) return;
+        ydoc.off('update', retry);
+        provider.connect();
+      };
+      ydoc.on('update', retry);
     }
   });
 

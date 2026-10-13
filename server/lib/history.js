@@ -37,6 +37,11 @@ function saveIndex(root, entries) {
   fs.writeFileSync(indexPath(root), JSON.stringify(entries, null, 2), 'utf8');
 }
 
+function isRegularFile(abs) {
+  const st = fs.statSync(abs, { throwIfNoEntry: false });
+  return !!st && st.isFile();
+}
+
 function walkTextFiles(root, relDir = '', out = []) {
   const absDir = path.join(root, relDir);
   for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
@@ -44,7 +49,8 @@ function walkTextFiles(root, relDir = '', out = []) {
     const relPath = path.join(relDir, entry.name).split(path.sep).join('/');
     if (entry.isDirectory()) {
       walkTextFiles(root, relPath, out);
-    } else if (isTextFile(relPath)) {
+    } else if (isTextFile(relPath) && (entry.isFile() || (entry.isSymbolicLink() && isRegularFile(path.join(root, relPath))))) {
+      // Dangling symlinks (e.g. Emacs lock files .#main.tex) can't be copied.
       out.push(relPath);
     }
   }
@@ -53,7 +59,11 @@ function walkTextFiles(root, relDir = '', out = []) {
 
 function sameFiles(root, prev, files) {
   if (prev.files.length !== files.length || prev.files.some((f, i) => f !== files[i])) return false;
-  return files.every((f) => readSnapshotFile(root, prev.id, f) === readCurrentFile(root, f));
+  try {
+    return files.every((f) => readSnapshotFile(root, prev.id, f) === readCurrentFile(root, f));
+  } catch (e) {
+    return false; // unreadable -> treat as changed
+  }
 }
 
 function snapshot(root, { label = null, trigger = 'autosave' } = {}) {
@@ -72,16 +82,31 @@ function snapshot(root, { label = null, trigger = 'autosave' } = {}) {
 
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const snapDir = path.join(historyRoot(root), SNAPSHOTS_DIR, id);
+  const copied = [];
   for (const relPath of files) {
     const dest = path.join(snapDir, relPath);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(path.join(root, relPath), dest);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(path.join(root, relPath), dest);
+      copied.push(relPath);
+    } catch (e) {
+      // File vanished or isn't readable -> leave it out; anything else (ENOSPC …)
+      // aborts without leaving a snapshot folder that no index entry points to.
+      if (['ENOENT', 'EACCES', 'EPERM'].includes(e.code)) continue;
+      fs.rmSync(snapDir, { recursive: true, force: true });
+      throw e;
+    }
   }
 
-  const entry = { id, createdAt: new Date().toISOString(), label, trigger, files };
+  const entry = { id, createdAt: new Date().toISOString(), label, trigger, files: copied };
   const entries = loadIndex(root);
   entries.push(entry);
-  saveIndex(root, entries);
+  try {
+    saveIndex(root, entries);
+  } catch (e) {
+    fs.rmSync(snapDir, { recursive: true, force: true });
+    throw e;
+  }
   return entry;
 }
 

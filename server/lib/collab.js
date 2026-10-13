@@ -23,6 +23,8 @@ const { safeResolve } = require('./fsTree');
 const STATE_DIR = '.latex-ide-yjs';
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
+// Largest WebSocket message (/ws and /yjs); a bigger one closes only that connection with 1009.
+const WS_MAX_PAYLOAD = 64 * 1024 * 1024;
 const PERSIST_DELAY_MS = 500;
 
 const docs = new Map(); // key -> entry
@@ -225,6 +227,9 @@ function readSyncReadOnly(dec, enc, ydoc, ws) {
 }
 
 function handleConnection(ws, root, rel, epoch, readOnly = false) {
+  // First, before any early close: without a listener a socket error (e.g. message > maxPayload)
+  // is an uncaught exception that ends the whole server. Cleanup happens in 'close'.
+  ws.on('error', (e) => console.warn('[collab] WebSocket-Fehler', rel, e.code || e.message));
   let entry;
   try {
     entry = getDoc(root, rel);
@@ -334,6 +339,7 @@ function flushAll() {
 
 module.exports = {
   STATE_DIR,
+  WS_MAX_PAYLOAD,
   setHooks,
   getEpoch,
   handleConnection,
