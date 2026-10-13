@@ -12,6 +12,12 @@ import { ySyncFacet } from 'y-codemirror.next';
 import { api } from './api.js';
 import { offlineBanner } from './offlineBanner.js';
 
+// Undo covers the review map too: the tracked-change entry that trackChanges
+// records right after a local edit belongs to the same undo step as the edit.
+export function createUndoManager(ydoc) {
+  return new Y.UndoManager([ydoc.getText('content'), ydoc.getMap('review')]);
+}
+
 const COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#e377c2', '#8c564b'];
 
 let projectId = null;
@@ -128,7 +134,7 @@ async function createSession(path) {
     shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500),
   });
   provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
-  const undoManager = new Y.UndoManager(ytext);
+  const undoManager = createUndoManager(ydoc);
 
   const pendingKey = `lide-offline:${dbName}`;
   const conflictKey = `lide-conflicts:${dbName}`;
