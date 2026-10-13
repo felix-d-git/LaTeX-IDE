@@ -72,6 +72,10 @@ können dann gelöscht werden.
   ([docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#fertiges-image-nur-bei-öffentlichem-repository));
   ohne Pandoc meldet der Export einen Fehler. Benötigt Pandoc ≥ 2.15 (Ubuntu
   20.04/Debian 11 liefern ältere Versionen, dann Pandoc von pandoc.org installieren).
+- `COMPILE_TIMEOUT_MS` — Zeitlimit pro Kompiliervorgang (Standard `600000`
+  = 10 min). Danach beendet der Server latexmk samt pdflatex/biber und meldet
+  „Zeitlimit überschritten“, etwa bei einer Endlosschleife im Dokument; die
+  Warteschlange für alle anderen Nutzer läuft weiter.
 - Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
   doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
   Der Zotero-API-Key wird auf dem Server gespeichert (`auth-data.json` im
