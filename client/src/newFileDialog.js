@@ -74,7 +74,7 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     const wrap = document.createElement('div');
     const drop = document.createElement('div');
     drop.id = 'new-file-drop-zone';
-    drop.textContent = 'Drop or paste your files here, or select them below.';
+    drop.textContent = 'Drop your files here, or select them below.';
     wrap.appendChild(drop);
 
     const input = document.createElement('input');

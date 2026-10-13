@@ -24,7 +24,15 @@ export function resetTreeSelection() {
   selected.clear();
 }
 
+function pruneSelection(tree) {
+  const live = new Set();
+  const walk = (ns) => ns.forEach((n) => { live.add(n.path); if (n.children) walk(n.children); });
+  walk(tree);
+  for (const p of [...selected]) if (!live.has(p)) selected.delete(p);
+}
+
 export function renderTree(container, tree, ctx) {
+  pruneSelection(tree);
   container.innerHTML = '';
   container.appendChild(renderNodes(tree, ctx, container));
   setupRootDrop(container, ctx);
@@ -166,7 +174,14 @@ function openNodeMenu(x, y, node, ctx, container) {
     items.push({
       label: 'Download',
       icon: 'download',
-      onClick: () => window.location.assign(withPid(`/api/raw?path=${encodeURIComponent(node.path)}`)),
+      onClick: () => {
+        const a = document.createElement('a');
+        a.href = withPid(`/api/raw?path=${encodeURIComponent(node.path)}`);
+        a.download = node.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      },
     });
   }
   if (!isDir && ctx.onSetMain && node.name.toLowerCase().endsWith('.tex')) {
@@ -216,6 +231,7 @@ function setupDropTarget(row, dirPath, ctx) {
     e.preventDefault();
     e.stopPropagation();
     row.classList.remove('drop-target');
+    row.closest('#file-tree')?.classList.remove('drop-target-root');
     handleDrop(e.dataTransfer, dirPath, ctx);
   });
 }
@@ -238,6 +254,8 @@ function setupRootDrop(container, ctx) {
 async function handleDrop(dataTransfer, targetDir, ctx) {
   const movedPath = dataTransfer.getData(MOVE_MIME);
   if (movedPath && ctx.onMove) {
+    // gleicher Ort / in sich selbst: nichts tun (sonst schließt moveTreeNode den Tab)
+    if (dirnameOf(movedPath) === targetDir || targetDir === movedPath || targetDir.startsWith(movedPath + '/')) return;
     await ctx.onMove(movedPath, targetDir);
     return;
   }
