@@ -45,6 +45,12 @@ function conflictName(rel) {
   return `${rel.slice(0, rel.length - ext.length)}.offline-konflikt${ext}`;
 }
 
+// Windows/macOS folders usually ignore case: "Kapitel1.tex" and "kapitel1.tex" are one file there.
+function caseInsensitive(dir) {
+  return dir.toUpperCase() !== dir.toLowerCase() && fs.existsSync(dir.toUpperCase()) && fs.existsSync(dir.toLowerCase());
+}
+const fold = (rel) => rel.normalize('NFC').toLowerCase();
+
 // Pure decision per file - kept separate so it can be checked without a server.
 function decide(s, l, b) {
   if (s === l) return 'same';
@@ -60,14 +66,35 @@ function decide(s, l, b) {
 const MAX_REMOTE_DELETES = 10;
 const MAX_REMOTE_DELETE_SHARE = 0.25;
 
-// io: { manifest(), download(rel) -> Buffer, upload(rel, buf), remove(rel) }
+// io: { manifest(), download(rel) -> Buffer, upload(rel, buf), remove(rel), caseInsensitive? (tests) }
 async function syncFolder(dir, indexPath, io) {
   const man = await io.manifest();
   // Folder gone (deleted, other drive, new install with old data dir): start over like the first
   // sync - only download. With the old index every file would count as deleted locally.
   const index = fs.existsSync(dir) ? readJson(indexPath, {}) : {};
+  fs.mkdirSync(dir, { recursive: true });
   const server = new Map(man.files.map((f) => [f.path, f.sha1]));
-  const local = walkLocal(dir);
+  let local = walkLocal(dir);
+  // Case-insensitive folder: map local and index paths onto the server's spelling, so a rename
+  // that only changes case is 'same' instead of download + deleteLocal (= the same file) and
+  // then deleteRemote. Server names that collide after folding (a.tex/A.tex) are skipped.
+  const clash = new Set();
+  if (io.caseInsensitive ?? caseInsensitive(dir)) {
+    const canon = new Map();
+    for (const rel of server.keys()) {
+      if (canon.has(fold(rel))) clash.add(fold(rel));
+      else canon.set(fold(rel), rel);
+    }
+    const rekey = (rel) => (clash.has(fold(rel)) ? rel : canon.get(fold(rel)) || rel);
+    local = new Map([...local].map(([r, h]) => [rekey(r), h]));
+    for (const r of Object.keys(index)) {
+      const w = rekey(r);
+      if (w === r) continue;
+      index[w] ??= index[r];
+      delete index[r];
+    }
+  }
+  const skipped = [];
   const abs = (rel) => {
     const a = path.resolve(dir, rel);
     if (!a.startsWith(path.resolve(dir) + path.sep)) throw new Error('Ungültiger Pfad.');
@@ -77,7 +104,9 @@ async function syncFolder(dir, indexPath, io) {
     fs.mkdirSync(path.dirname(abs(rel)), { recursive: true });
     fs.writeFileSync(abs(rel), buf);
   };
-  const plan = [...new Set([...server.keys(), ...local.keys(), ...Object.keys(index)])].map((rel) => {
+  const all = [...new Set([...server.keys(), ...local.keys(), ...Object.keys(index)])];
+  for (const rel of all) if (clash.has(fold(rel))) skipped.push(rel);
+  const plan = all.filter((rel) => !clash.has(fold(rel))).map((rel) => {
     const s = server.get(rel) || null;
     const l = local.get(rel) || null;
     return { rel, s, l, act: decide(s, l, index[rel]) };
@@ -116,7 +145,7 @@ async function syncFolder(dir, indexPath, io) {
     else index[rel] = act === 'upload' ? l : got;
   }
   writeJson(indexPath, index);
-  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts, warning };
+  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts, warning, skipped };
 }
 
 function readJson(file, fallback) {

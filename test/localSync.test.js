@@ -112,3 +112,32 @@ test('Änderung zwischen Manifest und Download erzeugt keinen Scheinkonflikt (#4
   assert.deepStrictEqual(io.uploaded, []);
   assert.strictEqual(fs.readFileSync(path.join(dir, 'main.tex'), 'utf8'), 's3');
 });
+
+test('Umbenennen nur in Groß-/Kleinschreibung löscht nichts (#47)', async () => {
+  const { dir, index, io } = await setup({ 'main.tex': 'x', 'kapitel1.tex': 'k', 'kap/a.tex': 'a' }, { caseInsensitive: true });
+  // Web-IDE on a case-sensitive server renames file and folder.
+  io.srv.set('Kapitel1.tex', io.srv.get('kapitel1.tex'));
+  io.srv.delete('kapitel1.tex');
+  io.srv.set('Kap/a.tex', io.srv.get('kap/a.tex'));
+  io.srv.delete('kap/a.tex');
+  for (let i = 0; i < 3; i++) await syncFolder(dir, index, io);
+  assert.deepStrictEqual(io.removed, []);
+  assert.deepStrictEqual([...io.srv.keys()].sort(), ['Kap/a.tex', 'Kapitel1.tex', 'main.tex']);
+  const names = fs.readdirSync(dir).map((n) => n.toLowerCase());
+  assert.ok(names.includes('kapitel1.tex'));
+  // Changes after the rename still sync both ways.
+  io.srv.set('Kapitel1.tex', Buffer.from('neu'));
+  await syncFolder(dir, index, io);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'kapitel1.tex'), 'utf8'), 'neu');
+});
+
+test('Paar a.tex/A.tex auf dem Server wird übersprungen statt gelöscht (#47)', async () => {
+  const { dir, index, io } = await setup({ 'main.tex': 'x', 'a.tex': 'klein' }, { caseInsensitive: true });
+  io.srv.set('A.tex', Buffer.from('groß'));
+  const r = await syncFolder(dir, index, io);
+  await syncFolder(dir, index, io);
+  assert.deepStrictEqual(io.removed, []);
+  assert.deepStrictEqual(io.uploaded, []);
+  assert.deepStrictEqual(r.skipped.sort(), ['A.tex', 'a.tex']);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'a.tex'), 'utf8'), 'klein');
+});

@@ -341,7 +341,14 @@ const wordCounts = new Map();
 let owned = readJson(path.join(SYNC_DIR, 'owned.json'), []); // [{ name, projectId }]
 const syncKey = (id) => String(id).replace(/[^\w-]/g, '_');
 const ownedEntry = (projectId) => owned.find((p) => p.projectId === projectId);
-const localDirOf = (p) => path.join(LOCAL_DIR, p.name.replace(/[<>:"/\\|?*]/g, '_'));
+const folderName = (name) => name.replace(/[<>:"/\\|?*]/g, '_');
+// "Thesis" and "thesis" would share one folder on Windows/macOS: only then add the id, so
+// existing folders keep their path (a now-missing folder just means a fresh download).
+const localDirOf = (p) => {
+  const f = folderName(p.name).normalize('NFC').toLowerCase();
+  const twin = owned.some((o) => o.projectId !== p.projectId && folderName(o.name).normalize('NFC').toLowerCase() === f);
+  return path.join(LOCAL_DIR, twin ? `${folderName(p.name)} (${syncKey(p.projectId)})` : folderName(p.name));
+};
 
 // One sync at a time: the periodic run and a compile must not touch a folder together.
 let syncLock = Promise.resolve();
@@ -368,9 +375,10 @@ async function syncOwnedNow(p) {
     remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
   });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
-  if (r.warning) {
-    console.warn(`Sync ${p.name}: ${r.warning}`);
-    syncWarnings.set(p.projectId, `${p.name}: ${r.warning}`);
+  const warn = [r.warning, r.skipped.length && `Dateien unterscheiden sich nur in Groß-/Kleinschreibung, nicht offline synchronisiert: ${r.skipped.join(', ')}`].filter(Boolean).join(' ');
+  if (warn) {
+    console.warn(`Sync ${p.name}: ${warn}`);
+    syncWarnings.set(p.projectId, `${p.name}: ${warn}`);
   } else syncWarnings.delete(p.projectId);
   return { ...r, dir };
 }
@@ -464,9 +472,13 @@ async function syncMirror() {
       })
     );
   }
+  // A path that differs from a wanted one only in case is the same file on Windows/macOS:
+  // drop it from the index, but do not delete the file that was just downloaded.
+  const fold = (rel) => rel.normalize('NFC').toLowerCase();
+  const wantedFolded = new Set([...wanted].map(fold));
   for (const rel of Object.keys(index)) {
     if (wanted.has(rel)) continue;
-    fs.rmSync(inside(dir, rel), { force: true });
+    if (!wantedFolded.has(fold(rel))) fs.rmSync(inside(dir, rel), { force: true });
     delete index[rel];
   }
   writeJson(indexPath, index);
