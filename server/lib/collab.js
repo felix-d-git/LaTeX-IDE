@@ -18,6 +18,7 @@ const syncProtocol = require('y-protocols/sync');
 const awarenessProtocol = require('y-protocols/awareness');
 const encoding = require('lib0/encoding');
 const decoding = require('lib0/decoding');
+const { diffLines, diffChars } = require('diff');
 const { safeResolve } = require('./fsTree');
 
 const STATE_DIR = '.latex-ide-yjs';
@@ -37,22 +38,45 @@ function setHooks(h) {
   hooks = { ...hooks, ...h };
 }
 
-// Replace only the differing middle part, so concurrent edits elsewhere and
-// remote cursors survive an external change (search/replace, file edited on disk).
+// Minimal edits (changed lines, then changed characters within them), so comment and
+// track-change anchors, remote cursors and concurrent edits on untouched text survive
+// an external change (search/replace, restore, upload, file edited on disk).
 function applyText(ytext, next, origin) {
   const cur = ytext.toString();
   if (cur === next) return false;
-  let start = 0;
-  while (start < cur.length && start < next.length && cur[start] === next[start]) start++;
-  let endCur = cur.length;
-  let endNext = next.length;
-  while (endCur > start && endNext > start && cur[endCur - 1] === next[endNext - 1]) {
-    endCur--;
-    endNext--;
+  const hunks = []; // [index in cur, chars to delete, text to insert], ascending
+  let pos = 0;
+  const parts = diffLines(cur, next);
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i].added && !parts[i].removed) {
+      pos += parts[i].value.length;
+      continue;
+    }
+    let del = '';
+    let ins = '';
+    for (; i < parts.length && (parts[i].added || parts[i].removed); i++) {
+      if (parts[i].removed) del += parts[i].value;
+      else ins += parts[i].value;
+    }
+    i--;
+    // ponytail: char diff capped (Myers is O(n*d)); a rewritten block is replaced as a whole.
+    const chars = del && ins ? diffChars(del, ins, { maxEditLength: 1000 }) : null;
+    if (chars) {
+      let q = pos;
+      for (const c of chars) {
+        if (c.added) hunks.push([q, 0, c.value]);
+        else if (c.removed) hunks.push([q, c.value.length, '']);
+        if (!c.added) q += c.value.length;
+      }
+    } else hunks.push([pos, del.length, ins]);
+    pos += del.length;
   }
   ytext.doc.transact(() => {
-    if (endCur > start) ytext.delete(start, endCur - start);
-    if (endNext > start) ytext.insert(start, next.slice(start, endNext));
+    for (let h = hunks.length - 1; h >= 0; h--) {
+      const [at, len, text] = hunks[h];
+      if (len) ytext.delete(at, len);
+      if (text) ytext.insert(at, text);
+    }
   }, origin);
   return true;
 }
