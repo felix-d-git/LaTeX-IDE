@@ -201,7 +201,9 @@ Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
 Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
 <https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
 `THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
-Quellcode der IDE selbst liegt im Image unter `/app`.
+Quellcode der IDE: die zur Laufzeit nötigen Quelltexte liegen im Image unter `/app`; der
+vollständige Quellcode einschließlich Build- und Hilfsskripten (`scripts/`, `installer/`,
+`.github/`) liegt unter der `/source`-Adresse des Servers (Tag dieser Version).
 
 Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
 und LGPL-3.0 (jeweils §6 d) über diese Hinweise und snapshot.debian.org

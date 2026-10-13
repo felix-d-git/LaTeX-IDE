@@ -28,9 +28,11 @@ jobs:
 
       - name: Tag passt zu package.json
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne $env:TAG) { throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Release." }
+          if ("v$v" -ne $env:TAG) { gh release edit $env:TAG --draft; throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Release." }
 
       - name: Inno Setup
         shell: pwsh
@@ -64,7 +66,7 @@ jobs:
           [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
           $body = gh release view $env:TAG --json body -q .body
           if ($body -match 'Welche Datei brauche ich') { exit 0 }
-          $tpl = (Get-Content .github/release-template.md -Raw -Encoding utf8).Replace('{{TAG}}', $env:TAG)
+          $tpl = (Get-Content .github/release-template.md -Raw -Encoding utf8).Replace('{{TAG}}', $env:TAG).Replace('{{REPO}}', $env:GITHUB_REPOSITORY)
           [IO.File]::WriteAllText("$env:RUNNER_TEMP/notes.md", (($body -join "`n") + "`n" + $tpl), [Text.UTF8Encoding]::new($false))
           gh release edit $env:TAG --notes-file "$env:RUNNER_TEMP/notes.md"
 

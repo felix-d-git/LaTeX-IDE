@@ -17,7 +17,7 @@
   "scripts": {
     "build:client": "node build.js",
     "start": "npm run build:client && node server/index.js",
-    "dev": "node build.js --watch & node server/index.js",
+    "dev": "node build.js --watch --serve",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

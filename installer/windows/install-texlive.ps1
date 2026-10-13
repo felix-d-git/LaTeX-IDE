@@ -8,21 +8,35 @@
 #>
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 zeichnet jeden Chunk des Fortschrittsbalkens: Download um ein Vielfaches langsamer.
+$ProgressPreference = 'SilentlyContinue'
 
 $TexDir = Join-Path $env:LOCALAPPDATA 'LatexIDE\texlive\2025'
 $ExistingLatexmk = Join-Path $TexDir 'bin\windows\latexmk.exe'
 
+# Ein latexmk im PATH zaehlt nur, wenn es laeuft (MiKTeX ohne Perl liefert latexmk.exe, das scheitert).
 function Test-LatexmkOnPath {
     $cmd = Get-Command latexmk.exe -ErrorAction SilentlyContinue
-    return $null -ne $cmd
+    if ($null -eq $cmd) { return $false }
+    try { & $cmd.Source -v *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
+
+# Marker erst nach vollstaendiger Installation: eine abgebrochene Installation hat oft schon latexmk.exe.
+$Marker = Join-Path $TexDir '.latexide-complete'
+# Aeltere Installationen ohne Marker: tlpdb wird von install-tl ganz am Ende geschrieben.
+if ((Test-Path $ExistingLatexmk) -and (Test-Path (Join-Path $TexDir 'tlpkg\texlive.tlpdb')) -and -not (Test-Path $Marker)) {
+    New-Item -ItemType File -Force -Path $Marker | Out-Null
+}
+
+# Fehler sichtbar machen: das Fenster schliesst sich sonst sofort, eine Teilinstallation wirkt wie fertig.
+try {
 
 if (Test-LatexmkOnPath) {
     Write-Host "latexmk bereits im PATH gefunden - TeX-Live-Installation wird uebersprungen."
     exit 0
 }
 
-if (Test-Path $ExistingLatexmk) {
+if (Test-Path $Marker) {
     Write-Host "TeX Live 2025 bereits unter $TexDir installiert - Installation wird uebersprungen."
     exit 0
 }
@@ -53,7 +67,17 @@ if (-not $InstallTlDir) {
 }
 
 # TEXDIR & Co. mit Vorwaertsslashes, wie von install-tl erwartet.
-$TexDirFwd = ($TexDir -replace '\\', '/')
+# install-tl liest das Profil nicht als Unicode: bei Nicht-ASCII-Zeichen (z. B. Umlaut im Benutzernamen)
+# ueber den 8.3-Kurzpfad des (existierenden) LOCALAPPDATA-Ordners gehen, Ziel bleibt derselbe Ordner.
+$TexDirProfile = $TexDir
+if ($TexDir -match '[^\x20-\x7E]') {
+    $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:LOCALAPPDATA).ShortPath
+    if ($short -match '[^\x20-\x7E]') {
+        throw "Der Benutzerpfad enthaelt Sonderzeichen und hat keinen 8.3-Kurznamen: $env:LOCALAPPDATA. TeX Live kann hier nicht installiert werden - bitte MiKTeX/TeX Live selbst installieren (latexmk im PATH)."
+    }
+    $TexDirProfile = Join-Path $short 'LatexIDE\texlive\2025'
+}
+$TexDirFwd = ($TexDirProfile -replace '\\', '/')
 
 $ProfileContent = @"
 selected_scheme scheme-full
@@ -90,7 +114,16 @@ if (-not (Test-Path $ExistingLatexmk)) {
     throw "Installation abgeschlossen, aber latexmk.exe wurde nicht unter $ExistingLatexmk gefunden."
 }
 
+New-Item -ItemType File -Force -Path $Marker | Out-Null
 Write-Host "TeX Live 2025 erfolgreich installiert: $TexDir"
 
 # Aufraeumen
 Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+catch {
+    Write-Host ""
+    Write-Host "FEHLER bei der TeX-Live-Installation: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Starte das Setup erneut oder installiere TeX Live/MiKTeX selbst (latexmk muss im PATH sein)."
+    Read-Host 'Enter zum Schliessen'
+    exit 1
+}

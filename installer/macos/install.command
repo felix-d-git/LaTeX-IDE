@@ -86,6 +86,17 @@ for src in "$SCRIPT_DIR"/*; do
     rm -rf "$APP_DIR/$name"
     cp -R "$src" "$APP_DIR/$name"
 done
+# ZIP aus GitHub (nicht vom Server): ohne server.json nach der Server-Adresse fragen.
+if [ ! -f "$APP_DIR/server.json" ] && [ -t 0 ]; then
+    read -r -p "Server-Adresse (https://..., leer = lokal ohne Server): " SERVER_URL
+    if [ -n "$SERVER_URL" ]; then
+        case "$SERVER_URL" in
+            http://*|https://*) printf '{"remoteUrl": "%s"}
+' "$(printf '%s' "$SERVER_URL" | tr -d '"\')" > "$APP_DIR/server.json" ;;
+            *) echo "Ungueltige Adresse (muss mit http:// oder https:// beginnen) - server.json nicht angelegt." >&2 ;;
+        esac
+    fi
+fi
 if ! (cd "$APP_DIR" && "$NODE_DIR/bin/node" -e "for (const m of ['express', 'ws', 'http-proxy']) require.resolve(m)"); then
     echo "App-Abhaengigkeiten fehlen in $APP_DIR/node_modules - Installation abgebrochen." >&2
     exit 1

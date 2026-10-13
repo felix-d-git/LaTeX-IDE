@@ -7,7 +7,7 @@ Copyright (C) 2026 felix-d-git
 GNU Affero General Public License, version 3 only (AGPL-3.0-only), see
 LICENSE. WITHOUT ANY WARRANTY. You do not have to accept the license to
 install or run LatexIDE (AGPL-3.0 section 9).
-Source code of this version: https://github.com/felix-d-git/latex-web-ide/tree/{{TAG}}
+Source code of this version: https://github.com/{{REPO}}/tree/{{TAG}}
 
 Node.js
 -------
@@ -31,7 +31,7 @@ Third-party npm packages
 ------------------------
 - in the installation folder: THIRD_PARTY_NOTICES.md
 - in the app: address /licenses ("Help" menu)
-- online: https://github.com/felix-d-git/latex-web-ide/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
+- online: https://github.com/{{REPO}}/blob/{{TAG}}/THIRD_PARTY_NOTICES.md
 
 German version (also covers the macOS package): LICENSES-INSTALLER.txt
 
