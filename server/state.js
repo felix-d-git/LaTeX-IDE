@@ -8,7 +8,9 @@ function loadWorkspace() {
     try {
       return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     } catch (e) {
-      // fall through to default
+      // An empty default would be saved over the damaged file (shares, settings gone): keep a copy and stop.
+      try { fs.copyFileSync(CONFIG_PATH, `${CONFIG_PATH}.corrupt-${Date.now()}`); } catch (_) { /* best effort */ }
+      throw new Error(`${CONFIG_PATH} ist nicht lesbar (${e.message}). Kopie als .corrupt-* gesichert; Datei reparieren oder entfernen.`);
     }
   }
   return { activeRootByUser: {}, recentRootsByUser: {}, mainFileByRoot: {}, settingsByRoot: {} };

@@ -89,6 +89,7 @@ function movePath(root, relPath, targetDir, overwrite) {
 function deletePath(root, relPath) {
   const abs = safeResolve(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
+  if (abs === path.resolve(root)) throw new Error('Die Projektwurzel kann nicht gelöscht werden.');
   fs.rmSync(abs, { recursive: true, force: true });
 }
 

@@ -64,7 +64,9 @@ function applyText(ytext, next, origin) {
     }
     i--;
     // ponytail: char diff capped (Myers is O(n*d)); a rewritten block is replaced as a whole.
-    const chars = del && ins ? diffChars(del, ins, { maxEditLength: 1000 }) : null;
+    let chars = del && ins ? diffChars(del, ins, { maxEditLength: 1000 }) : null;
+    // A piece must not cut a surrogate pair (emoji, math letters): that would leave U+FFFD behind.
+    if (chars && chars.some((c) => /^[\udc00-\udfff]|[\ud800-\udbff]$/.test(c.value))) chars = null;
     if (chars) {
       let q = pos;
       for (const c of chars) {
@@ -217,9 +219,14 @@ function persist(entry) {
       fs.writeFileSync(abs, text, 'utf8');
     }
     writeState(entry.root, entry.rel, entry.ydoc);
+    entry.failures = 0;
     hooks.onPersist(entry.root, entry.rel);
   } catch (e) {
-    console.error(`[collab] Speichern fehlgeschlagen: ${entry.rel}`, e.message);
+    // Keep the doc loaded and dirty and try again (disk full, locked file): unloading would lose the edit.
+    entry.failures = (entry.failures || 0) + 1;
+    entry.dirty = true;
+    entry.timer = setTimeout(() => persist(entry), Math.min(30000, PERSIST_DELAY_MS * 2 ** entry.failures));
+    console.error(`[collab] Speichern fehlgeschlagen (Versuch ${entry.failures}): ${entry.rel}`, e.message);
   }
   maybeUnload(entry);
 }
@@ -419,10 +426,16 @@ function readText(root, rel) {
 // fn(oldText) -> newText; returns newText. A throwing fn leaves the doc untouched.
 function editText(root, rel, fn) {
   const entry = getDoc(root, rel);
-  const next = normEol(fn(entry.ytext.toString()));
-  applyText(entry.ytext, next, 'mcp');
-  maybeUnload(entry); // stays loaded while dirty; persist() unloads it
-  return next;
+  try {
+    const next = normEol(fn(entry.ytext.toString()));
+    applyText(entry.ytext, next, 'mcp');
+    // Write now so a disk error reaches the caller instead of a silent "ok".
+    if (entry.timer) persist(entry);
+    if (entry.dirty) throw new Error('Speichern fehlgeschlagen (wird wiederholt).');
+    return next;
+  } finally {
+    maybeUnload(entry); // stays loaded while dirty
+  }
 }
 
 function flushAll() {
