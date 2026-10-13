@@ -1,9 +1,13 @@
 const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
+// .env first: legal.js reads SOURCE_URL / UPDATE_REPO for the bundle banner.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const legal = require('./server/lib/legal');
 
 const watch = process.argv.includes('--watch');
+// --serve: start the server in this process after the first build (npm run dev; "&" does not background on Windows cmd).
+const serve = process.argv.includes('--serve');
 
 function copyPdfWorker() {
   const outDir = path.join(__dirname, 'client', 'dist');
@@ -43,6 +47,7 @@ async function run() {
     const ctx = await esbuild.context(options);
     await ctx.watch();
     console.log('esbuild: watching client/src for changes...');
+    if (serve) require('./server/index.js');
   } else {
     await esbuild.build(options);
     console.log('esbuild: client bundle built.');

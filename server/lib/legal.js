@@ -10,7 +10,8 @@ const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/latex-web-ide';
 // vollständigen Quellcode dieses Stands setzen (AGPL §13 bzw. §6).
 const SOURCE_URL = process.env.SOURCE_URL || `https://github.com/${UPDATE_REPO}`;
 // Ohne eigene SOURCE_URL: der Tag genau dieser Version statt master.
-const SOURCE_LINK = process.env.SOURCE_URL || `${SOURCE_URL}/tree/v${VERSION}`;
+// {version} in SOURCE_URL is replaced by the running version, so the link follows server updates.
+const SOURCE_LINK = (process.env.SOURCE_URL || `${SOURCE_URL}/tree/v${VERSION}`).replaceAll('{version}', VERSION);
 
 // GET /licenses: eigener Hinweis, dann LICENSE und THIRD_PARTY_NOTICES.md (Klartext).
 function licensesText() {
