@@ -417,7 +417,7 @@ verschieben? Der alte Ordner bleibt danach leer. Der Zielordner muss leer oder n
       const d = r ? await r.json().catch(() => ({})) : {};
       btn.disabled = false;
       if (r && r.ok) desktopInfo.localDir = d.localDir;
-      msg.textContent = r && r.ok ?`Fertig: ${d.moved} Projekt(e) nach ${d.localDir} verschoben.` : `Fehler: ${d.error || 'Keine Antwort'}`;
+      msg.textContent = r && r.ok ? `Fertig: ${d.moved} Projekt(e) nach ${d.localDir} verschoben.${d.warning ? ` ${d.warning}` : ''}` : `Fehler: ${d.error || 'Keine Antwort'}`;
     });
     wrap.appendChild(field('Ordner der lokalen Kopie', input));
     wrap.appendChild(btn);

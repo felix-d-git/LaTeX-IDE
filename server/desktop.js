@@ -214,16 +214,22 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
     await syncing; // let a running sync finish, then wait for queued per-project syncs
     await syncLock;
     const names = owned.map((p) => path.basename(localDirOf(p)));
-    const moved = moveDir(LOCAL_DIR, target, names);
     const old = LOCAL_DIR;
-    LOCAL_DIR = target;
-    config = { ...config, localDir: target };
-    writeJson(CONFIG_PATH, config);
-    if (current && current.owned && current.dir.startsWith(old + path.sep)) {
-      current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
-      writeJson(path.join(MIRROR_DIR, 'current.json'), current);
-    }
-    res.json({ ok: true, localDir: target, moved });
+    // Switch to the verified copy before the originals are deleted (see moveDir).
+    const { moved, failed } = moveDir(old, target, names, () => {
+      writeJson(CONFIG_PATH, { ...config, localDir: target });
+      config = { ...config, localDir: target };
+      LOCAL_DIR = target;
+      if (current && current.owned && current.dir.startsWith(old + path.sep)) {
+        current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
+        try {
+          writeJson(path.join(MIRROR_DIR, 'current.json'), current); // cache only, the next compile rewrites it
+        } catch {}
+      }
+    });
+    const warning = failed.length ? `Der alte Ordner konnte nicht vollständig entfernt werden (${failed.join(', ')}), bitte ${old} von Hand aufräumen.` : undefined;
+    if (warning) console.warn(warning);
+    res.json({ ok: true, localDir: target, moved, warning });
   } catch (e) {
     res.status(500).json({ error: e.message });
   } finally {

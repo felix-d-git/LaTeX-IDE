@@ -162,8 +162,11 @@ function writeJson(file, value) {
   fs.renameSync(`${file}.tmp`, file);
 }
 
-// Moves the named project folders from src to dst: copy, compare file count + bytes, then delete
-// the originals. A failed check removes the copy and throws - the originals stay untouched.
+// Moves the named project folders from src to dst in two phases:
+// 1) copy + compare file count and bytes, then commit() switches the app to dst. A failure up to
+//    here removes the copy and throws - the originals stay untouched and in use.
+// 2) delete the originals. Failures (file open in a viewer: EBUSY/EPERM) are only collected:
+//    the app no longer looks there, so a half-deleted old folder can't trigger server deletes.
 function treeStat(dir) {
   let files = 0;
   let bytes = 0;
@@ -181,7 +184,7 @@ function treeStat(dir) {
   return { files, bytes };
 }
 
-function moveDir(src, dst, names) {
+function moveDir(src, dst, names, commit) {
   const todo = names.filter((n) => fs.existsSync(path.join(src, n)));
   fs.mkdirSync(dst, { recursive: true });
   try {
@@ -191,12 +194,20 @@ function moveDir(src, dst, names) {
       const b = treeStat(path.join(dst, n));
       if (a.files !== b.files || a.bytes !== b.bytes) throw new Error(`Kopie von "${n}" unvollständig (${b.files}/${a.files} Dateien) - nichts gelöscht.`);
     }
+    commit();
   } catch (e) {
     for (const n of todo) fs.rmSync(path.join(dst, n), { recursive: true, force: true });
     throw e;
   }
-  for (const n of todo) fs.rmSync(path.join(src, n), { recursive: true, force: true });
-  return todo.length;
+  const failed = [];
+  for (const n of todo) {
+    try {
+      fs.rmSync(path.join(src, n), { recursive: true, force: true });
+    } catch {
+      failed.push(n);
+    }
+  }
+  return { moved: todo.length, failed };
 }
 
 module.exports = { syncFolder, decide, conflictName, moveDir };

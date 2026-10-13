@@ -141,3 +141,43 @@ test('Paar a.tex/A.tex auf dem Server wird übersprungen statt gelöscht (#47)',
   assert.deepStrictEqual(r.skipped.sort(), ['A.tex', 'a.tex']);
   assert.strictEqual(fs.readFileSync(path.join(dir, 'a.tex'), 'utf8'), 'klein');
 });
+
+test('Verschieben: Fehler beim Löschen der Originale wird gesammelt, Umstellung ist schon passiert (#29)', () => {
+  const src = tmp();
+  const dst = path.join(tmp(), 'neu');
+  for (const n of ['Paper', 'Thesis']) {
+    fs.mkdirSync(path.join(src, n, 'figs'), { recursive: true });
+    fs.writeFileSync(path.join(src, n, 'figs', 'x.png'), n);
+  }
+  let committed = false;
+  const orig = fs.rmSync;
+  fs.rmSync = (p, ...rest) => {
+    if (path.resolve(String(p)) === path.join(src, 'Thesis')) throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' });
+    return orig(p, ...rest);
+  };
+  let r;
+  try {
+    r = moveDir(src, dst, ['Paper', 'Thesis'], () => {
+      committed = true;
+    });
+  } finally {
+    fs.rmSync = orig;
+  }
+  assert.ok(committed);
+  assert.strictEqual(r.moved, 2);
+  assert.deepStrictEqual(r.failed, ['Thesis']);
+  assert.ok(fs.existsSync(path.join(dst, 'Thesis', 'figs', 'x.png')));
+  assert.ok(fs.existsSync(path.join(dst, 'Paper', 'figs', 'x.png')));
+});
+
+test('Verschieben: scheitert die Umstellung, bleiben die Originale und die Kopie wird entfernt (#29)', () => {
+  const src = tmp();
+  const dst = path.join(tmp(), 'neu');
+  fs.mkdirSync(path.join(src, 'Paper'));
+  fs.writeFileSync(path.join(src, 'Paper', 'a.tex'), 'a');
+  assert.throws(() => moveDir(src, dst, ['Paper'], () => {
+    throw new Error('Config nicht schreibbar');
+  }), /Config/);
+  assert.ok(fs.existsSync(path.join(src, 'Paper', 'a.tex')));
+  assert.ok(!fs.existsSync(path.join(dst, 'Paper')));
+});
