@@ -279,8 +279,11 @@ function readSyncReadOnly(dec, enc, ydoc, ws) {
     return;
   }
   const update = decoding.readVarUint8Array(dec);
-  if (reviewerMayApply(ydoc, update)) Y.applyUpdate(ydoc, update, ws);
-  else console.warn('[collab] Änderung eines Kommentierenden verworfen.');
+  if (reviewerMayApply(ydoc, update)) return Y.applyUpdate(ydoc, update, ws);
+  // Not silently: the client would keep the phantom text, and its later updates
+  // (comment anchors) would hang here as pending structs. 4403 = drop the cache.
+  console.warn('[collab] Änderung eines Kommentierenden abgewiesen.');
+  ws.close(4403, 'read only');
 }
 
 function handleConnection(ws, root, rel, epoch, readOnly = false) {

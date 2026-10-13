@@ -827,11 +827,12 @@ editorMgr.view.dom.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const v = editorMgr.view;
   const { from, to, text } = editorMgr.getSelection();
+  const ro = v.state.readOnly;
   const replaceSel = (insert) => v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
   openDropdownAt(e.clientX, e.clientY, [
-    { label: 'Cut', shortcut: 'Ctrl X', disabled: !text, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
+    { label: 'Cut', shortcut: 'Ctrl X', disabled: !text || ro, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
     { label: 'Copy', shortcut: 'Ctrl C', disabled: !text, onClick: () => navigator.clipboard.writeText(text) },
-    { label: 'Paste', shortcut: 'Ctrl V', onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
+    { label: 'Paste', shortcut: 'Ctrl V', disabled: ro, onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
     { type: 'divider' },
     { label: 'Add comment', icon: 'comment', disabled: !text, onClick: () => commentsPanel.triggerAddComment() },
     { label: 'Jump to location in PDF', onClick: () => syncTex.syncToPdf() },

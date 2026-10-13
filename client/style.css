@@ -1360,6 +1360,9 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 :root[data-theme="dark"] .home-logo, :root[data-theme="dark"] .dash-logo{ content: url(/logo-dark.svg); }
 
 .role-reviewer #btn-history-restore{ display: none; }
+.role-reviewer #editor-toolbar .ol-toolbar-left,
+.role-reviewer #menu-insert,
+.role-reviewer #menu-format{ display: none; }
 
 /* Dashboard: Mehrfachauswahl, Labels, Neues-Projekt-Menü */
 #projects-view .dash-content{ position: relative; }

@@ -104,7 +104,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
         },
       }));
 
-      if (c.suggestion) {
+      if (c.suggestion && !editorMgr.view.state.readOnly) {
         // Change proposed by an external AI tool (MCP review token): nothing is applied until accepted here.
         const diff = document.createElement('div');
         diff.className = 'comment-text';

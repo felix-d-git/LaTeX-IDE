@@ -177,9 +177,10 @@ async function createSession(path) {
 
   provider.on('connection-close', (ev) => {
     const code = ev && ev.code;
-    if (code === 4409) {
-      // Server re-created this doc (state lost) - our cache belongs to the old
+    if (code === 4409 || code === 4403) {
+      // 4409: Server re-created this doc (state lost) - our cache belongs to the old
       // identity and would duplicate the text if merged.
+      // 4403: Reviewer change rejected - the cache holds text the server never took.
       // ponytail: unsynced offline edits in that old cache are dropped here.
       closeSession(path);
       indexedDB.deleteDatabase(dbName);

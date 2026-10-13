@@ -15,6 +15,7 @@ import { vim } from '@replit/codemirror-vim';
 import { emacs } from '@replit/codemirror-emacs';
 import { grammarDiagnostics } from './languageTool.js';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
+import { reviewerReadOnly } from './editorCommands.js';
 import { getSession, closeSession, listConflicts, conflictField, setConflictsEffect } from './collab.js';
 import { EditorState, StateField, StateEffect, Prec, Compartment } from '@codemirror/state';
 import { visualMode } from './visualEditor.js';
@@ -132,7 +133,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     prefs.codeCheck || prefs.grammar ? [lintGutter(), linter(lintSource, { delay: 1500 })] : [],
   ];
   let readOnly = false; // reviewer role: read + comment only
-  const readOnlyExt = () => (readOnly ? EditorState.readOnly.of(true) : []);
+  const readOnlyExt = () => (readOnly ? reviewerReadOnly : []);
   let visualOn = false;
   try {
     visualOn = localStorage.getItem('editorMode') === 'visual';
