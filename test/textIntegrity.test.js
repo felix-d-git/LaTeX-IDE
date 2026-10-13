@@ -122,3 +122,24 @@ test('applyText: insertions, deletions and a full rewrite give the exact target 
     assert.strictEqual(yt.toString(), next);
   }
 });
+
+// --- #31: external change while unloaded is not duplicated ---------------------
+
+for (const [name, before, after] of [
+  ['Einfügung', '@a{x}\n', '@a{x}\n@b{NEU}\n'],
+  ['Ersetzung', 'foo und foo\n', 'bar und foo\n'],
+]) {
+  test(`external change before load, opened twice: no duplicate (${name}, #31)`, () => {
+    const root = tmp();
+    const file = path.join(root, 'refs.bib');
+    fs.writeFileSync(file, before);
+    let { cache } = openOnce(root, 'refs.bib', null);
+    fs.writeFileSync(file, after); // doc not loaded: DOI import, desktop upload, external editor
+    for (let n = 0; n < 2; n++) {
+      const r = openOnce(root, 'refs.bib', cache);
+      assert.strictEqual(r.text, after);
+      cache = r.cache;
+    }
+    assert.strictEqual(fs.readFileSync(file, 'utf8'), after);
+  });
+}

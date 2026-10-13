@@ -103,8 +103,19 @@ function loadDoc(root, rel) {
     ydoc.destroy();
     return createFresh(root, rel, disk);
   }
+  let changed = false;
   // Disk changed while the doc was unloaded (e.g. edited outside the IDE) -> fold it in.
-  applyText(ytext, disk, 'disk');
+  if (applyText(ytext, disk, 'disk')) changed = true;
+  // ... and save that at once: otherwise every load re-creates the same change with a
+  // new identity, and a client holding an earlier one gets the text twice. Only the
+  // state - the disk already matches, and no history snapshot/autocompile for opening.
+  if (changed) {
+    try {
+      writeState(root, rel, ydoc);
+    } catch (e) {
+      console.error(`[collab] Yjs-Zustand konnte nicht gespeichert werden: ${rel}`, e.message);
+    }
+  }
   return { ydoc, ytext, meta };
 }
 
