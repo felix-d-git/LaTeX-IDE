@@ -22,13 +22,17 @@ function makeVault(dataKey, vaultDir) {
   const aesKey = derive('latex-vault-aes');
   const nameOf = (rel) => crypto.createHmac('sha256', macKey).update(rel).digest('hex');
 
-  function encrypt(rel, data) {
+  // Optional mtime: high bit of len set -> 8 more bytes (ms since epoch) follow the path. Old entries have none.
+  const HAS_MTIME = 0x80000000;
+  function encrypt(rel, data, mtimeMs) {
     const p = Buffer.from(rel, 'utf8');
     const len = Buffer.alloc(4);
-    len.writeUInt32BE(p.length);
+    const mt = Buffer.alloc(mtimeMs ? 8 : 0);
+    len.writeUInt32BE((p.length | (mtimeMs ? HAS_MTIME : 0)) >>> 0);
+    if (mtimeMs) mt.writeDoubleBE(mtimeMs);
     const iv = crypto.randomBytes(12);
     const c = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-    const ct = Buffer.concat([c.update(Buffer.concat([len, p, data])), c.final()]);
+    const ct = Buffer.concat([c.update(Buffer.concat([len, p, mt, data])), c.final()]);
     return Buffer.concat([iv, c.getAuthTag(), ct]);
   }
 
@@ -36,13 +40,19 @@ function makeVault(dataKey, vaultDir) {
     const d = crypto.createDecipheriv('aes-256-gcm', aesKey, blob.subarray(0, 12));
     d.setAuthTag(blob.subarray(12, 28));
     const pt = Buffer.concat([d.update(blob.subarray(28)), d.final()]);
-    const n = pt.readUInt32BE(0);
-    return { rel: pt.subarray(4, 4 + n).toString('utf8'), data: pt.subarray(4 + n) };
+    const raw = pt.readUInt32BE(0);
+    const n = raw & ~HAS_MTIME;
+    const off = 4 + n + (raw & HAS_MTIME ? 8 : 0);
+    return {
+      rel: pt.subarray(4, 4 + n).toString('utf8'),
+      mtimeMs: raw & HAS_MTIME ? pt.readDoubleBE(4 + n) : null,
+      data: pt.subarray(off),
+    };
   }
 
-  function put(rel, data) {
+  function put(rel, data, mtimeMs) {
     const f = path.join(vaultDir, nameOf(rel));
-    fs.writeFileSync(f + '.tmp', encrypt(rel, data));
+    fs.writeFileSync(f + '.tmp', encrypt(rel, data, mtimeMs));
     fs.renameSync(f + '.tmp', f);
   }
 
@@ -75,8 +85,10 @@ function restore(v, vaultDir, dataDir) {
     catch (err) { throw new Error(`Vault-Eintrag ${name} nicht entschluesselbar (falscher DATA_KEY oder defekt): ${err.message}`); }
     const abs = path.resolve(dataDir, e.rel);
     if (!abs.startsWith(path.resolve(dataDir) + path.sep)) throw new Error(`Vault-Eintrag ${name}: unzulaessiger Pfad`);
+    if (e.rel.endsWith('/')) { fs.mkdirSync(abs, { recursive: true }); n++; continue; } // leerer Ordner
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, e.data);
+    if (e.mtimeMs) fs.utimesSync(abs, new Date(e.mtimeMs), new Date(e.mtimeMs));
     seen.set(e.rel, fs.statSync(abs).mtimeMs);
     n++;
   }
@@ -113,32 +125,58 @@ function start() {
 
   const timers = new Map();
   const rel = (abs) => path.relative(dataDir, abs).split(path.sep).join('/');
+  // seen: rel -> mtimeMs der zuletzt gespiegelten (bzw. wiederhergestellten) Fassung; bleibt dauerhaft
+  // stehen, damit flush() beim Herunterfahren alles nachholen kann, was der Watcher noch nicht gemeldet hat.
   const sync = (r) => {
     timers.delete(r);
     const abs = path.join(dataDir, r);
     let st;
-    try { st = fs.statSync(abs); } catch { return v.del(r); }
-    if (!st.isFile()) return;
-    if (seen.get(r) === st.mtimeMs) { seen.delete(r); return; } // gerade erst wiederhergestellt
-    seen.delete(r);
-    try { v.put(r, fs.readFileSync(abs)); } catch (e) { console.error(`[vault] Spiegeln von ${r} fehlgeschlagen: ${e.message}`); }
+    try { st = fs.statSync(abs); } catch { seen.delete(r); v.del(r); return v.del(r + '/'); }
+    if (st.isDirectory()) { // nur leere Ordner brauchen einen eigenen Eintrag
+      if (!fs.readdirSync(abs).length) v.put(r + '/', Buffer.alloc(0));
+      else v.del(r + '/');
+      return;
+    }
+    if (!st.isFile() || seen.get(r) === st.mtimeMs) return;
+    try { v.put(r, fs.readFileSync(abs), st.mtimeMs); seen.set(r, st.mtimeMs); } catch (e) { console.error(`[vault] Spiegeln von ${r} fehlgeschlagen: ${e.message}`); }
   };
   const queue = (abs) => {
     const r = rel(abs);
     if (!r || r.startsWith('..') || v.excluded(r)) return;
     clearTimeout(timers.get(r));
     timers.set(r, setTimeout(() => sync(r), DEBOUNCE_MS));
+    // Ordner wird (nicht mehr) leer: Eltern neu bewerten.
+    const parent = path.posix.dirname(r);
+    if (parent !== '.') queue(path.join(dataDir, parent));
+  };
+  // Alles nachholen, was der Watcher noch nicht gemeldet hat (Schreibvorgaenge direkt vor dem Beenden).
+  const sweep = () => {
+    const walk = (dir) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const d of entries) {
+        const abs = path.join(dir, d.name);
+        const r = rel(abs);
+        if (v.excluded(r)) continue;
+        if (d.isDirectory()) walk(abs);
+        else if (d.isFile()) sync(r);
+      }
+      const r = rel(dir);
+      if (r && !entries.length) sync(r);
+    };
+    walk(dataDir);
+    for (const r of [...seen.keys()]) if (!fs.existsSync(path.join(dataDir, r))) sync(r);
   };
   const watcher = require('chokidar').watch(dataDir, {
     ignoreInitial: false,
     ignored: (p) => { const r = rel(p); return !!r && !r.startsWith('..') && v.excluded(r); },
   });
-  watcher.on('add', queue).on('change', queue).on('unlink', queue)
+  watcher.on('add', queue).on('change', queue).on('unlink', queue).on('addDir', queue).on('unlinkDir', queue)
     .on('error', (e) => console.error('[vault] Watcher-Fehler:', e.message));
 
   active = {
     flush() {
       for (const [r, t] of [...timers]) { clearTimeout(t); sync(r); }
+      try { sweep(); } catch (e) { console.error('[vault] Abschluss-Sync fehlgeschlagen:', e.message); }
       return watcher.close();
     },
   };
