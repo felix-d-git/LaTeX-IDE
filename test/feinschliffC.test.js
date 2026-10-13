@@ -46,7 +46,7 @@ test('MCP-Token: Projektrechte folgen Umbenennen, fallen bei Papierkorb weg', ()
 });
 
 test('Login-Limiter: erfolgreiche Anfragen geben den Platz zurueck', () => {
-  const mw = authMw.rateLimit('t-skip', 2, 60000, () => 'k', { skipSuccess: true });
+  const mw = authMw.rateLimit('t-skip', 2, 60000, () => 'k', { countIf: (res) => res.statusCode >= 400 });
   const call = (status) => {
     let code = 0;
     const handlers = {};

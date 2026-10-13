@@ -233,6 +233,17 @@ function dropRoot(root) {
   saveWorkspace(workspace);
 }
 
+// Project copy: only project settings (compiler, main file, ...) go along - never shares, roles or share links.
+function copyRoot(srcRoot, destRoot) {
+  srcRoot = rk(srcRoot);
+  destRoot = rk(destRoot);
+  for (const k of ['mainFileByRoot', 'settingsByRoot']) {
+    if (workspace[k][srcRoot] === undefined) continue;
+    workspace[k][destRoot] = JSON.parse(JSON.stringify(workspace[k][srcRoot]));
+  }
+  saveWorkspace(workspace);
+}
+
 // Account deleted: drop the user's own state, their memberships, and every
 // per-root entry for projects below ownDir (the deleted projects folder).
 function purgeUser(userId, ownDir) {
@@ -333,6 +344,7 @@ function takeSelfWrite(abs, hash) {
 }
 
 module.exports = {
+  copyRoot,
   workspace,
   migrateLegacyGlobalState,
   setActiveRoot,

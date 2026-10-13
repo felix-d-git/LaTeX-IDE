@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { isIgnored } = require('./fsTree');
+const { isSameEntry } = require('./treeOps');
 const { extractZip } = require('./unzip');
 
 const TRASH_DIRNAME = '.trash';
@@ -160,7 +161,7 @@ function renameProject(projectsDir, oldName, newName) {
   const src = path.join(projectsDir, oldName);
   const dest = path.join(projectsDir, safeName);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
-  if (fs.existsSync(dest)) throw new Error('Ein Projekt mit diesem Namen existiert bereits.');
+  if (fs.existsSync(dest) && !isSameEntry(src, dest)) throw new Error('Ein Projekt mit diesem Namen existiert bereits.');
   fs.renameSync(src, dest);
   return dest;
 }
