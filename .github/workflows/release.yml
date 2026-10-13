@@ -39,13 +39,21 @@ jobs:
 
       - name: Pakete bauen
         shell: pwsh
-        run: ./installer/build-release.ps1
+        run: ./installer/build-release.ps1 -MacStagingOut installer/out/macos
+
+      # Das macOS-ZIP baut der Job "macos": Windows-ZIPs kennen keine Unix-Rechte.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-staging
+          path: installer/out/macos
+          include-hidden-files: true
+          retention-days: 1
 
       - name: An Release haengen
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload $env:TAG installer/out/LatexIDE-Setup.exe installer/out/LatexIDE-macOS.zip --clobber
+        run: gh release upload $env:TAG installer/out/LatexIDE-Setup.exe --clobber
 
       # Download overview from .github/release-template.md under the release text (once).
       - name: Download-Übersicht in den Release-Text
@@ -59,3 +67,28 @@ jobs:
           $tpl = (Get-Content .github/release-template.md -Raw -Encoding utf8).Replace('{{TAG}}', $env:TAG)
           [IO.File]::WriteAllText("$env:RUNNER_TEMP/notes.md", (($body -join "`n") + "`n" + $tpl), [Text.UTF8Encoding]::new($false))
           gh release edit $env:TAG --notes-file "$env:RUNNER_TEMP/notes.md"
+
+  # macOS-ZIP auf Linux packen, damit install.command ausfuehrbar ankommt
+  # (Archive-Utility uebernimmt die Unix-Rechte aus dem ZIP).
+  macos:
+    needs: desktop
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-staging
+          path: staging
+
+      - name: ZIP mit Ausfuehrungsrecht bauen
+        run: |
+          test -f staging/install.command -a -d staging/node_modules
+          chmod +x staging/install.command
+          (cd staging && zip -r -X -q ../LatexIDE-macOS.zip .)
+          zipinfo LatexIDE-macOS.zip install.command | grep -q '^-rwx'
+
+      - name: An Release haengen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" LatexIDE-macOS.zip --clobber --repo "$GITHUB_REPOSITORY"

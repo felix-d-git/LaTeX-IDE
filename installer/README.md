@@ -42,6 +42,10 @@ powershell -File installer\build-release.ps1
 5. Baut zusaetzlich `installer\out\LatexIDE-macOS.zip` (Staging ohne
    Windows-Node, Windows-Starter, `install-texlive.ps1` und
    `LICENSES-INSTALLER-en.txt`, dafuer mit `installer\macos\install.command`).
+   Dieses lokale ZIP traegt keine Unix-Rechte (`install.command` dann per
+   `bash install.command` starten). Fuers Release legt der Workflow mit
+   `-MacStagingOut` nur den Ordner ab; das ZIP packt ein Linux-Job mit
+   `chmod +x install.command` und `zip -r -X`.
 
 ## Was der Windows-Installer tut
 

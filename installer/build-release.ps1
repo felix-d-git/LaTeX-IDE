@@ -17,11 +17,14 @@
     powershell -File installer\build-release.ps1              # voller Build
     powershell -File installer\build-release.ps1 -StagingOnly # nur Schritt 1 (kein npm ci noetig - siehe -WhatIf)
     powershell -File installer\build-release.ps1 -WhatIf      # nur anzeigen, was kopiert wuerde
+    ... -MacStagingOut <ordner>  # macOS-Paket nur als Ordner ablegen, kein ZIP
+                                 # (CI: das ZIP baut ein Linux-Job mit chmod +x)
 #>
 
 param(
     [switch]$StagingOnly,
     [switch]$WhatIf,
+    [string]$MacStagingOut,
     [string]$NodeVersion = "24.21.0"
 )
 
@@ -212,7 +215,7 @@ if ($Iscc) {
 Write-Step "macOS-Paket erzeugen: installer\out\LatexIDE-macOS.zip"
 
 # Temp statt out/: Nextcloud/AV sperrt sonst Dateien waehrend Compress-Archive
-$MacStagingDir = Join-Path $env:TEMP 'latexide-staging-macos'
+$MacStagingDir = if ($MacStagingOut) { $MacStagingOut } else { Join-Path $env:TEMP 'latexide-staging-macos' }
 if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 
@@ -227,6 +230,15 @@ Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
 }
 Copy-Item -Path (Join-Path $InstallerDir 'macos\install.command') -Destination (Join-Path $MacStagingDir 'install.command') -Force
 
+if ($MacStagingOut) {
+    Write-Host "macOS-Staging liegt unter $MacStagingOut (ZIP baut der Release-Workflow)."
+    Write-Step "Fertig."
+    return
+}
+# Compress-Archive speichert keine Unix-Rechte: install.command ist in diesem
+# lokalen ZIP nicht ausfuehrbar (Mac: 'bash install.command'). Das Release-ZIP
+# baut .github/workflows/release.yml auf Linux mit chmod +x.
+Write-Warning "Lokales macOS-ZIP ohne Ausfuehrungsrecht fuer install.command - nur zum Testen."
 $MacZipPath = Join-Path $OutDir 'LatexIDE-macOS.zip'
 if (Test-Path $MacZipPath) { Remove-Item -Path $MacZipPath -Force }
 Compress-Archive -Path (Join-Path $MacStagingDir '*') -DestinationPath $MacZipPath -Force

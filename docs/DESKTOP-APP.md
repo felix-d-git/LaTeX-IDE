@@ -39,8 +39,11 @@ bzw. beim Admin).
 
 ## Installation macOS
 
-1. `LatexIDE-macOS.zip` entpacken, `install.command` per Rechtsklick → „Öffnen“
-   starten (Gatekeeper: nicht signiert).
+1. `LatexIDE-macOS.zip` entpacken, `install.command` doppelklicken. Weil die
+   Datei nicht signiert ist, blockt Gatekeeper sie: Systemeinstellungen →
+   Datenschutz & Sicherheit → „Dennoch öffnen“ (bis macOS 14 reicht
+   Rechtsklick → „Öffnen“). Falls macOS die Datei gar nicht ausführt: im
+   Terminal im entpackten Ordner `bash install.command`.
 2. Das Skript lädt Node.js, kopiert die App nach `~/Applications/LatexIDE` und
    installiert MacTeX, falls noch keines da ist.
 3. Starten über `~/Applications/LatexIDE/LatexIDE.command`.
