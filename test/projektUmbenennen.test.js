@@ -88,3 +88,26 @@ test('Umbenennen während ein Mitglied tippt: kein Geisterordner, Änderung im n
   assert.deepStrictEqual(list.sharedProjects.map((p) => path.resolve(p.root)), [path.resolve(newRoot)]);
   assert.strictEqual((await user.call('GET', '/api/tree')).status, 200);
 });
+
+test('Umbenennen scheitert (Name vergeben): Editoren bleiben verbunden', async (t) => {
+  const srv2 = await startServer();
+  t.after(() => srv2.stop());
+  const { admin, user } = await adminAndUser(srv2);
+  const root = (await admin.call('POST', '/api/projects/create', { name: 'Paper' })).body.root;
+  await admin.call('POST', '/api/projects/create', { name: 'Paper2' });
+  await admin.call('POST', '/api/projects/open', { root });
+  assert.strictEqual((await admin.call('POST', '/api/share', { login: 'bob' })).status, 200);
+  await admin.call('POST', '/api/projects/open', { root: (await admin.call('POST', '/api/projects/create', { name: 'Sonst' })).body.root });
+
+  const projectId = (await user.call('POST', '/api/projects/open', { root })).body.projectId;
+  const cookie = Object.entries(user.jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  const bob = yClient(srv2.base, cookie, projectId, 'main.tex');
+  await bob.synced;
+  bob.type('\nVOR-DEM-FEHLER');
+  await sleep(50);
+  const ren = await admin.call('POST', '/api/projects/rename', { oldName: 'Paper', newName: 'Paper2' });
+  assert.strictEqual(ren.status, 400);
+  assert.strictEqual(await Promise.race([bob.closed, sleep(500).then(() => 'offen')]), 'offen');
+  assert.match(fs.readFileSync(path.join(root, 'main.tex'), 'utf8'), /VOR-DEM-FEHLER/);
+  bob.ws.close();
+});

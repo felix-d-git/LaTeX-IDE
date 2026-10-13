@@ -1125,8 +1125,10 @@ app.post('/api/projects/rename', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses umbenannt wird.' });
   }
   try {
-    collab.closeRoot(root);
+    // Save first, send editors away only once the (synchronous) move worked.
+    collab.flushRoot(root);
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
+    collab.closeRoot(root);
     projectMoved(req, projectsDir, root, path.resolve(newRoot));
     res.json({ root: newRoot });
   } catch (e) {
@@ -1153,8 +1155,10 @@ app.post('/api/projects/archive', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses archiviert wird.' });
   }
   try {
+    collab.flushRoot(root);
+    const dest = projects.archiveProject(projectsDir, name);
     collab.closeRoot(root);
-    projectMoved(req, projectsDir, root, path.resolve(projects.archiveProject(projectsDir, name)));
+    projectMoved(req, projectsDir, root, path.resolve(dest));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1329,8 +1333,10 @@ app.post('/api/projects/trash', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });
   }
   try {
+    collab.flushRoot(root);
+    const dest = projects.trashProject(projectsDir, name);
     collab.closeRoot(root);
-    projectMoved(req, projectsDir, root, path.resolve(projects.trashProject(projectsDir, name)));
+    projectMoved(req, projectsDir, root, path.resolve(dest));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
