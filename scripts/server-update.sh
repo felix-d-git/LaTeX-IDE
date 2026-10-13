@@ -17,6 +17,10 @@
 # .update-status next to .update-request, where the web UI shows it to admins.
 set -euo pipefail
 
+# Everything runs inside main(): bash parses the whole function before running it.
+# Step 2 copies the new release over this very file (same inode); without main()
+# bash would read on at the old byte offset in the new content.
+main() {
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 [ -f "$APP_DIR/.update.env" ] && . "$APP_DIR/.update.env"
 if [ -z "${DATA_DIR:-}" ] && [ -f "$APP_DIR/.env" ]; then
@@ -111,3 +115,7 @@ docker compose ${COMPOSE:+-f "$COMPOSE"} up -d --build >>"$RUNLOG" 2>&1
 printf '%s\n' "$tag" > "$APP_DIR/.release"
 say "fertig ($tag)"
 status done
+}
+
+# Same line: nothing after it is read from the (possibly replaced) file.
+main "$@"; exit $?
