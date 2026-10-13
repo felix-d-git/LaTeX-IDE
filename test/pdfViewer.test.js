@@ -130,3 +130,18 @@ test('Zoomen während des Neuladens springt nicht auf Seite 1 (#45)', async () =
   await wait(100);
   assert.strictEqual(viewer.getCurrentPage(), 20);
 });
+
+test('alte Dokumente werden zerstört, ein gemeinsamer Worker (#46)', async () => {
+  mock.docs.length = 0;
+  mock.workers = 0;
+  const { viewer } = await viewerOnPage20();
+  await viewer.reload();
+  const a = viewer.reload();
+  const b = viewer.reload();
+  const c = viewer.reload(); // b und c werden zu einem Nachladen zusammengefasst
+  await Promise.all([a, b, c]);
+  await wait(50);
+  assert.strictEqual(mock.docs.length, 4);
+  assert.deepStrictEqual(mock.docs.map((d) => d.destroyed), [true, true, true, false]);
+  assert.strictEqual(mock.workers, 1);
+});

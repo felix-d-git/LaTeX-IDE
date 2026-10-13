@@ -17,6 +17,8 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   // nicht (Spalte kurz leer → Scroll-Event meldet Seite 1). Dann gilt lastStable.
   let rendering = false;
   let lastStable = null;
+  // Ein gemeinsamer Worker statt eines neuen Threads je Load (#46).
+  let sharedWorker = null;
   const emptyEl = document.getElementById('pdf-empty');
   const pageWrappers = new Map(); // pageNumber -> wrapper element
 
@@ -30,7 +32,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     native = !!on;
     document.body.classList.toggle('pdf-native', native);
     container.querySelectorAll('.pdf-native-frame').forEach((f) => f.remove());
-    if (!native) pdfDoc = null; // nächster load() rendert wieder per PDF.js
+    // Beim Wechsel in beide Richtungen das PDF.js-Dokument freigeben; der
+    // nächste load() lädt neu (#46).
+    if (pdfDoc) pdfDoc.destroy();
+    pdfDoc = null;
+    renderToken++; // laufendes renderAll auf dem zerstörten Dokument beendet sich still
+    rendering = false;
+    lastStable = null;
     if (currentPath) load(currentPath);
   }
 
@@ -62,7 +70,11 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       while (pendingPath) {
         const p = pendingPath;
         pendingPath = null;
-        await loadOnce(p);
+        try {
+          await loadOnce(p);
+        } catch (e) {
+          console.warn('PDF konnte nicht angezeigt werden:', e && e.message);
+        }
       }
     })().finally(() => {
       loading = null;
@@ -78,10 +90,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     for (let attempt = 0; ; attempt++) {
       if (native) return; // inzwischen auf Browser-Viewer umgeschaltet
       const url = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
+      sharedWorker ||= new pdfjsLib.PDFWorker();
+      const task = pdfjsLib.getDocument({ url, worker: sharedWorker });
       try {
-        doc = await pdfjsLib.getDocument(url).promise;
+        doc = await task.promise;
         break;
       } catch (e) {
+        task.destroy();
         // Die PDF kann gemeldet werden, während latexmk noch schreibt - dann
         // liefert pdf.js einen InvalidPDFException. Kurz später neu versuchen
         // und die bisherige Ansicht so lange stehen lassen.
@@ -92,8 +107,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
         await new Promise((r) => setTimeout(r, 400));
       }
     }
-    if (native || pendingPath) return; // überholt: nächster Pfad lädt gleich
+    if (native || pendingPath) {
+      doc.destroy(); // überholt: nächster Pfad lädt gleich
+      return;
+    }
+    const oldDoc = pdfDoc;
     pdfDoc = doc;
+    if (oldDoc && oldDoc !== doc) oldDoc.destroy();
     if (emptyEl && emptyEl.parentNode) emptyEl.remove();
     if (!samePdf) currentPage = 1;
     await renderAll(keep);
@@ -140,12 +160,20 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     if (!pdfDoc) return;
     const restore = keepState === undefined ? captureScroll() : keepState;
     const token = ++renderToken;
+    const doc = pdfDoc;
     rendering = true;
     lastStable = restore;
     container.querySelectorAll('.pdf-page').forEach((c) => c.remove());
     pageWrappers.clear();
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      const page = await pdfDoc.getPage(i);
+    for (let i = 1; i <= doc.numPages; i++) {
+      let page;
+      try {
+        page = await doc.getPage(i);
+      } catch (e) {
+        if (token !== renderToken) return; // Dokument inzwischen zerstört/ersetzt
+        rendering = false;
+        throw e;
+      }
       if (token !== renderToken) return; // neuer Renderlauf hat übernommen
       const s = await effectiveScale(page);
       if (zoomMode !== 'fixed') scale = s;
@@ -162,7 +190,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       container.appendChild(wrapper);
       pageWrappers.set(i, wrapper);
       const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      try {
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (e) {
+        if (token !== renderToken) return;
+        rendering = false;
+        throw e;
+      }
 
       wrapper.addEventListener('dblclick', (e) => {
         if (!onPdfDoubleClick) return;
