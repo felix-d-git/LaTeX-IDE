@@ -884,7 +884,16 @@ configureCollab({
     renderTabbar();
     loadTree();
   },
+  // Every open doc of the project gets 4410 at once -> one notice.
+  onProjectGone: () => {
+    if (projectGoneNotice) return;
+    projectGoneNotice = setTimeout(() => (projectGoneNotice = null), 2000);
+    closeAllSessions();
+    projectsView.show();
+    alert('Das Projekt wurde vom Eigentümer umbenannt, archiviert oder gelöscht. Deine Änderungen sind gespeichert.');
+  },
 });
+let projectGoneNotice = null;
 // Offline = the banner, nothing else: alerts that only say "server unreachable" are dropped.
 const nativeAlert = window.alert.bind(window);
 window.alert = (msg) => {

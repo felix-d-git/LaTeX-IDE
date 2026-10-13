@@ -200,6 +200,8 @@ function persist(entry) {
   clearTimeout(entry.timer);
   entry.timer = null;
   if (!entry.dirty) return;
+  // Project folder gone (renamed/trashed/deleted under a live doc): never recreate it.
+  if (!fs.existsSync(entry.root)) return dropDoc(entry, 4410, 'project moved');
   entry.dirty = false;
   const text = entry.ytext.toString();
   try {
@@ -362,6 +364,18 @@ function dropDoc(entry, code, reason) {
 
 // File or folder renamed/moved/deleted: kick connected clients off the old
 // name and move/remove the persisted state along with it.
+// Project folder about to move/vanish (rename, archive, trash, account deletion): save pending
+// edits, then send everyone on it or below `dir` away with 4410 (client goes to the dashboard).
+function closeRoot(dir) {
+  dir = path.resolve(dir);
+  for (const entry of [...docs.values()]) {
+    const r = path.resolve(entry.root);
+    if (r !== dir && !r.startsWith(dir + path.sep)) continue;
+    if (entry.timer) persist(entry);
+    if (docs.get(entry.key) === entry) dropDoc(entry, 4410, 'project moved');
+  }
+}
+
 function onPathMoved(root, oldRel, newRel) {
   const prefix = oldRel + '/';
   for (const entry of [...docs.values()]) {
@@ -420,6 +434,7 @@ module.exports = {
   handleConnection,
   applyExternalText,
   onPathMoved,
+  closeRoot,
   flushRoot,
   flushAll,
   applyText,

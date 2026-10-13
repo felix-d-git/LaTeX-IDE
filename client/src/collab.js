@@ -19,7 +19,7 @@ let me = { name: 'Ich', color: COLORS[0] };
 const sessions = new Map(); // path -> session
 const opening = new Map(); // path -> Promise<session>
 let maxPayload = 64 * 1024 * 1024; // server's WebSocket limit, updated from /api/collab/epoch
-let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {} };
+let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {}, onProjectGone: () => {} };
 
 const store = {
   get(k, fallback) {
@@ -189,6 +189,10 @@ async function createSession(path) {
     } else if (code === 4404) {
       closeSession(path);
       hooks.onGone(path);
+    } else if (code === 4410) {
+      // Owner renamed/archived/trashed the project: this path is dead, edits were saved before.
+      closeSession(path);
+      hooks.onProjectGone();
     } else if (code === 4415) {
       // File was replaced by a non-UTF-8 one: reopening shows it read-only.
       closeSession(path);

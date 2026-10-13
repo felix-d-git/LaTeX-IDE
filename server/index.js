@@ -208,10 +208,20 @@ function sharedRootsOf(userId) {
 // Label key of an own project: folder name, '.trash/<name>', '.archive/<name>'.
 const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split(path.sep).join('/');
 
-// Owner moved a project folder: per-root state and the label go along.
+// Owner moved a project folder: per-root state, the label and its watcher go along. Users who had
+// it open follow a rename; into trash/archive it's dropped as their active project.
 function projectMoved(req, projectsDir, oldRoot, newRoot) {
-  state.moveRoot(oldRoot, newRoot);
+  state.moveRoot(oldRoot, newRoot, isParked(newRoot) ? null : newRoot);
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
+  const w = watchersByRoot.get(path.resolve(oldRoot));
+  if (w) {
+    w.watcher.close();
+    watchersByRoot.delete(path.resolve(oldRoot));
+    if (!isParked(newRoot)) {
+      ensureWatcher(path.resolve(newRoot));
+      watchersByRoot.get(path.resolve(newRoot)).refCount = w.refCount;
+    }
+  }
 }
 
 // New project folder (create/copy/import) or permanently deleted one: no leftovers of an earlier project at that path.
@@ -557,6 +567,7 @@ function removeAccount(userId) {
       }
     }
   };
+  collab.closeRoot(ownDir);
   const tmp = path.join(PROJECTS_DIR, 'users', `.deleted-${userId}-${Date.now()}`);
   const moveAside = () => {
     try {
@@ -1096,8 +1107,7 @@ app.post('/api/projects/rename', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses umbenannt wird.' });
   }
   try {
-    collab.flushRoot(root);
-    // ponytail: members who have this project open keep the old path until they reopen it from the dashboard.
+    collab.closeRoot(root);
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
     projectMoved(req, projectsDir, root, path.resolve(newRoot));
     res.json({ root: newRoot });
@@ -1125,7 +1135,7 @@ app.post('/api/projects/archive', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses archiviert wird.' });
   }
   try {
-    collab.flushRoot(root);
+    collab.closeRoot(root);
     projectMoved(req, projectsDir, root, path.resolve(projects.archiveProject(projectsDir, name)));
     res.json({ ok: true });
   } catch (e) {
@@ -1301,7 +1311,7 @@ app.post('/api/projects/trash', (req, res) => {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });
   }
   try {
-    collab.flushRoot(root);
+    collab.closeRoot(root);
     projectMoved(req, projectsDir, root, path.resolve(projects.trashProject(projectsDir, name)));
     res.json({ ok: true });
   } catch (e) {

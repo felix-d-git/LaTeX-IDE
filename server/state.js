@@ -200,10 +200,21 @@ function sharedRootsFor(userId) {
 
 // Project folder moved (rename, trash, archive, restore): carry its per-root settings/main file/shares
 // over. Leftovers of an earlier project at the target are dropped first, never mixed in.
-function moveRoot(oldRoot, newRoot) {
+// activeTo: where users who had it open/recent now point (null = forget it, e.g. trash/archive).
+function moveRoot(oldRoot, newRoot, activeTo = newRoot) {
   oldRoot = rk(oldRoot);
   newRoot = rk(newRoot);
+  activeTo = rk(activeTo);
   if (oldRoot === newRoot) return;
+  for (const [u, r] of Object.entries(workspace.activeRootByUser)) {
+    if (r !== oldRoot) continue;
+    if (activeTo) workspace.activeRootByUser[u] = activeTo;
+    else delete workspace.activeRootByUser[u];
+  }
+  for (const [u, list] of Object.entries(workspace.recentRootsByUser)) {
+    if (!Array.isArray(list) || !list.includes(oldRoot)) continue;
+    workspace.recentRootsByUser[u] = [...new Set(list.map((r) => (r === oldRoot ? activeTo : r)).filter(Boolean))];
+  }
   for (const k of ROOT_MAPS) {
     delete workspace[k][newRoot];
     if (workspace[k][oldRoot] === undefined) continue;
