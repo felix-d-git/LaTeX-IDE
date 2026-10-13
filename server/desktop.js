@@ -191,7 +191,7 @@ app.get('/desktop-callback', (req, res) => {
 });
 
 app.get('/api/desktop/info', (req, res) => {
-  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
+  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION, warnings: [...syncWarnings.values()] });
 });
 
 // --- local copy folder (settings) ---
@@ -351,14 +351,15 @@ function syncOwned(p) {
   return run;
 }
 
+const syncWarnings = new Map(); // projectId -> text for the UI (/api/desktop/info), until a clean sync
+
 async function syncOwnedNow(p) {
   const q = `project=${encodeURIComponent(p.projectId)}`;
   const need = async (res, what) => {
     if (!res.ok) throw new Error(`${what} fehlgeschlagen (HTTP ${res.status})`);
     return res;
   };
-  const dir = localDirOf(p);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = localDirOf(p); // syncFolder creates it (missing folder = fresh download)
   const r = await syncFolder(dir, path.join(SYNC_DIR, syncKey(p.projectId) + '.json'), {
     manifest: () => remoteJson(`/api/collab/manifest?${q}`),
     download: async (rel) => Buffer.from(await (await need(await remote(`/api/raw?${q}&path=${encodeURIComponent(rel)}`), rel)).arrayBuffer()),
@@ -367,6 +368,10 @@ async function syncOwnedNow(p) {
     remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
   });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
+  if (r.warning) {
+    console.warn(`Sync ${p.name}: ${r.warning}`);
+    syncWarnings.set(p.projectId, `${p.name}: ${r.warning}`);
+  } else syncWarnings.delete(p.projectId);
   return { ...r, dir };
 }
 

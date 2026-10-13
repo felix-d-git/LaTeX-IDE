@@ -875,6 +875,27 @@ async function pollDesktopState() {
   window.dispatchEvent(new CustomEvent('lide-offline', { detail: d.online === false }));
   if (d.online && !proxyOnline && currentProjectId) loadTree().catch(() => {});
   proxyOnline = d.online !== false;
+  showSyncWarnings(d.warnings || []);
+}
+
+// Desktop sync warnings (emergency brake, case-only names): the proxy forgets them after the next
+// clean sync, so the banner keeps every text it has shown until the user closes it.
+const seenSyncWarnings = new Set();
+function showSyncWarnings(list) {
+  const fresh = list.filter((w) => !seenSyncWarnings.has(w));
+  if (!fresh.length) return;
+  let bar = document.getElementById('sync-warning');
+  if (!bar) {
+    bar = Object.assign(document.createElement('div'), { id: 'sync-warning', role: 'alert' });
+    const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
+    close.addEventListener('click', () => bar.remove());
+    bar.appendChild(close);
+    document.body.appendChild(bar);
+  }
+  for (const w of fresh) {
+    seenSyncWarnings.add(w);
+    bar.appendChild(Object.assign(document.createElement('div'), { textContent: `Lokale Kopie – ${w}` }));
+  }
 }
 fetch('/api/desktop/info')
   .then((r) => (r.ok ? r.json() : {}))

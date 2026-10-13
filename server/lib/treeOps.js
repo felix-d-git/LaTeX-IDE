@@ -92,6 +92,17 @@ function deletePath(root, relPath) {
   fs.rmSync(abs, { recursive: true, force: true });
 }
 
+// Desktop sync deletes land in the project's .trash (hidden, not synced/compiled via isIgnored):
+// a sync gone wrong must not destroy files for all members, binaries have no history.
+// ponytail: .trash is never emptied - add a cleanup when it grows noticeably.
+function trashPath(root, relPath) {
+  const abs = safeResolve(root, relPath);
+  if (!fs.existsSync(abs) || abs === path.resolve(root)) throw new Error('Nicht gefunden.');
+  const dir = path.dirname(safeResolve(path.join(root, '.trash'), toRel(root, abs)));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.renameSync(abs, uniqueDest(dir, path.basename(abs)));
+}
+
 // Used both by drag&drop upload from the OS and by (future) file-picker upload.
 // contentBase64 is the raw file bytes, base64-encoded client-side. overwrite:
 // replace a same-named file (user chose so in the conflict dialog), else "_2".
@@ -105,4 +116,4 @@ function uploadFile(root, relDir, name, contentBase64, overwrite = false) {
   return toRel(root, dest);
 }
 
-module.exports = { createFolder, createFile, renamePath, movePath, deletePath, uploadFile };
+module.exports = { createFolder, createFile, renamePath, movePath, deletePath, trashPath, uploadFile };

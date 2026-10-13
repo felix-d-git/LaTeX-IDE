@@ -12,20 +12,28 @@ const { isIgnored } = require('./fsTree');
 
 const sha1 = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 
+// Only "vanished while walking" (ENOENT) is tolerated. Any other read error throws and aborts the
+// sync: a file we could not see would otherwise count as deleted locally and be deleted on the server.
 function walkLocal(dir) {
   const out = new Map(); // rel -> sha1
-  const walk = (rel) => {
-    let entries;
+  const gone = (fn) => {
     try {
-      entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true });
-    } catch {
-      return;
+      return fn();
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      throw e;
     }
+  };
+  const walk = (rel) => {
+    const entries = gone(() => fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) || [];
     for (const d of entries) {
       if (isIgnored(d.name)) continue;
       const r = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) walk(r);
-      else if (d.isFile()) out.set(r, sha1(fs.readFileSync(path.join(dir, r))));
+      else if (d.isFile()) {
+        const buf = gone(() => fs.readFileSync(path.join(dir, r)));
+        if (buf) out.set(r, sha1(buf));
+      }
     }
   };
   walk('');
@@ -48,10 +56,16 @@ function decide(s, l, b) {
   return 'conflict';
 }
 
+// Emergency brake: more local deletions than this are not passed on to the server.
+const MAX_REMOTE_DELETES = 10;
+const MAX_REMOTE_DELETE_SHARE = 0.25;
+
 // io: { manifest(), download(rel) -> Buffer, upload(rel, buf), remove(rel) }
 async function syncFolder(dir, indexPath, io) {
   const man = await io.manifest();
-  const index = readJson(indexPath, {});
+  // Folder gone (deleted, other drive, new install with old data dir): start over like the first
+  // sync - only download. With the old index every file would count as deleted locally.
+  const index = fs.existsSync(dir) ? readJson(indexPath, {}) : {};
   const server = new Map(man.files.map((f) => [f.path, f.sha1]));
   const local = walkLocal(dir);
   const abs = (rel) => {
@@ -63,11 +77,21 @@ async function syncFolder(dir, indexPath, io) {
     fs.mkdirSync(path.dirname(abs(rel)), { recursive: true });
     fs.writeFileSync(abs(rel), buf);
   };
-  const conflicts = [];
-  for (const rel of new Set([...server.keys(), ...local.keys(), ...Object.keys(index)])) {
+  const plan = [...new Set([...server.keys(), ...local.keys(), ...Object.keys(index)])].map((rel) => {
     const s = server.get(rel) || null;
     const l = local.get(rel) || null;
-    const act = decide(s, l, index[rel]);
+    return { rel, s, l, act: decide(s, l, index[rel]) };
+  });
+  // Many files missing locally at once looks like a broken/emptied folder, not intent:
+  // fetch them again instead of deleting them on the server for every member.
+  const dels = plan.filter((x) => x.act === 'deleteRemote');
+  let warning = null;
+  if (dels.length > MAX_REMOTE_DELETES || (dels.length > 1 && dels.length > server.size * MAX_REMOTE_DELETE_SHARE)) {
+    for (const x of dels) x.act = 'download';
+    warning = `${dels.length} Dateien fehlten in der lokalen Kopie. Sie wurden nicht auf dem Server gelöscht, sondern neu heruntergeladen. Absichtlich gelöscht? Dann bitte im Web-IDE löschen.`;
+  }
+  const conflicts = [];
+  for (const { rel, s, l, act } of plan) {
     let got = s; // hash of what we now have locally = the next sync's base
     // Base = hash of the bytes actually written: the file may change between manifest and download.
     const pull = async () => {
@@ -92,7 +116,7 @@ async function syncFolder(dir, indexPath, io) {
     else index[rel] = act === 'upload' ? l : got;
   }
   writeJson(indexPath, index);
-  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts };
+  return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts, warning };
 }
 
 function readJson(file, fallback) {

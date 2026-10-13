@@ -1252,6 +1252,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 :root[data-theme="dark"] .project-actions button.danger:hover{ background: #3a2224; }
 :root[data-theme="dark"] #share-error, :root[data-theme="dark"] #auth-error{ background: #3a2224; color: #ffb4ab; }
 :root[data-theme="dark"] #offline-banner{ background: #3a2e1c; color: #f2d48a; border-bottom-color: #5c4a24; }
+:root[data-theme="dark"] #sync-warning{ background: #3a2e1c; color: #f2d48a; border-color: #5c4a24; }
 :root[data-theme="dark"] #offline-banner.minimized{ background: #f2c14e; }
 :root[data-theme="dark"] #update-banner{ background: #1d3a2a; color: #b5e8c8; border-color: #2f5a40; }
 :root[data-theme="dark"] .review-item.type-conflict .review-item-type{ color: #f2c14e; }
@@ -1322,6 +1323,8 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 .settings-pw-input{ display: block; width: 100%; max-width: 320px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--ol-border); border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); }
 #update-banner{ position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: var(--z-modal); display: flex; align-items: center; gap: 12px; padding: 8px 40px 8px 14px; background: #e8f3ec; color: #1e5631; border: 1px solid #b5d8c0; border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 #update-banner a{ color: inherit; }
+#sync-warning{ position: fixed; bottom: 12px; right: 12px; z-index: var(--z-modal); max-width: min(520px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 6px; padding: 8px 40px 8px 14px; background: #fff4d6; color: #7a5600; border: 1px solid #f0d58a; border-radius: var(--ol-r-sm); font-size: var(--ol-fs-sm); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+#sync-warning .update-banner-close{ position: absolute; top: 6px; right: 8px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; }
 #update-banner details{ max-width: 50vw; }
 #update-banner details pre{ max-height: 40vh; overflow: auto; margin: 6px 0 0; font-size: 11px; white-space: pre-wrap; }
 #update-banner .update-banner-close{ position: absolute; right: 8px; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; }

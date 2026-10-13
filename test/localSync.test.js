@@ -46,6 +46,52 @@ async function setup(files, extra) {
   return { base, dir, index, io };
 }
 
+test('fehlender Projektordner: nichts auf dem Server löschen, neu herunterladen (#28)', async () => {
+  const { dir, index, io } = await setup({ 'main.tex': 'x', 'kap/a.tex': 'a', 'bild.png': 'png' });
+  fs.rmSync(dir, { recursive: true, force: true });
+  await syncFolder(dir, index, io);
+  assert.deepStrictEqual(io.removed, []);
+  assert.strictEqual(io.srv.size, 3);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'kap/a.tex'), 'utf8'), 'a');
+});
+
+test('Lesefehler im lokalen Ordner bricht den Sync ab, ohne zu löschen (#28)', async () => {
+  const { dir, index, io } = await setup({ 'main.tex': 'x', 'kap/a.tex': 'a', 'kap/b.tex': 'b' });
+  const orig = fs.readdirSync;
+  fs.readdirSync = (p, ...rest) => {
+    if (path.basename(String(p)) === 'kap') throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    return orig(p, ...rest);
+  };
+  try {
+    await assert.rejects(syncFolder(dir, index, io), /EACCES/);
+  } finally {
+    fs.readdirSync = orig;
+  }
+  assert.deepStrictEqual(io.removed, []);
+  assert.strictEqual(io.srv.size, 3);
+});
+
+test('Notbremse: viele lokal fehlende Dateien werden nicht auf dem Server gelöscht (#28)', async () => {
+  const files = { 'main.tex': 'x' };
+  for (let i = 0; i < 12; i++) files[`fig/${i}.png`] = `p${i}`;
+  const { dir, index, io } = await setup(files);
+  fs.rmSync(path.join(dir, 'fig'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'fig')); // folder still there, only emptied
+  const r = await syncFolder(dir, index, io);
+  assert.deepStrictEqual(io.removed, []);
+  assert.strictEqual(io.srv.size, 13);
+  assert.match(r.warning, /12/);
+  assert.ok(fs.existsSync(path.join(dir, 'fig/3.png')), 'fehlende Dateien wieder geholt');
+});
+
+test('Notbremse greift nicht bei einer einzelnen bewussten Löschung (#28)', async () => {
+  const { dir, index, io } = await setup({ 'main.tex': 'x', 'alt.tex': 'a', 'b.tex': 'b' });
+  fs.rmSync(path.join(dir, 'alt.tex'));
+  const r = await syncFolder(dir, index, io);
+  assert.deepStrictEqual(io.removed, ['alt.tex']);
+  assert.ok(!r.warning);
+});
+
 test('Änderung zwischen Manifest und Download erzeugt keinen Scheinkonflikt (#48)', async () => {
   const base = tmp();
   const dir = path.join(base, 'Thesis');

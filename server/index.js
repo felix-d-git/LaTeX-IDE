@@ -769,7 +769,7 @@ app.delete('/api/collab/raw', (req, res) => {
   if (!root) return;
   try {
     if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
-    treeOps.deletePath(root, req.query.path);
+    treeOps.trashPath(root, req.query.path);
     collab.onPathMoved(root, req.query.path, null);
     res.json({ ok: true });
   } catch (e) {
