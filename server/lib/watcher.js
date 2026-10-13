@@ -5,7 +5,6 @@ const crypto = require('crypto');
 const { diffLines } = require('diff');
 const { isIgnored, isTextFile, decodeText } = require('./fsTree');
 const { takeSelfWrite } = require('../state');
-const { OUT_DIR } = require('./compile');
 
 function hashOf(content) {
   return crypto.createHash('sha1').update(content).digest('hex');
@@ -17,7 +16,6 @@ function startWatcher(root, broadcast) {
       const rel = path.relative(root, p);
       if (!rel) return false;
       const parts = rel.split(path.sep);
-      if (parts[0] === OUT_DIR) return false; // watch pdf output, filter below
       return parts.some((part) => isIgnored(part));
     },
     ignoreInitial: true,
@@ -38,13 +36,6 @@ function startWatcher(root, broadcast) {
 
   watcher.on('change', (absPath) => {
     const relPath = path.relative(root, absPath).split(path.sep).join('/');
-
-    if (relPath.startsWith(OUT_DIR + '/')) {
-      if (relPath.toLowerCase().endsWith('.pdf')) {
-        broadcast({ type: 'pdfChanged', path: relPath });
-      }
-      return;
-    }
 
     if (!isTextFile(relPath)) return;
 
@@ -97,7 +88,6 @@ function startWatcher(root, broadcast) {
 
   watcher.on('add', (absPath) => {
     const relPath = path.relative(root, absPath).split(path.sep).join('/');
-    if (relPath.startsWith(OUT_DIR + '/')) return;
     broadcast({ type: 'treeChanged' });
   });
 

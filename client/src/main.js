@@ -1087,7 +1087,11 @@ connectWs(forThisProject({
     loadTree();
   },
   treeChanged: () => loadTree(),
-  pdfChanged: (msg) => pdfViewer.reload(),
+  // Nur das gerade gezeigte PDF neu laden (oder das erste, falls noch keins offen ist).
+  pdfChanged: (msg) => {
+    const cur = pdfViewer.getCurrentPath();
+    if (msg.path && (!cur || msg.path === cur)) pdfViewer.load(msg.path);
+  },
   compileStatus: (msg) => {
     if (msg.status === 'running') els.compileBtn.textContent = 'Kompiliere…';
   },
