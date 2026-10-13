@@ -75,7 +75,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // TeX writes <output-directory>/<jobname>.pdf, jobname = basename of the main
 // file (latexmk runs without -cd from the project root).
 function pdfNameFor(mainRelPath) {
-  return path.basename(mainRelPath).replace(/\.tex$/i, '.pdf');
+  return String(mainRelPath).split(/[\\/]/).pop().replace(/\.tex$/i, '.pdf');
 }
 
 // outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).

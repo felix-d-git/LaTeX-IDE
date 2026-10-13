@@ -13,14 +13,17 @@ const LEGACY_LEVEL_PERMS = { read: ['read'], review: ['read', 'comment'], edit: 
 
 function load() {
   if (fs.existsSync(DATA_PATH)) {
+    // A damaged file must not silently turn into an empty account list (bootstrapAdmin would then create a new admin): refuse to start.
+    let data;
     try {
-      const data = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-      for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!data[k]) data[k] = [];
-      data.mcpTokens.forEach(migrateMcpToken);
-      return data;
+      data = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8').replace(/^﻿/, ''));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('kein JSON-Objekt');
     } catch (e) {
-      // fall through to default
+      throw new Error(`auth-data.json ist beschädigt (${e.message}). Datei prüfen oder aus dem Backup wiederherstellen: ${DATA_PATH}`);
     }
+    for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!Array.isArray(data[k])) data[k] = [];
+    data.mcpTokens.forEach(migrateMcpToken);
+    return data;
   }
   return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [] };
 }
@@ -80,7 +83,7 @@ function toPublicUser(user) {
 async function createUser({ email, password, isAdmin, username, emailVerified = true }) {
   const norm = (email || '').trim().toLowerCase();
   if (!norm || !/^\S+@\S+\.\S+$/.test(norm)) throw new Error('Ungültige E-Mail-Adresse.');
-  if (!password || password.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+  validatePassword(password);
   if (username !== undefined && !USERNAME_RE.test(username || '')) {
     throw new Error('Benutzername: 3–32 Zeichen, nur Buchstaben, Ziffern, Punkt, Unterstrich, Bindestrich.');
   }
@@ -89,6 +92,9 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
   if (findUserByEmail(norm)) throw new Error('Für diese E-Mail-Adresse existiert bereits ein Konto.');
   if (username && findUserByUsername(username)) throw new Error('Dieser Benutzername ist schon vergeben.');
   const passwordHash = await bcrypt.hash(password, 12);
+  // bcrypt yields the event loop: a double-submitted registration passes the checks above twice -> check again right before the push.
+  if (findUserByEmail(norm)) throw new Error('Für diese E-Mail-Adresse existiert bereits ein Konto.');
+  if (username && findUserByUsername(username)) throw new Error('Dieser Benutzername ist schon vergeben.');
   const user = {
     id: crypto.randomUUID(),
     email: norm,
@@ -109,8 +115,12 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(password || '', user.passwordHash);
 }
 
+function validatePassword(pw) {
+  if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+}
+
 async function setPassword(user, newPassword) {
-  if (!newPassword || newPassword.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+  validatePassword(newPassword);
   user.passwordHash = await bcrypt.hash(newPassword, 12);
   user.passwordChangedAt = new Date().toISOString();
   save(data);
@@ -335,6 +345,7 @@ module.exports = {
   createUser,
   verifyPassword,
   setPassword,
+  validatePassword,
   createInvite,
   listInvites,
   getValidInvite,

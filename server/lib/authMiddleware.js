@@ -115,7 +115,8 @@ function requireAuth(req, res, next) {
 
 // ponytail: in-memory fixed-window limiter, resets on restart - enough for a handful of users behind one Funnel.
 const hits = new Map();
-function rateLimit(name, max, windowMs, keyFn = (req) => req.ip) {
+// countIf(res): counted only after the answer (e.g. failed logins) - successful requests do not use up the budget.
+function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {}) {
   return (req, res, next) => {
     const key = `${name}:${keyFn(req)}`;
     const now = Date.now();
@@ -124,11 +125,12 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip) {
       e = { count: 0, resetAt: now + windowMs };
       hits.set(key, e);
     }
-    e.count += 1;
-    if (e.count > max) {
+    if (!countIf) e.count += 1;
+    if (countIf ? e.count >= max : e.count > max) {
       res.set('Retry-After', String(Math.ceil((e.resetAt - now) / 1000)));
       return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
     }
+    if (countIf) res.on('finish', () => { if (countIf(res)) e.count += 1; });
     next();
   };
 }

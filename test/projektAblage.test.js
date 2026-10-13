@@ -18,6 +18,7 @@ test('Papierkorb: neues gleichnamiges Projekt ohne Altlasten, Wiederherstellen b
   const other = (await admin.call('POST', '/api/projects/create', { name: 'Anderes' })).body.root;
 
   assert.strictEqual((await open(admin, thesis)).status, 200);
+  require('fs').writeFileSync(path.join(thesis, 'thesis.tex'), 'x'); // mainFileOf repairs a main file that does not exist
   await admin.call('POST', '/api/main-file', { path: 'thesis.tex' });
   await admin.call('POST', '/api/settings', { compiler: 'xelatex', autocompile: true });
   assert.strictEqual((await admin.call('POST', '/api/share', { login: 'bob' })).status, 200);

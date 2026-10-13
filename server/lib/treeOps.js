@@ -44,12 +44,29 @@ function createFile(root, relPath) {
   return toRel(root, abs);
 }
 
+// The project folder itself is never a target of rename/move/delete (empty path or "." resolves to it).
+function assertNotRoot(root, abs) {
+  if (abs === path.resolve(root)) throw new Error('Der Projektordner selbst kann nicht geändert werden.');
+}
+
+// Same file system entry under another spelling (case-only rename on case-insensitive file systems).
+function isSameEntry(a, b) {
+  try {
+    const x = fs.statSync(a, { bigint: true });
+    const y = fs.statSync(b, { bigint: true });
+    return x.ino === y.ino && x.dev === y.dev && x.ino !== 0n;
+  } catch {
+    return false;
+  }
+}
+
 function renamePath(root, relPath, newName) {
   const safeName = assertValidName(newName);
   const abs = safeResolve(root, relPath);
+  assertNotRoot(root, abs);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const dest = path.join(path.dirname(abs), safeName);
-  if (fs.existsSync(dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
+  if (fs.existsSync(dest) && !isSameEntry(abs, dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
   fs.renameSync(abs, dest);
   return toRel(root, dest);
 }
@@ -61,6 +78,7 @@ function renamePath(root, relPath, newName) {
 // set, so the client can ask "cancel or overwrite" before resubmitting.
 function movePath(root, relPath, targetDir, overwrite) {
   const abs = safeResolve(root, relPath);
+  assertNotRoot(root, abs);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const destDirAbs = safeResolve(root, targetDir || '');
   if (!fs.existsSync(destDirAbs) || !fs.statSync(destDirAbs).isDirectory()) {
@@ -88,6 +106,7 @@ function movePath(root, relPath, targetDir, overwrite) {
 
 function deletePath(root, relPath) {
   const abs = safeResolve(root, relPath);
+  assertNotRoot(root, abs);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   fs.rmSync(abs, { recursive: true, force: true });
 }
@@ -116,4 +135,4 @@ function uploadFile(root, relDir, name, contentBase64, overwrite = false) {
   return toRel(root, dest);
 }
 
-module.exports = { createFolder, createFile, renamePath, movePath, deletePath, trashPath, uploadFile };
+module.exports = { isSameEntry, createFolder, createFile, renamePath, movePath, deletePath, trashPath, uploadFile };
