@@ -192,7 +192,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
         }));
       } else if (mode === 'archive') {
         tdActions.appendChild(actionBtn('Wiederherstellen', 'primary', () => unarchiveProject(p.name)));
-        tdActions.appendChild(iconBtn('close', 'In Papierkorb', () => trashProject(p.name), 'danger'));
+        tdActions.appendChild(iconBtn('close', 'In Papierkorb', () => trashProject(p.name, 'archive'), 'danger'));
       } else {
         tdActions.appendChild(actionBtn('Wiederherstellen', 'primary', () => restoreProject(p.name)));
         tdActions.appendChild(iconBtn('close', 'Endgültig löschen', () => deletePermanently(p.name), 'danger'));
@@ -247,7 +247,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   }
 
   bulkTrash.addEventListener('click', () => {
-    if (confirm(`${ownedSelected().length} Projekt(e) in den Papierkorb verschieben?`)) bulkRun('In Papierkorb', (n) => api.trashProject(n));
+    if (confirm(`${ownedSelected().length} Projekt(e) in den Papierkorb verschieben?`)) bulkRun('In Papierkorb', (n) => api.trashProject(n, mode === 'archive' ? 'archive' : undefined));
   });
   bulkArchive.addEventListener('click', () => {
     if (mode === 'archive') bulkRun('Wiederherstellen', (n) => api.unarchiveProject(n));
@@ -513,10 +513,10 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     }
   }
 
-  async function trashProject(name) {
+  async function trashProject(name, from) {
     if (!confirm(`"${name}" in den Papierkorb verschieben?`)) return;
     try {
-      await api.trashProject(name);
+      await api.trashProject(name, from);
       await refresh();
     } catch (e) {
       alert('Fehler: ' + e.message);

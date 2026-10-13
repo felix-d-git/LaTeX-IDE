@@ -1253,8 +1253,17 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
 });
 
 app.post('/api/projects/trash', (req, res) => {
-  const { name } = req.body;
+  const { name, from } = req.body;
   const projectsDir = userProjectsDir(req.user);
+  // An archived project can't be open; it may share its name with an active one.
+  if (from === 'archive') {
+    try {
+      projects.trashArchivedProject(projectsDir, name);
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  }
   const root = path.resolve(path.join(projectsDir, name || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });

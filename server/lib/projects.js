@@ -130,6 +130,16 @@ function trashProject(projectsDir, name) {
   return dest;
 }
 
+function trashArchivedProject(projectsDir, name) {
+  const src = path.join(projectsDir, ARCHIVE_DIRNAME, name || '');
+  if (!name || path.basename(name) !== name || !fs.existsSync(src)) throw new Error('Projekt im Archiv nicht gefunden.');
+  const trashDir = path.join(projectsDir, TRASH_DIRNAME);
+  fs.mkdirSync(trashDir, { recursive: true });
+  const dest = uniqueDest(trashDir, name);
+  fs.renameSync(src, dest);
+  return dest;
+}
+
 function restoreProject(projectsDir, name) {
   const src = path.join(projectsDir, TRASH_DIRNAME, name);
   if (!fs.existsSync(src)) throw new Error('Projekt im Papierkorb nicht gefunden.');
@@ -210,6 +220,7 @@ module.exports = {
   archiveProject,
   unarchiveProject,
   trashProject,
+  trashArchivedProject,
   restoreProject,
   deleteProjectPermanently,
   renameProject,
