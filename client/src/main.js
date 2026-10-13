@@ -727,6 +727,7 @@ setupProjectDialog({
   onOpened: async ({ activeRoot, mainFile: mf, startFile, projectId }) => {
     mainFile = mf;
     await loadProject(activeRoot, projectId);
+    projectsView.hide();
     if (startFile) await openFile(startFile);
   },
 });
@@ -839,9 +840,16 @@ const menuCtx = {
   onToggleOutline: () => document.querySelector('.outline-toggle').click(),
   getToolbarVisible: () => editorToolbar.isVisible(),
   onToggleToolbar: () => editorToolbar.setVisible(!editorToolbar.isVisible()),
-  onMakeCopy: () => {
-    const name = activeProjectRoot.split(/[\\/]/).pop();
-    if (name) projectsView.showCopyDialogFor(name);
+  onDownloadPdf: () => els.downloadPdfBtn.click(),
+  // Kopieren geht serverseitig per Namen im eigenen Projektordner: nur für eigene Projekte.
+  onMakeCopy: async () => {
+    try {
+      const own = (await api.listProjects()).localProjects.find((p) => p.root === activeProjectRoot);
+      if (own) projectsView.showCopyDialogFor(own.name);
+      else alert('Nur eigene Projekte können kopiert werden.');
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+    }
   },
 };
 
@@ -887,16 +895,12 @@ document.getElementById('btn-cancel-comment-2').addEventListener('click', () =>
   document.getElementById('btn-cancel-comment').click()
 );
 
+// Escape schließt Dialoge über modals.js (einzeln, oberster zuerst); hier nur der Fokusmodus,
+// und nur wenn nichts anderes die Taste schon verbraucht hat.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  hotkeySettings.hide();
-  shareDialog.hide();
-  settingsDialog.hide();
-  profileDialog.hide();
-  adminDialog.hide();
-  helpDialog.hide();
-  // CodeMirror (autocomplete, search, vim) already used this Escape
-  if (!e.defaultPrevented && appEl.classList.contains('layout-focus')) applyLayout('split');
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if ([...document.querySelectorAll('.modal-backdrop')].some((b) => b.getClientRects().length)) return;
+  if (appEl.classList.contains('layout-focus')) applyLayout('split');
 });
 
 registerAction('compile', () => els.compileBtn.click());

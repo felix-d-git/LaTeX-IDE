@@ -1,4 +1,4 @@
-import { authApi } from './api.js';
+import { publicOrigin, authApi } from './api.js';
 
 // Settings tab "MCP": tokens for external AI tools (Claude, Codex, Cursor) with single rights per project.
 const DOCS_URL = 'https://github.com/felix-d-git/latex-web-ide/blob/master/docs/MCP.md';
@@ -44,7 +44,7 @@ function copyField(value, label = 'Kopieren', multiline = false) {
 
 // Prompt the user pastes into Claude Code / Codex so the agent sets up the connector itself.
 function setupPrompt(token) {
-  const url = `${location.origin}/mcp`;
+  const url = `${publicOrigin()}/mcp`;
   return `Richte den MCP-Server meines LatexIDE-Servers als Connector ein (Streamable HTTP, Authentifizierung per Bearer-Token).
 
 URL: ${url}
@@ -118,7 +118,7 @@ function scopeEditor(initial, projectList) {
 
 export function renderMcpTab() {
   const wrap = el('div', 'mcp-tab');
-  const url = `${location.origin}/mcp`;
+  const url = `${publicOrigin()}/mcp`;
   wrap.append(
     el('h4', null, 'KI-Zugriff (MCP)'),
     note('Mit einem Token greifen externe KI-Tools (Claude Code/Desktop, Codex, Cursor) mit ihrem eigenen Abo auf deine Projekte zu. Du legst pro Token fest, was erlaubt ist – pro Projekt einzeln. Alles bleibt auf deinen eigenen Zugriff begrenzt.'),

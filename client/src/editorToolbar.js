@@ -41,7 +41,7 @@ export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComm
     separator(),
     button('link', 'Link einfügen', () => {
       const v = getView();
-      if (!v) return;
+      if (!v || v.state.readOnly) return;
       const url = prompt('URL:', 'https://');
       if (!url) return;
       const label = prompt('Anzeigetext:', url) || url;

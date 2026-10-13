@@ -166,7 +166,9 @@ async function argumentSource(context) {
   if (ref) return { from, to: m.to, options: labels.map((l) => ({ label: l, type: 'variable', detail: 'label' })), validFor: /^[^},]*$/ };
   // Einstellungen ▸ Literatur: nur gewählte .bib-Dateien; "erweitert" sucht auch in Titel/Autor.
   const prefs = referencePrefs();
-  const keys = bibKeys.filter((b) => !prefs.bibFiles.length || prefs.bibFiles.includes(b.file));
+  // Auswahl gilt global: nur Dateien zählen, die es in diesem Projekt gibt (sonst leer -> alle)
+  const chosen = prefs.bibFiles.filter((f) => bibKeys.some((b) => b.file === f));
+  const keys = bibKeys.filter((b) => !chosen.length || chosen.includes(b.file));
   const option = (b) => ({ label: b.key, type: 'variable', detail: (b.author || 'bib').split(/\s+and\s+/)[0], info: b.title || undefined });
   if (prefs.search !== 'advanced') return { from, to: m.to, options: keys.map(option), validFor: /^[^},]*$/ };
   const q = context.state.sliceDoc(from, m.to).toLowerCase();

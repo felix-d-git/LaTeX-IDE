@@ -1,4 +1,5 @@
-import { shareApi } from './api.js';
+import { publicOrigin, shareApi } from './api.js';
+import { copyText } from './clipboard.js';
 
 const ROLE_LABEL = { editor: 'Kann bearbeiten', reviewer: 'Kann kommentieren' };
 
@@ -59,12 +60,12 @@ export function setupShareDialog({ currentUser, onLeft }) {
       if (link) {
         const input = document.createElement('input');
         input.readOnly = true;
-        input.value = `${location.origin}/?join=${link.token}`;
+        input.value = `${publicOrigin()}/?join=${link.token}`;
         if (link.maxUses) input.title = `${link.uses} von ${link.maxUses} Beitritten genutzt`;
         input.addEventListener('focus', () => input.select());
         el.append(
           input,
-          button('Kopieren', () => navigator.clipboard.writeText(input.value)),
+          button('Kopieren', () => copyText(input.value)),
           button('Deaktivieren', () => run(() => shareApi.revokeLink(role)))
         );
       } else {
