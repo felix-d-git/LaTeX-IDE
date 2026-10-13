@@ -257,6 +257,7 @@ const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split
 function projectMoved(req, projectsDir, oldRoot, newRoot) {
   kickRoot(path.resolve(oldRoot));
   state.moveRoot(oldRoot, newRoot, isParked(newRoot) ? null : newRoot);
+  auth.moveMcpProject(projectIdOf(oldRoot), isParked(newRoot) ? null : projectIdOf(newRoot));
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
   const w = watchersByRoot.get(path.resolve(oldRoot));
   if (w) {
@@ -272,6 +273,7 @@ function projectMoved(req, projectsDir, oldRoot, newRoot) {
 // New project folder (create/copy/import) or permanently deleted one: no leftovers of an earlier project at that path.
 function projectFresh(req, projectsDir, root) {
   state.dropRoot(root);
+  auth.moveMcpProject(projectIdOf(root), null);
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, root), null);
 }
 
@@ -331,7 +333,7 @@ function baseUrl(req) {
   return process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 }
 
-const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000);
+const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000, undefined, { skipSuccess: true });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000);
@@ -431,6 +433,8 @@ app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
 
 app.post('/api/auth/reset-password', limitToken, ah(async (req, res) => {
   const { token, password } = req.body;
+  // Check first: a typo must not burn the single-use link.
+  try { auth.validatePassword(password); } catch (e) { return res.status(400).json({ error: e.message }); }
   const user = auth.consumeResetToken(token || '');
   if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
   try {
@@ -911,6 +915,7 @@ app.delete('/api/collab/raw', (req, res) => {
   if (!root) return;
   try {
     if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    collab.flushRoot(root);
     treeOps.trashPath(root, req.query.path);
     collab.onPathMoved(root, req.query.path, null);
     res.json({ ok: true });
@@ -1502,6 +1507,7 @@ app.delete('/api/tree', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    collab.flushRoot(root); // a pending edit would otherwise recreate the deleted file
     treeOps.deletePath(root, req.query.path);
     pathMoved(root, req.query.path, null);
     res.json({ ok: true });
@@ -1584,12 +1590,13 @@ function safeSnapshot(root, opts) {
 }
 
 async function doCompile(root, main, outRel, to, meta, auto) {
+  lastAutocompileAt.set(root, Date.now()); // the flush below must not trigger a second autocompile
   collab.flushRoot(root);
   const t0 = Date.now();
   const result = await compile(root, main, state.getProjectSettings(root), outRel);
   result.durationMs = Date.now() - t0;
   try {
-    state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
+    if (result.pdfPath) state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
   } catch (e) {
     console.error('[compile] Laufzeit nicht gespeichert:', e.message);
   }
