@@ -1,4 +1,4 @@
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
 if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirname, '..', process.env.DATA_DIR);
@@ -2110,7 +2110,7 @@ async function bootstrapAdmin() {
   if (!email || !password) {
     console.warn(
       '[auth] ADMIN_EMAIL/ADMIN_PASSWORD nicht gesetzt - lege Fallback-Admin admin@local.host / bitte-sofort-aendern an. ' +
-        'UNBEDINGT direkt nach dem ersten Login das Passwort über "Passwort vergessen" ändern, oder die Umgebungsvariablen setzen und den Server neu starten.'
+        'UNBEDINGT direkt nach dem ersten Login das Passwort im Profil ändern. ADMIN_* wirken nur beim allerersten Start (leerer Datenordner).'
     );
   }
   const adminUser = await auth.createUser({
@@ -2137,7 +2137,7 @@ function shutdown() {
   vault.flush();
   process.exit(0);
 }
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, shutdown);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK']) process.on(sig, shutdown);
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 process.on('uncaughtException', (e) => {
   console.error('[uncaughtException]', e);

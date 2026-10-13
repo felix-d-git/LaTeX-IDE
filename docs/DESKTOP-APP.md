@@ -62,7 +62,7 @@ sie verlangt danach eine neue Anmeldung.
 
 ## Offline arbeiten
 
-- Eigene Projekte lassen sich ohne Verbindung bearbeiten und lokal kompilieren.
+- Offline bearbeitbar und lokal kompilierbar sind Dateien von eigenen Projekten, die auf diesem Gerät mindestens einmal online geöffnet wurden (nur diese liegen in der lokalen Kopie).
 - Sobald der Server wieder erreichbar ist, gleicht die App die Änderungen ab.
   Wurde dieselbe Datei auch auf dem Server geändert, bleibt die Server-Fassung
   und die lokale liegt daneben als `*.offline-konflikt.*`.

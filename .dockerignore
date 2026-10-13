@@ -17,6 +17,10 @@ Backup1_03_08_2026
 projects
 data
 desktop-data
+desktop
+.update-request
+.update-status
+.latex-ide-yjs
 backups
 .session-secret
 .update.env

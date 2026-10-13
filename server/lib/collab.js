@@ -214,7 +214,10 @@ function persist(entry) {
     if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || onDisk() !== text) {
       hooks.markSelfWrite(entry.root, entry.rel, text);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, text, 'utf8');
+      const tmp = statePath(entry.root, entry.rel) + '.tex.tmp'; // same FS, outside the tree
+      fs.mkdirSync(path.dirname(tmp), { recursive: true });
+      fs.writeFileSync(tmp, text, 'utf8');
+      fs.renameSync(tmp, abs);
     }
     writeState(entry.root, entry.rel, entry.ydoc);
     hooks.onPersist(entry.root, entry.rel);

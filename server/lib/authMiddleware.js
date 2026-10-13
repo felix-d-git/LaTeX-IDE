@@ -35,6 +35,7 @@ const SESSION_SECRET = loadSessionSecret();
 const sessionStore = new FileStore({
   path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),
   logFn: () => {},
+  ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
 function createSessionMiddleware() {
