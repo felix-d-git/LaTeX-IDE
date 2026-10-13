@@ -2080,6 +2080,7 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
+    if (msg && msg.type === 'ping') return ws.readyState === 1 && ws.send('{"type":"pong"}'); // client heartbeat
     if (!msg || msg.type !== 'subscribe') return;
     const user = auth.findUserById(ws.userId);
     const r = user && msg.projectId ? windowRoot({ user, get: () => String(msg.projectId), query: {} }) : {};
