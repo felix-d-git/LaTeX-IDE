@@ -13,6 +13,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   let currentPath = null;
   let currentPage = 1;
   let renderToken = 0;
+  let loadGen = 0; // clear() invalidates a running load
   // Während renderAll die Seiten neu aufbaut, stimmen Scrollposition und currentPage
   // nicht (Spalte kurz leer → Scroll-Event meldet Seite 1). Dann gilt lastStable.
   let rendering = false;
@@ -83,6 +84,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   }
 
   async function loadOnce(path) {
+    const gen = loadGen;
     const samePdf = path === currentPath;
     const keep = samePdf ? captureScroll() : null;
     currentPath = path;
@@ -107,7 +109,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
         await new Promise((r) => setTimeout(r, 400));
       }
     }
-    if (native || pendingPath) {
+    if (native || pendingPath || gen !== loadGen) {
       doc.destroy(); // überholt: nächster Pfad lädt gleich
       return;
     }
@@ -126,7 +128,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     if (rendering) return lastStable;
     const wrapper = pageWrappers.get(currentPage);
     if (!wrapper) return null;
-    const pageTop = wrapper.offsetTop - container.offsetTop;
+    const pageTop = wrapper.offsetTop;
     return {
       page: currentPage,
       ratio: (container.scrollTop - pageTop) / (wrapper.offsetHeight || 1),
@@ -139,7 +141,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     const page = Math.min(Math.max(1, state.page), pdfDoc.numPages);
     const wrapper = pageWrappers.get(page);
     if (!wrapper) return;
-    const pageTop = wrapper.offsetTop - container.offsetTop;
+    const pageTop = wrapper.offsetTop;
     container.scrollTop = Math.max(0, pageTop + state.ratio * wrapper.offsetHeight);
     container.scrollLeft = state.leftRatio * container.scrollWidth;
     currentPage = page;
@@ -157,7 +159,9 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   // keepState: vorher gemerkte Position; ohne Angabe wird die aktuelle
   // Position übernommen (z.B. beim Zoomen), damit die Ansicht nicht springt.
   async function renderAll(keepState) {
-    if (!pdfDoc) return;
+    if (!pdfDoc || native) return;
+    // Hidden PDF column (clientWidth 0): fit modes would compute 10 % - the ResizeObserver renders again once visible.
+    if (zoomMode !== 'fixed' && !container.clientWidth) return;
     const restore = keepState === undefined ? captureScroll() : keepState;
     const token = ++renderToken;
     const doc = pdfDoc;
@@ -175,23 +179,31 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
         throw e;
       }
       if (token !== renderToken) return; // neuer Renderlauf hat übernommen
-      const s = await effectiveScale(page);
-      if (zoomMode !== 'fixed') scale = s;
+      // one scale per run (from page 1), so all pages and the SyncTeX maths share it
+      if (i === 1 && zoomMode !== 'fixed') scale = await effectiveScale(page);
+      const s = scale;
       const viewport = page.getViewport({ scale: s });
       const wrapper = document.createElement('div');
       wrapper.className = 'pdf-page';
       wrapper.dataset.page = String(i);
       wrapper.style.width = viewport.width + 'px';
       wrapper.style.height = viewport.height + 'px';
+      // HiDPI: render at device resolution, capped like pdf.js' maxCanvasPixels
+      const MAX_CANVAS_PIXELS = 16777216;
+      let ratio = globalThis.devicePixelRatio || 1;
+      ratio = Math.min(ratio, Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)));
+      ratio = Math.max(1, ratio);
       const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      canvas.width = Math.floor(viewport.width * ratio);
+      canvas.height = Math.floor(viewport.height * ratio);
+      canvas.style.width = viewport.width + 'px';
+      canvas.style.height = viewport.height + 'px';
       wrapper.appendChild(canvas);
       container.appendChild(wrapper);
       pageWrappers.set(i, wrapper);
       const ctx = canvas.getContext('2d');
       try {
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        await page.render({ canvasContext: ctx, viewport, transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null }).promise;
       } catch (e) {
         if (token !== renderToken) return;
         rendering = false;
@@ -255,7 +267,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     const page = Math.min(pdfDoc.numPages, Math.max(1, n));
     const wrapper = pageWrappers.get(page);
     if (!wrapper) return;
-    container.scrollTo({ top: wrapper.offsetTop - container.offsetTop - 12, behavior: 'smooth' });
+    container.scrollTo({ top: wrapper.offsetTop - 12, behavior: 'smooth' });
     currentPage = page;
     updateLabels();
   }
@@ -275,7 +287,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     const top = container.scrollTop + 24;
     let page = 1;
     for (const [n, el] of pageWrappers) {
-      if (el.offsetTop - container.offsetTop <= top) page = n;
+      if (el.offsetTop <= top) page = n;
     }
     if (page !== currentPage) {
       currentPage = page;
@@ -283,6 +295,37 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     }
     lastStable = captureScroll();
   });
+
+  // Project switch: drop the old project's PDF (and stop any running load/render).
+  function clear() {
+    pendingPath = null;
+    loadGen++;
+    renderToken++;
+    rendering = false;
+    lastStable = null;
+    currentPath = null;
+    currentPage = 1;
+    if (pdfDoc) pdfDoc.destroy();
+    pdfDoc = null;
+    container.querySelectorAll('.pdf-page, .pdf-native-frame').forEach((c) => c.remove());
+    pageWrappers.clear();
+    if (emptyEl && !emptyEl.parentNode) container.appendChild(emptyEl);
+    updateLabels();
+  }
+
+  // Fit modes follow the column width (window/splitter resize, column shown again).
+  let lastW = 0;
+  let resizeTimer = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      const w = container.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      if (zoomMode === 'fixed' || !pdfDoc) return;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => renderAll(), 150);
+    }).observe(container);
+  }
 
   function reload() {
     if (currentPath) return load(currentPath);
@@ -314,6 +357,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
 
   return {
     load,
+    clear,
     setNative,
     zoom,
     setZoom,
