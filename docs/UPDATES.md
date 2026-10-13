@@ -64,6 +64,11 @@ git -C /pfad/zu/latex-web-ide checkout <alte Version>   # oder alten Quellstand 
 docker compose up -d --build
 ```
 
+Hinweis: Die Daten des Backups gehören zur alten Version. Nach einem Rollback läuft der
+Server mit dem alten Code und dem alten Datenstand; zwischenzeitlich angelegte Konten und
+Änderungen sind weg. Eine neuere Datenstruktur kann ein älterer Server nicht lesen, deshalb
+immer Code und Backup derselben Version zusammen zurückspielen.
+
 ## Öffentliches oder privates Repository
 
 **Öffentlich:** nichts weiter nötig. Server, Update-Skript und Desktop-Downloads
