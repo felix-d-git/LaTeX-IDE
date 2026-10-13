@@ -1,4 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
+// otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
+if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirname, '..', process.env.DATA_DIR);
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
@@ -12,8 +15,8 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
+const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
+const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, replaceInProject, collectRefs } = require('./lib/search');
@@ -55,15 +58,23 @@ function outRelFor(root, userId) {
 function activeMainPdfAbs(root, userId) {
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return null;
-  return path.join(root, outRelFor(root, userId), main.replace(/\.tex$/i, '.pdf'));
+  return path.join(root, outRelFor(root, userId), pdfNameFor(main));
 }
 
 const PORT = process.env.PORT || 3077;
-const PROJECTS_DIR = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
+const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
 
 const app = express();
+// Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
 app.set('trust proxy', 'loopback, uniquelocal');
+// Marks every answer as coming from the app itself: the desktop app treats 502-504 only without it
+// (= tunnel/proxy, server unreachable) as offline, not e.g. a LanguageTool failure.
+app.use((req, res, next) => {
+  res.setHeader('X-Latex-IDE', '1');
+  next();
+});
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
@@ -109,7 +120,7 @@ function maybeAutocompile(root, userId) {
   if (!main) return;
   const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && state.getActiveRoot(c.userId) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
-  for (const u of users) runCompile(root, main, u).catch(() => {});
+  for (const u of users) runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
 }
 
 // Multiple users can have different projects open at the same time, so
@@ -123,13 +134,22 @@ const watchersByRoot = new Map(); // root -> { watcher, refCount }
 // onlyUserId: restrict to one user's connections (per-user compile events).
 function broadcast(root, msg, onlyUserId) {
   if (!wss) return;
-  const data = JSON.stringify(msg);
+  // projectId: a window still showing another project (active project switched elsewhere) ignores it.
+  const data = JSON.stringify({ ...msg, projectId: projectIdOf(root) });
   wss.clients.forEach((client) => {
     if (onlyUserId && client.userId !== onlyUserId) return;
     if (client.readyState === 1 && client.userId && state.getActiveRoot(client.userId) === root) {
       client.send(data);
     }
   });
+}
+
+// A file/folder in the project was renamed/moved (newRel) or deleted (newRel = null) by the app:
+// open editors and the comments follow it. Not for watcher events (external edits, desktop
+// delete+put renames) - their comments stay and get re-attached by comments.listAll.
+function pathMoved(root, oldRel, newRel) {
+  collab.onPathMoved(root, oldRel, newRel);
+  if (comments.movePath(root, oldRel, newRel)) broadcast(root, { type: 'commentsChanged', path: newRel || oldRel });
 }
 
 function requireRoot(req, res) {
@@ -143,7 +163,22 @@ function requireRoot(req, res) {
     res.status(403).json({ error: 'Kein Zugriff mehr auf dieses Projekt.' });
     return null;
   }
+  if (projectMismatch(req, root)) {
+    projectSwitchedRes(res);
+    return null;
+  }
   return root;
+}
+
+// The active project is per user, not per window: a window that still shows another project
+// sends its X-Project-Id (or ?pid=) and gets 409 instead of acting on the wrong project.
+// ponytail: stage 1 only; one project per window (resolve the root from pid) is the follow-up.
+function projectMismatch(req, root) {
+  const pid = req.get('X-Project-Id') || req.query.pid;
+  return !!pid && pid !== projectIdOf(root);
+}
+function projectSwitchedRes(res) {
+  res.status(409).json({ error: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.', projectSwitched: true });
 }
 
 // Desktop offline copy syncs every project the user owns, not just the active
@@ -177,10 +212,44 @@ function canManageRoot(user, root) {
   return user.isAdmin || ownerIdOf(root) === user.id;
 }
 
+// In the owner's trash or archive: members keep their share (back after restore), but no access meanwhile.
+function isParked(root) {
+  return [projects.TRASH_DIRNAME, projects.ARCHIVE_DIRNAME].includes(path.basename(path.dirname(path.resolve(root))));
+}
+
 function canAccessRoot(user, root) {
   if (!user || !root) return false;
   if (canManageRoot(user, root)) return true;
-  return state.getShares(path.resolve(root)).includes(user.id);
+  return !isParked(root) && state.getShares(path.resolve(root)).includes(user.id);
+}
+
+function sharedRootsOf(userId) {
+  return state.sharedRootsFor(userId).filter((r) => !isParked(r));
+}
+
+// Label key of an own project: folder name, '.trash/<name>', '.archive/<name>'.
+const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split(path.sep).join('/');
+
+// Owner moved a project folder: per-root state, the label and its watcher go along. Users who had
+// it open follow a rename; into trash/archive it's dropped as their active project.
+function projectMoved(req, projectsDir, oldRoot, newRoot) {
+  state.moveRoot(oldRoot, newRoot, isParked(newRoot) ? null : newRoot);
+  state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
+  const w = watchersByRoot.get(path.resolve(oldRoot));
+  if (w) {
+    w.watcher.close();
+    watchersByRoot.delete(path.resolve(oldRoot));
+    if (!isParked(newRoot)) {
+      ensureWatcher(path.resolve(newRoot));
+      watchersByRoot.get(path.resolve(newRoot)).refCount = w.refCount;
+    }
+  }
+}
+
+// New project folder (create/copy/import) or permanently deleted one: no leftovers of an earlier project at that path.
+function projectFresh(req, projectsDir, root) {
+  state.dropRoot(root);
+  state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, root), null);
 }
 
 // 'owner' | 'editor' | 'reviewer' (read + comment only) | null
@@ -244,9 +313,10 @@ const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000);
 
-async function sendVerifyMail(req, user) {
+// Never throws (see mailer.sendMailSafe); result.error is set when delivery failed.
+function sendVerifyMail(req, user) {
   const token = auth.createVerifyToken(user.id);
-  await mailer.sendMail({
+  return mailer.sendMailSafe({
     to: user.email,
     subject: 'LatexIDE - E-Mail-Adresse bestätigen',
     text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${baseUrl(req)}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
@@ -254,19 +324,27 @@ async function sendVerifyMail(req, user) {
 }
 
 // Registration stays invite-gated: without a valid admin token nobody gets an account.
-app.post('/api/auth/register', limitRegister, async (req, res) => {
+app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   const { token, username, email, password } = req.body;
   const invite = auth.getValidInvite(token || '');
   if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
+  let user;
   try {
-    const user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: false });
+    user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: false });
     auth.consumeInvite(token, user.id);
-    await sendVerifyMail(req, user);
-    res.json({ ok: true, needsVerification: true, message: `Fast geschafft: Wir haben dir eine Bestätigungsmail an ${user.email} geschickt.` });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: e.message });
   }
-});
+  // Account and invite are already used up: a mail failure must not look like a failed registration.
+  const sent = await sendVerifyMail(req, user);
+  res.json({
+    ok: true,
+    needsVerification: true,
+    message: sent.error
+      ? 'Konto angelegt, aber die Bestätigungsmail konnte gerade nicht verschickt werden. Bitte später beim Anmelden „Bestätigungsmail erneut senden“ nutzen.'
+      : `Fast geschafft: Wir haben dir eine Bestätigungsmail an ${user.email} geschickt.`,
+  });
+}));
 
 app.post('/api/auth/verify', limitToken, (req, res) => {
   const user = auth.consumeVerifyToken(req.body.token || '');
@@ -274,13 +352,14 @@ app.post('/api/auth/verify', limitToken, (req, res) => {
   res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
 });
 
-app.post('/api/auth/resend-verification', limitMail, async (req, res) => {
+app.post('/api/auth/resend-verification', limitMail, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
-  if (user && !auth.isVerified(user)) await sendVerifyMail(req, user);
+  // Not awaited: same answer and timing whether or not the account exists, and a hanging SMTP server doesn't block.
+  if (user && !auth.isVerified(user)) sendVerifyMail(req, user);
   res.json({ ok: true, message: 'Falls ein unbestätigtes Konto existiert, wurde eine neue Bestätigungsmail verschickt.' });
-});
+}));
 
-app.post('/api/auth/login', limitLogin, async (req, res) => {
+app.post('/api/auth/login', limitLogin, ah(async (req, res) => {
   const { password, rememberMe } = req.body;
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   const ok = user && (await auth.verifyPassword(user, password));
@@ -295,7 +374,7 @@ app.post('/api/auth/login', limitLogin, async (req, res) => {
     authMw.applyRememberMe(req, !!rememberMe);
     res.json({ user: auth.toPublicUser(user) });
   });
-});
+}));
 
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => {
@@ -310,23 +389,24 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE } });
 });
 
-app.post('/api/auth/forgot-password', limitMail, async (req, res) => {
+app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Always answer the same way, whether or not the account exists -
   // otherwise the endpoint would leak which e-mails/usernames are registered.
   if (user) {
     const token = auth.createResetToken(user.id);
     const link = `${baseUrl(req)}/?reset=${token}`;
-    await mailer.sendMail({
+    // Not awaited (see resend-verification); sendMailSafe never rejects.
+    mailer.sendMailSafe({
       to: user.email,
       subject: 'LatexIDE - Passwort zurücksetzen',
       text: `Zum Zurücksetzen deines Passworts auf diesen Link klicken (gültig 1 Stunde):\n${link}\n\nFalls du das nicht angefordert hast, ignoriere diese Mail.`,
     });
   }
   res.json({ ok: true, message: 'Falls das Konto existiert, wurde ein Link zum Zurücksetzen an die hinterlegte E-Mail-Adresse verschickt.' });
-});
+}));
 
-app.post('/api/auth/reset-password', limitToken, async (req, res) => {
+app.post('/api/auth/reset-password', limitToken, ah(async (req, res) => {
   const { token, password } = req.body;
   const user = auth.consumeResetToken(token || '');
   if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
@@ -338,7 +418,7 @@ app.post('/api/auth/reset-password', limitToken, async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // --- Admin: invite links (self-registration is invite-gated, no open signup) ---
 
@@ -414,7 +494,7 @@ function updateStatus() {
   try { return JSON.parse(fs.readFileSync(UPDATE_STATUS, 'utf8')); } catch { return null; }
 }
 
-app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, async (req, res) => {
+app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
   const base = { current: APP_VERSION, mode: UPDATE_MODE, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
   if (UPDATE_MODE === 'off') return res.json({ ...base, available: false });
   try {
@@ -423,7 +503,7 @@ app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, async (req
   } catch (e) {
     res.json({ ...base, available: false, error: e.message });
   }
-});
+}));
 
 app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   if (UPDATE_MODE !== 'button') return res.status(400).json({ error: 'Update per Button ist auf diesem Server nicht aktiviert (UPDATE_MODE).' });
@@ -435,10 +515,10 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 // Projects a user can reach (own + shared) as { id, name, shared }; id = stable project id used in MCP tokens.
 function mcpProjects(user) {
   const own = projects.listProjects(userProjectsDir(user)).filter((p) => !(user.isAdmin && p.name === 'users')).map((p) => p.root);
-  const shared = state.sharedRootsFor(user.id).filter((r) => fs.existsSync(r));
+  const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp',createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast }));
+app.post('/mcp',ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -448,7 +528,9 @@ app.use('/api', authMw.requireAuth);
 const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
-  if (roleOf(req.user, state.getActiveRoot(req.user.id)) === 'reviewer') {
+  const active = state.getActiveRoot(req.user.id);
+  if (active && projectMismatch(req, active)) return projectSwitchedRes(res);
+  if (roleOf(req.user, active) === 'reviewer') {
     return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
   }
   next();
@@ -462,26 +544,26 @@ const desktopAssets = createDesktopAssets({
   version: APP_VERSION,
 });
 
-app.get('/api/desktop/release', async (req, res) => {
+app.get('/api/desktop/release', ah(async (req, res) => {
   try {
     res.json({ version: APP_VERSION, ...(await desktopAssets.available()) });
   } catch (e) {
     res.json({ version: APP_VERSION, windows: false, macos: false, error: e.message });
   }
-});
+}));
 
-app.get('/api/desktop/download/:os', async (req, res) => {
+app.get('/api/desktop/download/:os', ah(async (req, res) => {
   try {
     await desktopAssets.send(req.params.os, baseUrl(req).replace(/\/+$/, ''), res);
   } catch (e) {
     if (res.headersSent) return res.destroy(e);
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 // --- Account (logged in) ---
 
-app.post('/api/auth/change-password', limitLogin, async (req, res) => {
+app.post('/api/auth/change-password', limitLogin, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!(await auth.verifyPassword(req.user, currentPassword))) {
     return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
@@ -494,36 +576,73 @@ app.post('/api/auth/change-password', limitLogin, async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // Account incl. all projects in projects/users/<id> (also trash/archive), its watchers and sockets.
+// The folder is moved aside first: if that fails (files in use), nothing is deleted
+// and the account stays intact instead of ending up half-removed.
 function removeAccount(userId) {
   const ownDir = path.resolve(path.join(PROJECTS_DIR, 'users', userId));
-  for (const [root, entry] of watchersByRoot) {
-    if (isInside(ownDir, root)) {
-      entry.watcher.close();
-      watchersByRoot.delete(root);
+  const closeWatchers = () => {
+    for (const [root, entry] of watchersByRoot) {
+      if (isInside(ownDir, root)) {
+        entry.watcher.close();
+        watchersByRoot.delete(root);
+      }
+    }
+  };
+  collab.closeRoot(ownDir);
+  const tmp = path.join(PROJECTS_DIR, 'users', `.deleted-${userId}-${Date.now()}`);
+  const moveAside = () => {
+    try {
+      fs.renameSync(ownDir, tmp);
+      return true;
+    } catch (e) {
+      if (e.code === 'ENOENT') return false; // no projects yet
+      throw e;
+    }
+  };
+  let moved;
+  try {
+    moved = moveAside();
+  } catch (e) {
+    // Windows: open watcher handles block renaming the folder -> close them and retry once.
+    closeWatchers();
+    try {
+      moved = moveAside();
+    } catch (e2) {
+      const err = new Error('Konto konnte nicht gelöscht werden, Dateien sind noch in Benutzung. Bitte später erneut versuchen.');
+      err.status = 500;
+      err.cause = e2;
+      throw err;
     }
   }
+  closeWatchers();
   if (wss) wss.clients.forEach((c) => c.userId === userId && c.close());
-  fs.rmSync(ownDir, { recursive: true, force: true });
   state.purgeUser(userId, ownDir);
   auth.deleteUser(userId);
+  if (moved) {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
+    } catch (e) {
+      console.error(`[account] Rest von ${userId} nicht löschbar (${tmp}):`, e.message);
+    }
+  }
 }
 
 // Delete own account incl. all projects in projects/users/<id> (also trash/archive).
 // The admin owns the top-level projects/ folder and can't delete itself.
-app.post('/api/auth/delete-account', limitLogin, async (req, res) => {
+app.post('/api/auth/delete-account', limitLogin, ah(async (req, res) => {
   if (req.user.isAdmin) return res.status(400).json({ error: 'Das Admin-Konto kann nicht gelöscht werden.' });
   if (!(await auth.verifyPassword(req.user, req.body.password))) {
     return res.status(400).json({ error: 'Passwort ist falsch.' });
   }
-  removeAccount(req.user.id);
+  removeAccount(req.user.id); // throws (-> error middleware) before deleting anything if files are in use
   req.session.destroy(() => {
     res.clearCookie('latex_ide_sid');
     res.json({ ok: true });
   });
-});
+}));
 
 // Desktop app login: the browser (session) mints a token that the local
 // desktop server stores and sends as Bearer. A token can't mint further tokens.
@@ -665,7 +784,7 @@ app.delete('/api/share/link/:role', (req, res) => {
 
 app.post('/api/share/join', limitToken, (req, res) => {
   const link = typeof req.body.token === 'string' && state.findShareLink(req.body.token);
-  if (!link || !fs.existsSync(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  if (!link || !fs.existsSync(link.root) || isParked(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
   if (!auth.isVerified(req.user)) return res.status(403).json({ error: 'Bitte zuerst die E-Mail-Adresse bestätigen.' });
   if (!canManageRoot(req.user, link.root)) {
     const ids = state.getShares(link.root);
@@ -702,9 +821,9 @@ app.get('/api/collab/epoch', (req, res) => {
   try {
     if (!isTextFile(req.query.path || '')) return res.status(400).json({ error: 'Keine Textdatei.' });
     safeResolve(root, req.query.path);
-    res.json({ projectId: projectIdOf(root), epoch: collab.getEpoch(root, req.query.path) });
+    res.json({ projectId: projectIdOf(root), epoch: collab.getEpoch(root, req.query.path), maxPayload: collab.WS_MAX_PAYLOAD });
   } catch (e) {
-    res.status(404).json({ error: e.message });
+    res.status(e.notUtf8 ? 415 : 404).json({ error: e.message, notUtf8: !!e.notUtf8 });
   }
 });
 
@@ -753,11 +872,11 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
     const abs = safeResolve(root, rel);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(buf).digest('hex'));
+    if (isTextFile(rel)) state.markSelfWrite(abs, buf);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
-    if (isTextFile(rel)) collab.applyExternalText(root, rel, buf.toString('utf8'));
-    history.snapshot(root, { trigger: 'autosave' });
+    if (isTextFile(rel)) collab.applyExternalText(root, rel, decodeText(buf));
+    safeSnapshot(root, { trigger: 'autosave' });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -769,7 +888,7 @@ app.delete('/api/collab/raw', (req, res) => {
   if (!root) return;
   try {
     if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
-    treeOps.deletePath(root, req.query.path);
+    treeOps.trashPath(root, req.query.path);
     collab.onPathMoved(root, req.query.path, null);
     res.json({ ok: true });
   } catch (e) {
@@ -790,7 +909,7 @@ app.get('/api/import/projects', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const own = projects.listProjects(userProjectsDir(req.user)).filter((p) => !(req.user.isAdmin && p.name === 'users')).map((p) => p.root);
-  const roots = [...own, ...state.sharedRootsFor(req.user.id)]
+  const roots = [...own, ...sharedRootsOf(req.user.id)]
     .map((r) => path.resolve(r))
     .filter((r) => r !== path.resolve(root) && importSourceRoot(req, projectIdOf(r)));
   res.json({ projects: roots.map((r) => ({ id: projectIdOf(r), name: path.basename(r) })) });
@@ -820,7 +939,7 @@ app.post('/api/import/project-file', (req, res) => {
   }
 });
 
-app.post('/api/import/url', limitToken, async (req, res) => {
+app.post('/api/import/url', limitToken, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
@@ -831,7 +950,7 @@ app.post('/api/import/url', limitToken, async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // Literatur: DOI → BibTeX (doi.org Content-Negotiation) und Zotero-Bibliothek als .bib.
 // replace: Zotero-Refresh überschreibt die Datei (wie Overleaf), DOI hängt an.
@@ -843,8 +962,10 @@ function appendOrUpload(root, dir, name, text, replace = false) {
     // Bestehende .bib ergänzen, auch wenn sie gerade live bearbeitet wird.
     collab.flushRoot(root);
     const relPath = path.relative(root, abs).split(path.sep).join('/');
-    const content = replace ? text : fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
-    state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
+    const old = replace ? '' : decodeText(fs.readFileSync(abs));
+    if (old === null) throw new Error(NOT_UTF8_MSG);
+    const content = replace ? text : old.replace(/\s*$/, '\n\n') + text;
+    state.markSelfWrite(abs, content);
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
     return relPath;
@@ -852,7 +973,7 @@ function appendOrUpload(root, dir, name, text, replace = false) {
   return treeOps.uploadFile(root, dir, name, Buffer.from(text).toString('base64'));
 }
 
-app.post('/api/import/doi', limitToken, async (req, res) => {
+app.post('/api/import/doi', limitToken, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const doi = String(req.body.doi || '').trim().replace(/^(https?:\/\/(dx\.)?doi\.org\/|doi:)/i, '');
@@ -865,7 +986,7 @@ app.post('/api/import/doi', limitToken, async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 app.get('/api/zotero', (req, res) => {
   const z = req.user.zotero;
@@ -885,7 +1006,7 @@ app.post('/api/zotero', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/import/zotero', limitToken, async (req, res) => {
+app.post('/api/import/zotero', limitToken, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const z = req.user.zotero;
@@ -912,12 +1033,12 @@ app.post('/api/import/zotero', limitToken, async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: 'Zotero: ' + e.message });
   }
-});
+}));
 
 // Grammatik über einen selbst betriebenen LanguageTool-Server (LANGUAGETOOL_URL).
 app.get('/api/languagetool', (req, res) => res.json({ enabled: !!process.env.LANGUAGETOOL_URL }));
 
-app.post('/api/languagetool', async (req, res) => {
+app.post('/api/languagetool', ah(async (req, res) => {
   const ltUrl = process.env.LANGUAGETOOL_URL;
   if (!ltUrl) return res.status(501).json({ error: 'LanguageTool ist auf diesem Server nicht eingerichtet.' });
   const data = String(req.body.data || '');
@@ -935,7 +1056,7 @@ app.post('/api/languagetool', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 // --- Projects ---
 
@@ -945,8 +1066,7 @@ app.get('/api/projects/list', (req, res) => {
     activeRoot: state.getActiveRoot(req.user.id),
     recentRoots: state.getRecentRoots(req.user.id),
     localProjects: projects.listProjects(projectsDir).filter((p) => !(req.user.isAdmin && p.name === 'users')),
-    sharedProjects: state
-      .sharedRootsFor(req.user.id)
+    sharedProjects: sharedRootsOf(req.user.id)
       .filter((root) => fs.existsSync(root))
       .map((root) => {
         const owner = auth.findUserById(ownerIdOf(root));
@@ -971,7 +1091,7 @@ function resolveProjectRoot(projectsDir, name) {
 }
 
 app.post('/api/projects/open', (req, res) => {
-  const { root } = req.body;
+  const root = req.body.root ? path.resolve(String(req.body.root)) : '';
   if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     return res.status(400).json({ error: 'Ordner nicht gefunden.' });
   }
@@ -994,7 +1114,9 @@ app.post('/api/projects/open', (req, res) => {
 
 app.post('/api/projects/create', (req, res) => {
   try {
-    const root = projects.createProject(userProjectsDir(req.user), req.body.name || '');
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.createProject(projectsDir, req.body.name || '');
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1004,16 +1126,16 @@ app.post('/api/projects/create', (req, res) => {
 app.post('/api/projects/rename', (req, res) => {
   const { oldName, newName } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, oldName || '');
+  const root = path.resolve(path.join(projectsDir, oldName || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses umbenannt wird.' });
   }
   try {
+    // Save first, send editors away only once the (synchronous) move worked.
     collab.flushRoot(root);
-    // ponytail: members who have this project open keep the old path until they reopen it from the dashboard.
     const newRoot = projects.renameProject(projectsDir, oldName, newName);
-    state.moveRoot(path.resolve(root), path.resolve(newRoot));
-    state.moveLabelKey(req.user.id, oldName, path.basename(newRoot));
+    collab.closeRoot(root);
+    projectMoved(req, projectsDir, root, path.resolve(newRoot));
     res.json({ root: newRoot });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1022,7 +1144,9 @@ app.post('/api/projects/rename', (req, res) => {
 
 app.post('/api/projects/copy', (req, res) => {
   try {
-    const root = projects.copyProject(userProjectsDir(req.user), req.body.name, req.body.newName);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1032,12 +1156,15 @@ app.post('/api/projects/copy', (req, res) => {
 app.post('/api/projects/archive', (req, res) => {
   const { name } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, name || '');
+  const root = path.resolve(path.join(projectsDir, name || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses archiviert wird.' });
   }
   try {
-    projects.archiveProject(projectsDir, name);
+    collab.flushRoot(root);
+    const dest = projects.archiveProject(projectsDir, name);
+    collab.closeRoot(root);
+    projectMoved(req, projectsDir, root, path.resolve(dest));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1046,7 +1173,9 @@ app.post('/api/projects/archive', (req, res) => {
 
 app.post('/api/projects/unarchive', (req, res) => {
   try {
-    const root = projects.unarchiveProject(userProjectsDir(req.user), req.body.name);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.unarchiveProject(projectsDir, req.body.name);
+    projectMoved(req, projectsDir, path.resolve(projectsDir, projects.ARCHIVE_DIRNAME, req.body.name), path.resolve(root));
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1057,7 +1186,9 @@ app.post('/api/projects/unarchive', (req, res) => {
 app.post('/api/projects/upload-zip', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Keine Zip-Datei empfangen.' });
   try {
-    const root = projects.importZip(userProjectsDir(req.user), String(req.query.name || ''), req.body);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body);
+    projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1075,7 +1206,7 @@ app.get('/api/projects/download/zip', (req, res) => {
     return res.status(400).json({ error: 'Ungültige Auswahl.' });
   }
   const dir = userProjectsDir(req.user);
-  const shared = state.sharedRootsFor(req.user.id).map((r) => path.resolve(r));
+  const shared = sharedRootsOf(req.user.id).map((r) => path.resolve(r));
   const list = [];
   try {
     for (const it of items) {
@@ -1183,7 +1314,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return res.status(404).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
-  const pdfAbs = path.join(root, outRelFor(root, req.user.id), main.replace(/\.tex$/i, '.pdf'));
+  const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.pdf"`);
@@ -1191,14 +1322,27 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
 });
 
 app.post('/api/projects/trash', (req, res) => {
-  const { name } = req.body;
+  const { name, from } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, name || '');
+  // An archived project can't be open; it may share its name with an active one.
+  if (from === 'archive') {
+    try {
+      const dest = projects.trashArchivedProject(projectsDir, name);
+      projectMoved(req, projectsDir, path.resolve(projectsDir, projects.ARCHIVE_DIRNAME, name), path.resolve(dest));
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  }
+  const root = path.resolve(path.join(projectsDir, name || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });
   }
   try {
-    projects.trashProject(projectsDir, name);
+    collab.flushRoot(root);
+    const dest = projects.trashProject(projectsDir, name);
+    collab.closeRoot(root);
+    projectMoved(req, projectsDir, root, path.resolve(dest));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1207,7 +1351,9 @@ app.post('/api/projects/trash', (req, res) => {
 
 app.post('/api/projects/restore', (req, res) => {
   try {
-    const root = projects.restoreProject(userProjectsDir(req.user), req.body.name);
+    const projectsDir = userProjectsDir(req.user);
+    const root = projects.restoreProject(projectsDir, req.body.name);
+    projectMoved(req, projectsDir, path.resolve(projectsDir, projects.TRASH_DIRNAME, req.body.name), path.resolve(root));
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1216,8 +1362,9 @@ app.post('/api/projects/restore', (req, res) => {
 
 app.delete('/api/projects/trash/:name', (req, res) => {
   try {
-    projects.deleteProjectPermanently(userProjectsDir(req.user), req.params.name);
-    state.moveLabelKey(req.user.id, req.params.name, null);
+    const projectsDir = userProjectsDir(req.user);
+    projects.deleteProjectPermanently(projectsDir, req.params.name);
+    projectFresh(req, projectsDir, path.resolve(projectsDir, projects.TRASH_DIRNAME, req.params.name));
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1239,7 +1386,11 @@ app.get('/api/file', (req, res) => {
     const abs = safeResolve(root, req.query.path);
     collab.flushRoot(root);
     if (isTextFile(req.query.path)) {
-      res.json({ path: req.query.path, content: fs.readFileSync(abs, 'utf8'), binary: false });
+      const buf = fs.readFileSync(abs);
+      const text = decodeText(buf);
+      if (text !== null) return res.json({ path: req.query.path, content: text, binary: false });
+      // Read-only view of a Latin-1 file; editing needs "Nach UTF-8 umwandeln".
+      res.json({ path: req.query.path, content: new TextDecoder('windows-1252').decode(buf), binary: false, notUtf8: true });
     } else {
       const buf = fs.readFileSync(abs);
       res.json({ path: req.query.path, content: buf.toString('base64'), binary: true });
@@ -1255,12 +1406,11 @@ app.put('/api/file', (req, res) => {
   try {
     const { path: relPath, content } = req.body;
     const abs = safeResolve(root, relPath);
-    const hash = crypto.createHash('sha1').update(content).digest('hex');
-    state.selfWrittenHashes.set(relPath, hash);
+    state.markSelfWrite(abs, content);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
-    history.snapshot(root, { trigger: 'autosave' });
+    safeSnapshot(root, { trigger: 'autosave' });
     maybeAutocompile(root, req.user.id);
     res.json({ ok: true });
   } catch (e) {
@@ -1296,7 +1446,7 @@ app.post('/api/tree/rename', (req, res) => {
   try {
     collab.flushRoot(root);
     const relPath = treeOps.renamePath(root, req.body.path, req.body.newName);
-    collab.onPathMoved(root, req.body.path, relPath);
+    pathMoved(root, req.body.path, relPath);
     res.json({ ok: true, path: relPath });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1313,8 +1463,11 @@ app.post('/api/tree/move', (req, res) => {
   try {
     collab.flushRoot(root);
     const relPath = treeOps.movePath(root, req.body.path, req.body.targetDir, !!req.body.overwrite);
-    if (req.body.overwrite) collab.onPathMoved(root, relPath, null);
-    collab.onPathMoved(root, req.body.path, relPath);
+    if (relPath !== req.body.path) {
+      // Overwritten target: its editors/comments go first, then the moved entry's take its place.
+      if (req.body.overwrite) pathMoved(root, relPath, null);
+      pathMoved(root, req.body.path, relPath);
+    }
     res.json({ ok: true, path: relPath });
   } catch (e) {
     if (e.conflict) return res.status(409).json({ conflict: true, error: e.message });
@@ -1327,7 +1480,7 @@ app.delete('/api/tree', (req, res) => {
   if (!root) return;
   try {
     treeOps.deletePath(root, req.query.path);
-    collab.onPathMoved(root, req.query.path, null);
+    pathMoved(root, req.query.path, null);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1343,7 +1496,7 @@ app.post('/api/tree/upload', (req, res) => {
     const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
     // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
     if (req.body.overwrite && isTextFile(relPath)) {
-      collab.applyExternalText(root, relPath, Buffer.from(req.body.content, 'base64').toString('utf8'));
+      collab.applyExternalText(root, relPath, decodeText(Buffer.from(req.body.content, 'base64')));
     }
     res.json({ ok: true, path: relPath });
   } catch (e) {
@@ -1354,7 +1507,14 @@ app.post('/api/tree/upload', (req, res) => {
 app.post('/api/main-file', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
+  const prev = state.getMainFile(root);
   state.setMainFile(root, req.body.path);
+  // main.tex and thesis/main.tex both write main.pdf: drop the other file's
+  // output so download/SyncTeX don't serve it until the next compile. Queued
+  // behind running compiles so it doesn't pull the directory from under latexmk.
+  if (prev && req.body.path && prev !== req.body.path && pdfNameFor(prev) === pdfNameFor(req.body.path)) {
+    compileChain = compileChain.then(() => fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true })).catch(() => {});
+  }
   res.json({ ok: true });
 });
 
@@ -1366,32 +1526,54 @@ app.post('/api/main-file', (req, res) => {
 let compileChain = Promise.resolve();
 const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
 
-function runCompile(root, main, userId, meta) {
+// opts.auto: autocompile run - its version snapshot is throttled like autosave.
+function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const outRel = outRelFor(root, userId);
   const key = path.join(root, outRel);
   // Group mode: everyone on the project sees the run; individual: only the compiling user.
   const to = outRel === OUT_DIR ? undefined : userId;
   if (queuedCompile.has(key)) return queuedCompile.get(key);
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
-  const run = compileChain.then(() => {
-    queuedCompile.delete(key);
-    return doCompile(root, main, outRel, to, meta);
-  });
+  const run = compileChain
+    .then(() => {
+      queuedCompile.delete(key);
+      return doCompile(root, main, outRel, to, meta, auto);
+    })
+    .catch((e) => {
+      // Otherwise every client's status would stay on 'running'.
+      console.error('[compile]', root, e);
+      broadcast(root, { type: 'compileStatus', status: 'error', log: String((e && e.message) || e) }, to);
+      throw e;
+    });
   queuedCompile.set(key, run);
   compileChain = run.catch(() => {});
   return run;
 }
 
-async function doCompile(root, main, outRel, to, meta) {
+// A failing version snapshot (unreadable file, full disk) must not fail the save/compile it belongs to.
+function safeSnapshot(root, opts) {
+  try {
+    return history.snapshot(root, opts);
+  } catch (e) {
+    console.error('[history] Snapshot fehlgeschlagen:', root, e.message);
+    return null;
+  }
+}
+
+async function doCompile(root, main, outRel, to, meta, auto) {
   collab.flushRoot(root);
   const t0 = Date.now();
   const result = await compile(root, main, state.getProjectSettings(root), outRel);
   result.durationMs = Date.now() - t0;
-  state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
+  try {
+    state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
+  } catch (e) {
+    console.error('[compile] Laufzeit nicht gespeichert:', e.message);
+  }
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
   broadcast(root, { type: 'compileStatus', status, log: result.log }, to);
   if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath }, to);
-  history.snapshot(root, { trigger: 'compile' });
+  safeSnapshot(root, { trigger: auto ? 'autocompile' : 'compile' });
   if (result.pdfPath) {
     try {
       wordCountByOut.set(path.join(root, outRel), wordcount.countWords(root, main));
@@ -1402,14 +1584,17 @@ async function doCompile(root, main, outRel, to, meta) {
   return result;
 }
 
-app.post('/api/compile', async (req, res) => {
+app.post('/api/compile', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return res.status(400).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
-  const result = await runCompile(root, main, req.user.id);
-  res.json(result);
-});
+  try {
+    res.json(await runCompile(root, main, req.user.id));
+  } catch (e) {
+    res.status(500).json({ error: 'Kompilierung fehlgeschlagen: ' + e.message });
+  }
+}));
 
 // "Clear cached files" im Log: Ausgabeordner (aux, PDF, synctex …) löschen.
 // Group mode clears the shared folder incl. the per-user ones (just caches).
@@ -1481,7 +1666,7 @@ app.get('/api/raw', (req, res) => {
 // Download the whole project as a .zip (File -> Download -> Source in the
 // Overleaf-style menu bar), skipping the same generated/hidden dirs the file
 // tree already hides (fsTree.isIgnored).
-app.get('/api/export', async (req, res) => {
+app.get('/api/export', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const main = state.getMainFile(root);
@@ -1496,7 +1681,7 @@ app.get('/api/export', async (req, res) => {
   } catch (e) {
     res.status(e.code === 'ENOENT' ? 501 : 400).json({ error: e.message.slice(0, 500) });
   }
-});
+}));
 
 app.get('/api/download/zip', (req, res) => {
   const root = requireRoot(req, res);
@@ -1517,7 +1702,7 @@ app.get('/api/download/zip', (req, res) => {
 
 // --- SyncTeX (code <-> PDF position) ---
 
-app.get('/api/synctex/forward', async (req, res) => {
+app.get('/api/synctex/forward', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { file, line } = req.query;
@@ -1533,9 +1718,9 @@ app.get('/api/synctex/forward', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
-app.get('/api/synctex/inverse', async (req, res) => {
+app.get('/api/synctex/inverse', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { page, x, y } = req.query;
@@ -1554,7 +1739,7 @@ app.get('/api/synctex/inverse', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // --- Comments ---
 
@@ -1696,14 +1881,14 @@ app.post('/api/history/restore', (req, res) => {
   try {
     if (!id || !file || !isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('id und Textdatei sind erforderlich.');
     const abs = safeResolve(root, file);
-    const content = history.readSnapshotFile(root, id, file);
-    if (content === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
+    const buf = history.readSnapshotBuffer(root, id, file);
+    if (buf === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
     collab.flushRoot(root);
     history.snapshot(root, { trigger: 'restore' }); // aktuellen Stand sichern
-    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
-    fs.writeFileSync(abs, content, 'utf8');
-    collab.applyExternalText(root, file, content); // live fuer alle offenen Editoren
-    const entry = history.snapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
+    state.markSelfWrite(abs, buf);
+    fs.writeFileSync(abs, buf);
+    collab.applyExternalText(root, file, decodeText(buf)); // live fuer alle offenen Editoren
+    const entry = safeSnapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
     res.json({ ok: true, entry });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1734,6 +1919,29 @@ app.get('/api/search', (req, res) => {
   }
 });
 
+// Latin-1 -> UTF-8, only on request; the snapshot before it keeps the original bytes.
+app.post('/api/file/convert-utf8', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (!canWriteRoot(req.user, root)) return res.status(403).json({ error: 'Kein Schreibrecht.' });
+  const file = String((req.body && req.body.path) || '');
+  try {
+    if (!isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('Keine Textdatei.');
+    const abs = safeResolve(root, file);
+    const buf = fs.readFileSync(abs);
+    if (decodeText(buf) !== null) return res.json({ ok: true, converted: false });
+    collab.flushRoot(root);
+    history.snapshot(root, { label: `Vor UTF-8-Umwandlung: ${file}`, trigger: 'restore' });
+    const content = toUtf8Text(buf);
+    state.markSelfWrite(abs, content);
+    fs.writeFileSync(abs, content, 'utf8');
+    collab.applyExternalText(root, file, content);
+    res.json({ ok: true, converted: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post('/api/replace', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
@@ -1743,7 +1951,7 @@ app.post('/api/replace', (req, res) => {
     const result = replaceInProject(root, query, replacement, { regex, caseSensitive, wholeWord });
     for (const f of result.changedFiles) {
       const content = fs.readFileSync(path.join(root, f.file), 'utf8');
-      state.selfWrittenHashes.set(f.file, crypto.createHash('sha1').update(content).digest('hex'));
+      state.markSelfWrite(path.join(root, f.file), content);
       collab.applyExternalText(root, f.file, content);
       broadcast(root, { type: 'fileChanged', path: f.file, content, changedRanges: [], source: 'replace' });
     }
@@ -1753,14 +1961,21 @@ app.post('/api/replace', (req, res) => {
   }
 });
 
+// Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
+app.use((err, req, res, next) => {
+  if (!err.status || err.status >= 500) console.error('[route]', req.method, req.path, err.cause || err);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.status ? err.message : 'Interner Fehler: ' + (err.message || err) });
+});
+
 const server = http.createServer(app);
-wss = new WebSocketServer({ noServer: true });
-const yjsWss = new WebSocketServer({ noServer: true, maxPayload: 20 * 1024 * 1024 });
+wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
+const yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 
 collab.setHooks({
-  markSelfWrite: (root, rel, text) => state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(text).digest('hex')),
+  markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
   onPersist: (root) => {
-    history.snapshot(root, { trigger: 'autosave' });
+    safeSnapshot(root, { trigger: 'autosave' });
     maybeAutocompile(root, null);
   },
 });
@@ -1771,7 +1986,14 @@ function rejectUpgrade(socket, code, text) {
 }
 
 // /ws = app events (tree/pdf/compile), /yjs/<projectId>/<file> = live text sync.
-server.on('upgrade', async (req, socket, head) => {
+server.on('upgrade', (req, socket, head) =>
+  handleUpgrade(req, socket, head).catch((e) => {
+    console.error('[upgrade]', e);
+    socket.destroy();
+  }),
+);
+
+async function handleUpgrade(req, socket, head) {
   let url;
   try {
     url = new URL(req.url, 'http://localhost');
@@ -1789,7 +2011,10 @@ server.on('upgrade', async (req, socket, head) => {
     if (host !== req.headers.host) return rejectUpgrade(socket, 403, 'Forbidden');
   }
   if (url.pathname === '/ws') {
-    return wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    return wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.on('error', (e) => console.warn('[ws] WebSocket-Fehler', e.code || e.message)); // see collab.handleConnection
+      wss.emit('connection', ws, req);
+    });
   }
   if (!url.pathname.startsWith('/yjs/')) return rejectUpgrade(socket, 404, 'Not Found');
   const parts = url.pathname.slice(5).split('/');
@@ -1809,10 +2034,13 @@ server.on('upgrade', async (req, socket, head) => {
   if (!canAccessRoot(user, root) || !isTextFile(rel) || !fs.existsSync(root)) return rejectUpgrade(socket, 403, 'Forbidden');
   const readOnly = roleOf(user, root) === 'reviewer';
   yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly));
-});
+}
 
 wss.on('connection', async (ws, req) => {
-  const userId = await authMw.getUserIdFromUpgradeRequest(req);
+  const userId = await authMw.getUserIdFromUpgradeRequest(req).catch((e) => {
+    console.error('[ws]', e);
+    return null;
+  });
   if (!userId) {
     ws.close();
     return;
@@ -1864,6 +2092,16 @@ function shutdown() {
   process.exit(0);
 }
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, shutdown);
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
+process.on('uncaughtException', (e) => {
+  console.error('[uncaughtException]', e);
+  // State is unknown now: save open live edits, then exit (Docker/systemd restarts).
+  try {
+    collab.flushAll();
+    vault.flush();
+  } catch {}
+  process.exit(1);
+});
 
 function openBrowser(url) {
   const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]];

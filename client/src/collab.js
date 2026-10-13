@@ -12,13 +12,20 @@ import { ySyncFacet } from 'y-codemirror.next';
 import { api } from './api.js';
 import { offlineBanner } from './offlineBanner.js';
 
+// Undo covers the review map too: the tracked-change entry that trackChanges
+// records right after a local edit belongs to the same undo step as the edit.
+export function createUndoManager(ydoc) {
+  return new Y.UndoManager([ydoc.getText('content'), ydoc.getMap('review')]);
+}
+
 const COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#e377c2', '#8c564b'];
 
 let projectId = null;
 let me = { name: 'Ich', color: COLORS[0] };
 const sessions = new Map(); // path -> session
 const opening = new Map(); // path -> Promise<session>
-let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {} };
+let maxPayload = 64 * 1024 * 1024; // server's WebSocket limit, updated from /api/collab/epoch
+let hooks = { onStatus: () => {}, onConflicts: () => {}, onReset: () => {}, onGone: () => {}, onProjectGone: () => {} };
 
 const store = {
   get(k, fallback) {
@@ -106,6 +113,7 @@ async function createSession(path) {
     // Server answers for the *active* project - a project switch in between would mix caches.
     if (r.projectId !== pid) throw Object.assign(new Error('Projekt wurde gewechselt.'), { status: 409 });
     epoch = r.epoch;
+    if (r.maxPayload) maxPayload = r.maxPayload;
     store.set(epochKey, epoch);
   } catch (e) {
     // real server answer (404, 403) - not an offline situation; the desktop app answers 503 {offline}
@@ -122,9 +130,11 @@ async function createSession(path) {
 
   const provider = new WebsocketProvider(wsBase(), `${encodeURIComponent(pid)}/${encodeURIComponent(path)}`, ydoc, {
     params: { epoch },
+    // 1009 = message too large: retrying would resend the same update forever.
+    shouldReconnect: (ev) => ev.code !== 1009 && !(ev.code >= 4400 && ev.code < 4500),
   });
   provider.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' });
-  const undoManager = new Y.UndoManager(ytext);
+  const undoManager = createUndoManager(ydoc);
 
   const pendingKey = `lide-offline:${dbName}`;
   const conflictKey = `lide-conflicts:${dbName}`;
@@ -173,9 +183,10 @@ async function createSession(path) {
 
   provider.on('connection-close', (ev) => {
     const code = ev && ev.code;
-    if (code === 4409) {
-      // Server re-created this doc (state lost) - our cache belongs to the old
+    if (code === 4409 || code === 4403) {
+      // 4409: Server re-created this doc (state lost) - our cache belongs to the old
       // identity and would duplicate the text if merged.
+      // 4403: Reviewer change rejected - the cache holds text the server never took.
       // ponytail: unsynced offline edits in that old cache are dropped here.
       closeSession(path);
       indexedDB.deleteDatabase(dbName);
@@ -185,6 +196,26 @@ async function createSession(path) {
     } else if (code === 4404) {
       closeSession(path);
       hooks.onGone(path);
+    } else if (code === 4410) {
+      // Owner renamed/archived/trashed the project: this path is dead, edits were saved before.
+      closeSession(path);
+      hooks.onProjectGone();
+    } else if (code === 4415) {
+      // File was replaced by a non-UTF-8 one: reopening shows it read-only.
+      closeSession(path);
+      hooks.onReset(path);
+    } else if (code === 1009) {
+      alert(
+        `Diese Änderung ist zu groß für die Live-Synchronisierung (max. ${Math.round(maxPayload / 1048576)} MB) und wurde NICHT auf dem Server gespeichert. ` +
+          'Bitte rückgängig machen (Strg+Z) oder die Datei über Hochladen ersetzen.',
+      );
+      // Stays disconnected (banner shows "offline") until the document fits again, e.g. after Strg+Z.
+      const retry = () => {
+        if (Y.encodeStateAsUpdate(ydoc).length >= maxPayload) return;
+        ydoc.off('update', retry);
+        provider.connect();
+      };
+      ydoc.on('update', retry);
     }
   });
 

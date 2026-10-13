@@ -104,6 +104,8 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
 }
 
 async function verifyPassword(user, password) {
+  // Malformed bodies (password: 123, {}) would make bcrypt throw.
+  if (typeof (password || '') !== 'string' || typeof user.passwordHash !== 'string') return false;
   return bcrypt.compare(password || '', user.passwordHash);
 }
 

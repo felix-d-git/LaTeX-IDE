@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const httpProxy = require('http-proxy');
-const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
+const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
@@ -107,13 +107,15 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {})
     throw new Offline(e.message);
   }
   // Funnel down / Pi off: Tailscale answers with 502/503/504 instead of a refused connection.
-  if ([502, 503, 504].includes(res.status)) {
+  // A 5xx from the app itself (X-Latex-IDE header, e.g. LanguageTool down) goes to the client as is.
+  if (tunnelDown(res)) {
     setOnline(false);
     throw new Offline(`HTTP ${res.status}`);
   }
   if (res.status === 401) setToken(null); // revoked or expired - log in again
   return res;
 }
+const tunnelDown = (res) => [502, 503, 504].includes(res.status) && !res.headers.get('x-latex-ide');
 let online = true;
 const wsSockets = new Set(); // proxied browser sockets - dropped when we go offline so the client notices at once
 
@@ -127,7 +129,7 @@ function setOnline(v) {
   else for (const s of wsSockets) s.destroy();
 }
 
-// Active health check: any HTTP answer except the tunnel's 502-504 = server reachable.
+// Active health check: any HTTP answer except the tunnel's 502-504 (no app header) = server reachable.
 // Every 2 s with a 2 s limit -> offline shows within ~4 s, recovery within ~2 s.
 let pinging = false;
 async function pingRemote() {
@@ -135,7 +137,7 @@ async function pingRemote() {
   pinging = true;
   try {
     const r = await fetch(REMOTE + '/', { method: 'HEAD', signal: AbortSignal.timeout(2000), redirect: 'manual' });
-    setOnline(![502, 503, 504].includes(r.status));
+    setOnline(!tunnelDown(r));
   } catch {
     setOnline(false);
   } finally {
@@ -154,6 +156,8 @@ async function remoteJson(pathAndQuery) {
 // --- app ---
 
 const app = express();
+// Express 4 does not catch rejected promises from async handlers (crash in Node >= 15).
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // DNS rebinding / other local sites: only our own origin may talk to us.
 app.use((req, res, next) => {
@@ -191,13 +195,13 @@ app.get('/desktop-callback', (req, res) => {
 });
 
 app.get('/api/desktop/info', (req, res) => {
-  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION });
+  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION, warnings: [...syncWarnings.values()] });
 });
 
 // --- local copy folder (settings) ---
 // Moves all owned project folders to a new location: copy, verify count + size, only then
 // delete the old ones. Sync is paused meanwhile.
-app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
+app.post('/api/desktop/local-dir', express.json(), ah(async (req, res) => {
   const dir = String((req.body && req.body.dir) || '').trim();
   if (process.env.LATEX_IDE_LOCAL) return res.status(409).json({ error: 'Ordner ist per Umgebungsvariable LATEX_IDE_LOCAL festgelegt.' });
   if (!dir || !path.isAbsolute(dir)) return res.status(400).json({ error: 'Bitte einen absoluten Pfad angeben.' });
@@ -214,22 +218,28 @@ app.post('/api/desktop/local-dir', express.json(), async (req, res) => {
     await syncing; // let a running sync finish, then wait for queued per-project syncs
     await syncLock;
     const names = owned.map((p) => path.basename(localDirOf(p)));
-    const moved = moveDir(LOCAL_DIR, target, names);
     const old = LOCAL_DIR;
-    LOCAL_DIR = target;
-    config = { ...config, localDir: target };
-    writeJson(CONFIG_PATH, config);
-    if (current && current.owned && current.dir.startsWith(old + path.sep)) {
-      current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
-      writeJson(path.join(MIRROR_DIR, 'current.json'), current);
-    }
-    res.json({ ok: true, localDir: target, moved });
+    // Switch to the verified copy before the originals are deleted (see moveDir).
+    const { moved, failed } = moveDir(old, target, names, () => {
+      writeJson(CONFIG_PATH, { ...config, localDir: target });
+      config = { ...config, localDir: target };
+      LOCAL_DIR = target;
+      if (current && current.owned && current.dir.startsWith(old + path.sep)) {
+        current = { ...current, dir: path.join(target, path.relative(old, current.dir)) };
+        try {
+          writeJson(path.join(MIRROR_DIR, 'current.json'), current); // cache only, the next compile rewrites it
+        } catch {}
+      }
+    });
+    const warning = failed.length ? `Der alte Ordner konnte nicht vollständig entfernt werden (${failed.join(', ')}), bitte ${old} von Hand aufräumen.` : undefined;
+    if (warning) console.warn(warning);
+    res.json({ ok: true, localDir: target, moved, warning });
   } catch (e) {
     res.status(500).json({ error: e.message });
   } finally {
     moving = false;
   }
-});
+}));
 
 // --- auto-update from the server ---
 // The server offers the desktop build of its own version (fetched from GitHub,
@@ -246,7 +256,7 @@ function newer(a, b) {
 const UPDATE_OS = { win32: 'windows', darwin: 'macos' }[process.platform];
 
 let latest = null; // version offered by the server
-app.get('/api/desktop/update', async (req, res) => {
+app.get('/api/desktop/update', ah(async (req, res) => {
   try {
     if (!config.token) throw new Error('nicht angemeldet');
     const rel = await remoteJson('/api/desktop/release');
@@ -255,13 +265,13 @@ app.get('/api/desktop/update', async (req, res) => {
   } catch (e) {
     res.json({ available: false, current: APP_VERSION, error: e.message }); // offline / no release yet: stay quiet
   }
-});
+}));
 
 // Windows: downloads the setup to Temp, starts it silently (keeps the chosen dirs, restarts the app)
 // and exits, so the installer can replace node.exe and the server files.
 // macOS: unpacks the ZIP over ~/Applications/LatexIDE/app (node/ and install.json stay) and
 // restarts via the LatexIDE.command starter that install.command created one level up.
-app.post('/api/desktop/update/install', async (req, res) => {
+app.post('/api/desktop/update/install', ah(async (req, res) => {
   if (!latest) return res.status(400).json({ error: 'Kein Update bekannt.' });
   try {
     const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
@@ -295,7 +305,7 @@ app.post('/api/desktop/update/install', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 // Only forgets the token locally - the server-side entry can be revoked in
 // the web UI (Profil → Verbundene Desktop-Apps).
@@ -305,7 +315,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // Lokaler LanguageTool (nur Loopback): der Proxy umgeht CORS/Mixed Content des Browsers.
-app.post('/api/languagetool-local', express.json({ limit: '2mb' }), async (req, res) => {
+app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (req, res) => {
   let u;
   try { u = new URL(String(req.body.url)); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
   if (!/^https?:$/.test(u.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) {
@@ -324,7 +334,7 @@ app.post('/api/languagetool-local', express.json({ limit: '2mb' }), async (req, 
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
-});
+}));
 
 app.use('/api', (req, res, next) => {
   if (!config.token) return res.status(401).json({ error: 'Desktop-App nicht angemeldet.', desktopLogin: true });
@@ -334,6 +344,10 @@ app.use('/api', (req, res, next) => {
 // --- local compile ---
 
 let current = readJson(path.join(MIRROR_DIR, 'current.json'), null); // { projectId, dir, mainFile, settings, owned }
+// Project the client last opened (from /api/projects/open and /api/tree). Offline answers
+// (local copy, mirror, cache) must belong to the project the window shows, not to `current`.
+let activeProjectId = current && current.projectId;
+const wantedProject = (req) => req.get('x-project-id') || req.query.pid || activeProjectId;
 const wordCounts = new Map();
 
 // --- offline copy of owned projects ---
@@ -341,7 +355,14 @@ const wordCounts = new Map();
 let owned = readJson(path.join(SYNC_DIR, 'owned.json'), []); // [{ name, projectId }]
 const syncKey = (id) => String(id).replace(/[^\w-]/g, '_');
 const ownedEntry = (projectId) => owned.find((p) => p.projectId === projectId);
-const localDirOf = (p) => path.join(LOCAL_DIR, p.name.replace(/[<>:"/\\|?*]/g, '_'));
+const folderName = (name) => name.replace(/[<>:"/\\|?*]/g, '_');
+// "Thesis" and "thesis" would share one folder on Windows/macOS: only then add the id, so
+// existing folders keep their path (a now-missing folder just means a fresh download).
+const localDirOf = (p) => {
+  const f = folderName(p.name).normalize('NFC').toLowerCase();
+  const twin = owned.some((o) => o.projectId !== p.projectId && folderName(o.name).normalize('NFC').toLowerCase() === f);
+  return path.join(LOCAL_DIR, twin ? `${folderName(p.name)} (${syncKey(p.projectId)})` : folderName(p.name));
+};
 
 // One sync at a time: the periodic run and a compile must not touch a folder together.
 let syncLock = Promise.resolve();
@@ -351,14 +372,15 @@ function syncOwned(p) {
   return run;
 }
 
+const syncWarnings = new Map(); // projectId -> text for the UI (/api/desktop/info), until a clean sync
+
 async function syncOwnedNow(p) {
   const q = `project=${encodeURIComponent(p.projectId)}`;
   const need = async (res, what) => {
     if (!res.ok) throw new Error(`${what} fehlgeschlagen (HTTP ${res.status})`);
     return res;
   };
-  const dir = localDirOf(p);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = localDirOf(p); // syncFolder creates it (missing folder = fresh download)
   const r = await syncFolder(dir, path.join(SYNC_DIR, syncKey(p.projectId) + '.json'), {
     manifest: () => remoteJson(`/api/collab/manifest?${q}`),
     download: async (rel) => Buffer.from(await (await need(await remote(`/api/raw?${q}&path=${encodeURIComponent(rel)}`), rel)).arrayBuffer()),
@@ -367,6 +389,11 @@ async function syncOwnedNow(p) {
     remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
   });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
+  const warn = [r.warning, r.skipped.length && `Dateien unterscheiden sich nur in Groß-/Kleinschreibung, nicht offline synchronisiert: ${r.skipped.join(', ')}`].filter(Boolean).join(' ');
+  if (warn) {
+    console.warn(`Sync ${p.name}: ${warn}`);
+    syncWarnings.set(p.projectId, `${p.name}: ${warn}`);
+  } else syncWarnings.delete(p.projectId);
   return { ...r, dir };
 }
 
@@ -418,13 +445,18 @@ setTimeout(syncAll, 2000);
 
 // Bring the mirror of the active project up to date: fetch changed files,
 // drop removed ones. Offline: keep using the last mirror.
-async function syncMirror() {
+async function syncMirror(want) {
   let man;
   try {
     man = await remoteJson('/api/collab/manifest');
   } catch (e) {
-    if (e instanceof Offline && current) return current;
-    throw e;
+    if (!(e instanceof Offline)) throw e;
+    const c = offlineProject(want);
+    if (c) {
+      if (c !== current) writeJson(path.join(MIRROR_DIR, 'current.json'), (current = c));
+      return c;
+    }
+    throw Object.assign(new Error('Offline: Dieses Projekt liegt nicht lokal vor - Kompilieren erst wieder mit Verbindung zum Server.'), { status: 503, offline: true });
   }
   // Own project: compile straight in the offline copy (after a two-way sync).
   if (!ownedEntry(man.projectId)) await refreshOwned(); // new project or first run after login
@@ -435,7 +467,7 @@ async function syncMirror() {
     writeJson(path.join(MIRROR_DIR, 'current.json'), current);
     return current;
   }
-  const dir = path.join(MIRROR_DIR, String(man.projectId).replace(/[^\w-]/g, '_'));
+  const dir = path.join(MIRROR_DIR, syncKey(man.projectId));
   fs.mkdirSync(dir, { recursive: true });
   const indexPath = path.join(dir, '.mirror.json');
   const index = readJson(indexPath, {}); // rel -> sha1 of what we wrote
@@ -459,9 +491,13 @@ async function syncMirror() {
       })
     );
   }
+  // A path that differs from a wanted one only in case is the same file on Windows/macOS:
+  // drop it from the index, but do not delete the file that was just downloaded.
+  const fold = (rel) => rel.normalize('NFC').toLowerCase();
+  const wantedFolded = new Set([...wanted].map(fold));
   for (const rel of Object.keys(index)) {
     if (wanted.has(rel)) continue;
-    fs.rmSync(inside(dir, rel), { force: true });
+    if (!wantedFolded.has(fold(rel))) fs.rmSync(inside(dir, rel), { force: true });
     delete index[rel];
   }
   writeJson(indexPath, index);
@@ -474,7 +510,7 @@ let compileChain = Promise.resolve();
 
 app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
   const run = compileChain.then(async () => {
-    const proj = await syncMirror();
+    const proj = await syncMirror(wantedProject(req));
     if (!proj.mainFile) return { status: 400, body: { error: 'Keine .tex-Hauptdatei gefunden.' } };
     // Open editor texts are newer than the server copy (or the server is unreachable).
     // They reach the server through Yjs, so the next sync takes the server's version.
@@ -498,12 +534,13 @@ app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
   compileChain = run.catch(() => {});
   run.then(
     ({ status, body }) => res.status(status).json(body),
-    (e) => res.status(e.status || 500).json({ error: e.message })
+    (e) => res.status(e.status || 500).json({ error: e.message, offline: e.offline })
   );
 });
 
-function requireCurrent(res) {
-  if (!current) {
+function requireCurrent(req, res) {
+  // PDF/SyncTeX of the last compiled project only for the window that shows it.
+  if (!current || current.projectId !== wantedProject(req)) {
     res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
     return null;
   }
@@ -511,14 +548,14 @@ function requireCurrent(res) {
 }
 
 app.post('/api/compile/clear-cache', (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   fs.rmSync(path.join(proj.dir, OUT_DIR), { recursive: true, force: true });
   res.json({ ok: true });
 });
 
 app.get('/api/pdf', (req, res) => {
-  const proj = requireCurrent(res);
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   try {
     const abs = inside(proj.dir, req.query.path);
@@ -538,12 +575,12 @@ app.get('/api/wordcount', (req, res) => {
 });
 
 function mainPdf(proj) {
-  const abs = path.join(proj.dir, OUT_DIR, proj.mainFile.replace(/\.tex$/i, '.pdf'));
+  const abs = path.join(proj.dir, OUT_DIR, pdfNameFor(proj.mainFile));
   return fs.existsSync(abs) ? abs : null;
 }
 
-app.get('/api/synctex/forward', async (req, res) => {
-  const proj = requireCurrent(res);
+app.get('/api/synctex/forward', ah(async (req, res) => {
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   const { file, line } = req.query;
   const pdf = mainPdf(proj);
@@ -554,10 +591,10 @@ app.get('/api/synctex/forward', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
-app.get('/api/synctex/inverse', async (req, res) => {
-  const proj = requireCurrent(res);
+app.get('/api/synctex/inverse', ah(async (req, res) => {
+  const proj = requireCurrent(req, res);
   if (!proj) return;
   const { page, x, y } = req.query;
   const pdf = mainPdf(proj);
@@ -570,7 +607,7 @@ app.get('/api/synctex/inverse', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
-});
+}));
 
 // --- offline: tree/files of the own project straight from the local copy ---
 
@@ -615,13 +652,23 @@ function serveOfflineProjects(req, res) {
   const mainFile = findMainCandidate(dir);
   current = { projectId: p.projectId, dir, mainFile, settings: {}, owned: true };
   writeJson(path.join(MIRROR_DIR, 'current.json'), current);
+  activeProjectId = p.projectId;
   offlineOpened = p.name;
   res.json({ activeRoot: dir, mainFile, startFile: pickStartFile(dir), projectId: p.projectId, role: 'owner' });
   return true;
 }
 
-function offlineCopy() {
-  return !online && current && current.owned && fs.existsSync(current.dir) ? current : null;
+// Offline: the local copy (own project) or the last mirror of project `want` - never another project's.
+function offlineProject(want) {
+  if (current && current.projectId === want && fs.existsSync(current.dir)) return current;
+  const own = ownedEntry(want);
+  const dir = own && localDirOf(own);
+  return dir && fs.existsSync(dir) ? { projectId: want, dir, mainFile: findMainCandidate(dir), settings: {}, owned: true } : null;
+}
+
+function offlineCopy(req) {
+  const c = !online && offlineProject(wantedProject(req));
+  return c && c.owned ? c : null;
 }
 
 const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
@@ -629,7 +676,7 @@ const LOCAL_GETS = new Set(['/api/tree', '/api/file', '/api/raw']);
 // Answers from the offline copy; false = not applicable (other route/project).
 function serveLocal(req, res) {
   if (serveOfflineProjects(req, res)) return true;
-  const c = offlineCopy();
+  const c = offlineCopy(req);
   if (!c || req.method !== 'GET' || !LOCAL_GETS.has(req.baseUrl + req.path)) return false;
   res.setHeader('X-Offline', '1');
   if (req.baseUrl + req.path === '/api/tree') {
@@ -653,15 +700,17 @@ function serveLocal(req, res) {
 
 // --- everything else: forward to the server, cache GETs for offline use ---
 
-// ponytail: cache key is the URL only - the server's "active project" is
-// per user, so offline you see the last project's tree/comments; fine as
-// long as offline work stays within one project.
-const cacheFile = (url) => path.join(CACHE_DIR, crypto.createHash('sha1').update(url).digest('hex') + '.json');
+// Project-bound answers (tree, comments, role, settings) are cached per project; the project
+// list and account/desktop data are the same for every project.
+const cacheFile = (url, projectId) => {
+  const key = projectId && !/^\/api\/(projects|auth|desktop)\//.test(url) ? `${projectId} ${url}` : url;
+  return path.join(CACHE_DIR, crypto.createHash('sha1').update(key).digest('hex') + '.json');
+};
 const checkedOwn = new Set();
-const FORWARD_REQ = ['content-type', 'accept'];
+const FORWARD_REQ = ['content-type', 'accept', 'x-project-id'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
 
-app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, res) => {
+app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req, res) => {
   if (serveLocal(req, res)) return; // known offline: don't wait for the remote timeout
   const url = req.originalUrl;
   const headers = {};
@@ -672,10 +721,12 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, r
     const buf = Buffer.from(await r.arrayBuffer());
     if (r.status === 401) return res.status(401).json({ error: 'Desktop-Anmeldung abgelaufen.', desktopLogin: true });
     for (const h of FORWARD_RES) if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
-    if (req.method === 'GET' && r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
-      writeJson(cacheFile(url), { contentType: r.headers.get('content-type'), body: buf.toString('utf8') });
+    if (req.method === 'POST' && r.ok && req.path === '/projects/open') {
+      try {
+        activeProjectId = JSON.parse(buf.toString('utf8')).projectId || activeProjectId;
+      } catch {}
     }
-    // Remember which own project is open, so offline the tree comes from its copy.
+    // Remember which project is open, so offline tree/files/compile come from its copy or mirror.
     if (req.method === 'GET' && r.ok && req.path === '/tree') {
       try {
         const { projectId, mainFile } = JSON.parse(buf.toString('utf8'));
@@ -685,23 +736,29 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), async (req, r
           await refreshOwned().catch(() => {});
         }
         const own = ownedEntry(projectId);
-        if (own && (!current || current.projectId !== projectId)) {
-          current = { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true };
+        if (projectId && (!current || current.projectId !== projectId)) {
+          current = own
+            ? { projectId, dir: localDirOf(own), mainFile, settings: {}, owned: true }
+            : { projectId, dir: path.join(MIRROR_DIR, syncKey(projectId)), mainFile, settings: {}, owned: false };
           writeJson(path.join(MIRROR_DIR, 'current.json'), current);
         }
+        if (projectId) activeProjectId = projectId;
       } catch {}
+    }
+    if (req.method === 'GET' && r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
+      writeJson(cacheFile(url, wantedProject(req)), { contentType: r.headers.get('content-type'), body: buf.toString('utf8') });
     }
     res.status(r.status).end(buf);
   } catch (e) {
     if (!(e instanceof Offline)) return res.status(500).json({ error: e.message });
     if (serveLocal(req, res)) return;
-    const cached = req.method === 'GET' && readJson(cacheFile(url), null);
+    const cached = req.method === 'GET' && readJson(cacheFile(url, wantedProject(req)), null);
     if (!cached) return res.status(503).json({ error: 'Server nicht erreichbar (offline).', offline: true });
     res.setHeader('Content-Type', cached.contentType);
     res.setHeader('X-Offline', '1');
     res.end(cached.body);
   }
-});
+}));
 
 // --- static client ---
 
@@ -714,6 +771,12 @@ app.get('/licenses', (req, res) => {
   res.type('text/plain; charset=utf-8').send(legal.licensesText());
 });
 app.get('/source', (req, res) => res.redirect(legal.SOURCE_LINK));
+
+app.use((err, req, res, next) => {
+  console.error('[route]', req.method, req.path, err);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.message || String(err) });
+});
 
 // --- websockets (/ws, /yjs) ---
 
@@ -736,6 +799,8 @@ server.on('upgrade', (req, socket, head) => {
   proxy.ws(req, socket, head, { headers: { authorization: `Bearer ${config.token}`, origin: new URL(REMOTE).origin } });
   socket.on('data', scheduleSync);
 });
+
+process.on('unhandledRejection', (e) => console.error('[desktop] unbehandelte Promise-Ablehnung:', e));
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`LaTeX IDE Desktop: http://localhost:${PORT}  (Server: ${REMOTE}, Daten: ${DATA})`);

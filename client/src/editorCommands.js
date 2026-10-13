@@ -1,8 +1,19 @@
 // Gemeinsame Text-Einfüge-Helfer für Menüleiste (R2) und die neue
 // Formatierungs-Toolbar über dem Editor (R5) — beide lösen dieselben
 // Aktionen aus, deshalb liegen sie hier statt doppelt in beiden Modulen.
+import { EditorState } from '@codemirror/state';
+import { ySyncAnnotation } from 'y-codemirror.next';
+
+// Rolle „Nur kommentieren“: EditorState.readOnly sperrt nur Tippen, nicht
+// view.dispatch (Toolbar, Menüs, Kontextmenü, Vorschlag annehmen) - der
+// Filter lässt nur Änderungen von anderen (ySync) ins Dokument.
+export const reviewerReadOnly = [
+  EditorState.readOnly.of(true),
+  EditorState.changeFilter.of((tr) => !!tr.annotation(ySyncAnnotation)),
+];
 
 export function insertAtCursor(view, text, { selectInner } = {}) {
+  if (view.state.readOnly) return;
   const sel = view.state.selection.main;
   view.dispatch({
     changes: { from: sel.from, to: sel.to, insert: text },
@@ -12,6 +23,7 @@ export function insertAtCursor(view, text, { selectInner } = {}) {
 }
 
 export function wrapSelection(view, before, after) {
+  if (view.state.readOnly) return;
   const sel = view.state.selection.main;
   const selected = view.state.sliceDoc(sel.from, sel.to);
   const insert = before + selected + after;
@@ -25,6 +37,7 @@ export function wrapSelection(view, before, after) {
 }
 
 export function insertAtLineStart(view, prefix) {
+  if (view.state.readOnly) return;
   const line = view.state.doc.lineAt(view.state.selection.main.head);
   view.dispatch({
     changes: { from: line.from, insert: prefix },

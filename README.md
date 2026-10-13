@@ -70,7 +70,12 @@ können dann gelöscht werden.
   File ▸ Download ▸ Markdown/HTML. Im selbst gebauten Docker-Image enthalten,
   nicht im fertigen Image von ghcr.io
   ([docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#fertiges-image-nur-bei-öffentlichem-repository));
-  ohne Pandoc meldet der Export einen Fehler.
+  ohne Pandoc meldet der Export einen Fehler. Benötigt Pandoc ≥ 2.15 (Ubuntu
+  20.04/Debian 11 liefern ältere Versionen, dann Pandoc von pandoc.org installieren).
+- `COMPILE_TIMEOUT_MS` — Zeitlimit pro Kompiliervorgang (Standard `600000`
+  = 10 min). Danach beendet der Server latexmk samt pdflatex/biber und meldet
+  „Zeitlimit überschritten“, etwa bei einer Endlosschleife im Dokument; die
+  Warteschlange für alle anderen Nutzer läuft weiter.
 - Literatur: Zotero (API-Key pro Nutzer, Einstellungen ▸ References), DOI über
   doi.org, `.bib` per Upload oder URL. Der Server braucht dafür Internetzugang.
   Der Zotero-API-Key wird auf dem Server gespeichert (`auth-data.json` im
@@ -85,6 +90,8 @@ liegen alle Nutzerdaten nur verschluesselt (AES-256-GCM, Dateinamen als HMAC) in
 beim Start dorthin und spiegelt Aenderungen entprellt zurueck. Falscher Schluessel = Start
 bricht ab. Bestehende Daten einmalig uebernehmen:
 `DATA_KEY=… VAULT_DIR=… node server/lib/vault.js encrypt <alter-Datenordner>` (Klartext bleibt, danach selbst loeschen).
+`VAULT_DIR` darf nicht in `DATA_DIR` liegen (und umgekehrt) und muss beschreibbar sein, sonst bricht der Start ab;
+ohne Docker `DATA_DIR` dafuer explizit setzen (Standard ist die Repo-Wurzel).
 Nicht gespiegelt: Build-Ausgaben, `desktop/`, `texlive`. Ohne Schluessel kein Zugriff: Schluessel separat sichern.
 
 ### Entwicklung (ohne Docker)

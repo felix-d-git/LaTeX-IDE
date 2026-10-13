@@ -70,7 +70,11 @@ export function listChanges(path) {
 // Accept: forget the change, text stays as it is.
 export function acceptChange(path, id) {
   const s = getSession(path);
-  if (s) s.ydoc.getMap('review').delete(id);
+  if (!s) return;
+  // Own undo step, not merged into the typing just before it.
+  s.undoManager.stopCapturing();
+  s.ydoc.getMap('review').delete(id);
+  s.undoManager.stopCapturing();
 }
 
 // Reject: remove the suggested insertion / restore the deleted text.
@@ -78,11 +82,13 @@ export function rejectChange(path, id) {
   const s = getSession(path);
   const item = s && listChanges(path).find((c) => c.id === id);
   if (!item) return;
+  s.undoManager.stopCapturing();
   s.ydoc.transact(() => {
     if (item.type === 'insert') s.ytext.delete(item.from, item.to - item.from);
     else s.ytext.insert(item.from, item.text);
     s.ydoc.getMap('review').delete(id);
   });
+  s.undoManager.stopCapturing();
 }
 
 export function trackChanges(path) {

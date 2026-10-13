@@ -18,14 +18,18 @@ function getTransporter() {
       port: Number(process.env.SMTP_PORT) || 587,
       secure: process.env.SMTP_SECURE === 'true',
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      // An unreachable SMTP server must not keep requests hanging for minutes.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     });
   }
   return transporter;
 }
 
-function logToOutbox(subject, to, text) {
+function logToOutbox(subject, to, text, reason = 'Kein SMTP konfiguriert') {
   const entry = `\n--- ${new Date().toISOString()} ---\nAn: ${to}\nBetreff: ${subject}\n${text}\n`;
-  console.log(`[mailer] Kein SMTP konfiguriert - Link/Nachricht wird nur geloggt:${entry}`);
+  console.log(`[mailer] ${reason} - Link/Nachricht wird nur geloggt:${entry}`);
   try {
     fs.appendFileSync(OUTBOX_PATH, entry, 'utf8');
   } catch (e) {
@@ -48,4 +52,16 @@ async function sendMail({ to, subject, text }) {
   return { delivered: true };
 }
 
-module.exports = { sendMail, smtpConfigured };
+// Never throws: a failed delivery is logged (and the text kept in the outbox,
+// so the admin can still hand out the link) instead of failing the request.
+async function sendMailSafe(opts) {
+  try {
+    return await sendMail(opts);
+  } catch (e) {
+    console.error('[mailer] Versand fehlgeschlagen:', e.message);
+    logToOutbox(opts.subject, opts.to, opts.text, 'Versand fehlgeschlagen');
+    return { delivered: false, error: e };
+  }
+}
+
+module.exports = { sendMail, sendMailSafe, smtpConfigured };

@@ -3,7 +3,8 @@
 # Veroeffentlicht wird es unter ghcr.io/<owner>/latex-web-ide nur, wenn das Repo oeffentlich
 # ist (privat braeuchte jeder Nutzer einen Registry-Login, und das Paketkontingent reicht nicht
 # fuer ~5 GB), und nur bei einem regulaeren Release oder einem manuellen Start auf master.
-# :latest bekommt nur ein regulaeres Release.
+# :latest und :<version> bekommt nur ein regulaeres Release; ein manueller Start pusht
+# :<version>-<commit> und haengt seine Dateien unter diesem Namen an, ueberschreibt also nichts vom Release.
 # pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL-2.0+) mit: deren Debian-Quellpakete
 # gehen als pandoc-sources-<tag>.tar ans Release, bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
 name: Container-Image
@@ -102,10 +103,14 @@ jobs:
       - name: pandoc-Quellen sammeln
         run: |
           TAG=${TAG:-v$(node -p "require('./package.json').version")}
+          # Manueller Start: eigener Name, sonst ueberschriebe er Image-Tag und Dateien des Releases.
+          ASSET=$TAG
+          [ "$GITHUB_EVENT_NAME" = release ] || ASSET="$TAG-${GITHUB_SHA::7}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$TAG.txt"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$ASSET.txt"
           # pandoc + statisch gelinkte Haskell-Bibliotheken laut offizieller buildinfo
-          python3 scripts/pandoc-sources.py "DEBIAN-PACKAGES-$TAG.txt" > pandoc-sources.txt
+          python3 scripts/pandoc-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > pandoc-sources.txt
           wc -l pandoc-sources.txt
           mkdir -p "$RUNNER_TEMP/src"
           cp pandoc-sources.txt "$RUNNER_TEMP/src/SOURCES.txt"
@@ -123,14 +128,14 @@ jobs:
             n=$(ls *.dsc | wc -l)
             [ "$n" -eq "$(wc -l < SOURCES.txt)" ] || { echo "$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete"; exit 1; }
           '
-          tar -cf "pandoc-sources-$TAG.tar" -C "$RUNNER_TEMP/src" .
-          ls -lh "pandoc-sources-$TAG.tar"
+          tar -cf "pandoc-sources-$ASSET.tar" -C "$RUNNER_TEMP/src" .
+          ls -lh "pandoc-sources-$ASSET.tar"
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$TAG.txt" "pandoc-sources-$TAG.tar" --clobber
+        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$ASSET.txt" "pandoc-sources-$ASSET.tar" --clobber
 
       - name: Nach ghcr.io pushen
         if: env.PUBLISH == 'true'
@@ -138,10 +143,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           IMG=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          VER=$(node -p "require('./package.json').version")
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker tag latex-web-ide:test "$IMG:$VER"
-          docker push "$IMG:$VER"
+          # Release: :<version>, manueller Start: :<version>-<commit> (ASSET aus "pandoc-Quellen sammeln")
+          docker tag latex-web-ide:test "$IMG:${ASSET#v}"
+          docker push "$IMG:${ASSET#v}"
           if [ "$GITHUB_EVENT_NAME" = release ]; then
             docker tag latex-web-ide:test "$IMG:latest"
             docker push "$IMG:latest"

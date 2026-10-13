@@ -47,8 +47,39 @@ function texCommand(mainRelPath, settings, outDir) {
   ];
 }
 
+// An endless loop in a document (\def\foo{\foo}\foo) would otherwise block the
+// global compile queue for every user until the server restarts.
+const COMPILE_TIMEOUT_MS = Number(process.env.COMPILE_TIMEOUT_MS) || 10 * 60 * 1000;
+const MAX_LOG = 4e6; // TeX output loops must not grow the log without bound
+const isWin = process.platform === 'win32';
+const running = new Set(); // TeX process trees to kill when the server exits
+
+// latexmk -> pdflatex -> biber …: kill the whole tree, not just latexmk.
+function killTree(proc) {
+  try {
+    if (isWin) spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
+    else process.kill(-proc.pid, 'SIGKILL');
+  } catch {}
+}
+
+// detached (own process group) means Ctrl+C no longer reaches TeX by itself.
+process.on('exit', () => running.forEach(killTree));
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    running.forEach(killTree);
+    // Keep the default "terminate" unless someone else handles the signal.
+    if (process.listenerCount(sig) === 0) process.exit(128 + (sig === 'SIGINT' ? 2 : 15));
+  });
+}
+
+// TeX writes <output-directory>/<jobname>.pdf, jobname = basename of the main
+// file (latexmk runs without -cd from the project root).
+function pdfNameFor(mainRelPath) {
+  return path.basename(mainRelPath).replace(/\.tex$/i, '.pdf');
+}
+
 // outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
-function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR) {
+function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs = COMPILE_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const outDir = path.join(root, outRel);
     fs.mkdirSync(outDir, { recursive: true });
@@ -58,14 +89,50 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR) {
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
     const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir };
-    const proc = spawn(cmd, args, { cwd: root, env });
+    // \input/\includegraphics relative to a main file in a subfolder (cwd stays the
+    // root, see pdfNameFor). "./" keeps log paths in the "(./x.tex" form parseLog
+    // reads; the trailing separator appends TeX's default search path.
+    const mainDir = path.dirname(mainRelPath).split(path.sep).join('/');
+    if (mainDir !== '.') env.TEXINPUTS = `./${mainDir}${path.delimiter}${process.env.TEXINPUTS || ''}`;
+    const proc = spawn(cmd, args, { cwd: root, env, detached: !isWin, windowsHide: true });
+    running.add(proc);
 
     let log = '';
-    proc.stdout.on('data', (d) => (log += d.toString()));
-    proc.stderr.on('data', (d) => (log += d.toString()));
+    const onData = (d) => {
+      log += d.toString();
+      // Keep start and end - that's where the error lines are.
+      if (log.length > MAX_LOG) log = log.slice(0, 1e6) + '\n[… gekürzt …]\n' + log.slice(-2e6);
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      running.delete(proc);
+      resolve(r);
+    };
+    // Resolve right away instead of waiting for 'close': a grandchild holding the
+    // pipe open would delay it forever. No pdfPath - the PDF may be half-written,
+    // the viewer keeps the previous one.
+    const timer = setTimeout(() => {
+      killTree(proc);
+      const msg = `Abgebrochen: Zeitlimit von ${Math.round(timeoutMs / 1000)} s überschritten (Endlosschleife im Dokument?)`;
+      finish({
+        success: false,
+        hasErrors: true,
+        log: log + '\n' + msg,
+        errors: [{ file: '', line: null, message: msg, hint: '', raw: '' }],
+        warnings: [],
+        infos: [],
+        pdfPath: null,
+      });
+    }, timeoutMs);
 
     proc.on('error', (err) => {
-      resolve({
+      finish({
         success: false,
         log: `Konnte "${cmd}" nicht starten: ${err.message}\nIst ${cmd === 'tectonic' ? 'Tectonic' : 'TeX Live/MiKTeX'} im PATH installiert?`,
         errors: [],
@@ -74,11 +141,12 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR) {
     });
 
     proc.on('close', (code) => {
-      const pdfName = mainRelPath.replace(/\.tex$/i, '.pdf');
+      if (settled) return;
+      const pdfName = pdfNameFor(mainRelPath);
       const pdfAbs = path.join(outDir, pdfName);
       const pdfExists = fs.existsSync(pdfAbs);
       const { errors, warnings, infos } = parseLog(log, root);
-      resolve({
+      finish({
         warnings,
         infos,
         // clean run: exit code 0, pdf produced, no error lines parsed out of the log
@@ -164,4 +232,4 @@ function parseLog(log, root) {
   return { errors, warnings, infos };
 }
 
-module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND };
+module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS };

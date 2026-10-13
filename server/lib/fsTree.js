@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { isUtf8 } = require('buffer');
 
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.latex-ide-out', '.trash', '.latex-ide-history', '.latex-ide-yjs']);
 const IGNORED_EXT = new Set([
@@ -73,4 +74,25 @@ function safeResolve(root, relPath) {
   return abs;
 }
 
-module.exports = { buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve };
+// Bytes -> text only if they are valid UTF-8 (leading BOM dropped); null otherwise,
+// so a Latin-1 file is never silently decoded to U+FFFD and written back.
+function decodeText(buf) {
+  if (!isUtf8(buf)) return null;
+  return buf.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+function readUtf8OrNull(abs) {
+  return decodeText(fs.readFileSync(abs));
+}
+
+// "Nach UTF-8 umwandeln": windows-1252 is a superset of Latin-1's printable range;
+// the inputenc option has to follow, or pdflatex reads the UTF-8 bytes as Latin-1.
+function toUtf8Text(buf) {
+  return new TextDecoder('windows-1252')
+    .decode(buf)
+    .replace(/(\\usepackage\s*\[\s*)(?:latin1|latin9|ansinew|cp1252)(\s*\]\s*\{inputenc\})/g, '$1utf8$2');
+}
+
+const NOT_UTF8_MSG = 'Datei ist nicht UTF-8-kodiert (vermutlich Latin-1/Windows-1252). Zum Bearbeiten bitte nach UTF-8 umwandeln.';
+
+module.exports = { buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };

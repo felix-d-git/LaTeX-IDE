@@ -18,11 +18,14 @@ const syncProtocol = require('y-protocols/sync');
 const awarenessProtocol = require('y-protocols/awareness');
 const encoding = require('lib0/encoding');
 const decoding = require('lib0/decoding');
-const { safeResolve } = require('./fsTree');
+const { diffLines, diffChars } = require('diff');
+const { safeResolve, decodeText, NOT_UTF8_MSG } = require('./fsTree');
 
 const STATE_DIR = '.latex-ide-yjs';
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
+// Largest WebSocket message (/ws and /yjs); a bigger one closes only that connection with 1009.
+const WS_MAX_PAYLOAD = 64 * 1024 * 1024;
 const PERSIST_DELAY_MS = 500;
 
 const docs = new Map(); // key -> entry
@@ -35,30 +38,60 @@ function setHooks(h) {
   hooks = { ...hooks, ...h };
 }
 
-// Replace only the differing middle part, so concurrent edits elsewhere and
-// remote cursors survive an external change (search/replace, file edited on disk).
+// CodeMirror counts CRLF as one character, Y.Text as two - every offset after a CR
+// would be off by one. So text crossing disk -> Yjs is always LF (saved back as LF).
+const normEol = (s) => s.replace(/\r\n?/g, '\n');
+
+// Minimal edits (changed lines, then changed characters within them), so comment and
+// track-change anchors, remote cursors and concurrent edits on untouched text survive
+// an external change (search/replace, restore, upload, file edited on disk).
 function applyText(ytext, next, origin) {
   const cur = ytext.toString();
   if (cur === next) return false;
-  let start = 0;
-  while (start < cur.length && start < next.length && cur[start] === next[start]) start++;
-  let endCur = cur.length;
-  let endNext = next.length;
-  while (endCur > start && endNext > start && cur[endCur - 1] === next[endNext - 1]) {
-    endCur--;
-    endNext--;
+  const hunks = []; // [index in cur, chars to delete, text to insert], ascending
+  let pos = 0;
+  const parts = diffLines(cur, next);
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i].added && !parts[i].removed) {
+      pos += parts[i].value.length;
+      continue;
+    }
+    let del = '';
+    let ins = '';
+    for (; i < parts.length && (parts[i].added || parts[i].removed); i++) {
+      if (parts[i].removed) del += parts[i].value;
+      else ins += parts[i].value;
+    }
+    i--;
+    // ponytail: char diff capped (Myers is O(n*d)); a rewritten block is replaced as a whole.
+    const chars = del && ins ? diffChars(del, ins, { maxEditLength: 1000 }) : null;
+    if (chars) {
+      let q = pos;
+      for (const c of chars) {
+        if (c.added) hunks.push([q, 0, c.value]);
+        else if (c.removed) hunks.push([q, c.value.length, '']);
+        if (!c.added) q += c.value.length;
+      }
+    } else hunks.push([pos, del.length, ins]);
+    pos += del.length;
   }
   ytext.doc.transact(() => {
-    if (endCur > start) ytext.delete(start, endCur - start);
-    if (endNext > start) ytext.insert(start, next.slice(start, endNext));
+    for (let h = hunks.length - 1; h >= 0; h--) {
+      const [at, len, text] = hunks[h];
+      if (len) ytext.delete(at, len);
+      if (text) ytext.insert(at, text);
+    }
   }, origin);
   return true;
 }
 
 function loadDoc(root, rel) {
   const abs = safeResolve(root, rel);
-  const disk = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
-  if (disk === null) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  if (!fs.existsSync(abs)) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  const raw = decodeText(fs.readFileSync(abs));
+  // Seeding a Latin-1 file would turn every umlaut into U+FFFD on the first save.
+  if (raw === null) throw Object.assign(new Error(NOT_UTF8_MSG), { notUtf8: true });
+  const disk = normEol(raw);
   const ydoc = new Y.Doc({ gc: true });
   const sp = statePath(root, rel);
   let fromState = false;
@@ -77,8 +110,28 @@ function loadDoc(root, rel) {
     ydoc.destroy();
     return createFresh(root, rel, disk);
   }
+  // State saved before CRLF was normalized: drop each CR on its own (not applyText,
+  // which may rewrite whole lines) so comment/track-change anchors stay put.
+  const old = ytext.toString();
+  let changed = false;
+  if (old.includes('\r')) {
+    ydoc.transact(() => {
+      for (let i = old.length - 1; i >= 0; i--) if (old[i] === '\r') ytext.delete(i, 1);
+    }, 'disk');
+    changed = true;
+  }
   // Disk changed while the doc was unloaded (e.g. edited outside the IDE) -> fold it in.
-  applyText(ytext, disk, 'disk');
+  if (applyText(ytext, disk, 'disk')) changed = true;
+  // ... and save that at once: otherwise every load re-creates the same change with a
+  // new identity, and a client holding an earlier one gets the text twice. Only the
+  // state - the disk already matches, and no history snapshot/autocompile for opening.
+  if (changed) {
+    try {
+      writeState(root, rel, ydoc);
+    } catch (e) {
+      console.error(`[collab] Yjs-Zustand konnte nicht gespeichert werden: ${rel}`, e.message);
+    }
+  }
   return { ydoc, ytext, meta };
 }
 
@@ -147,12 +200,18 @@ function persist(entry) {
   clearTimeout(entry.timer);
   entry.timer = null;
   if (!entry.dirty) return;
+  // Project folder gone (renamed/trashed/deleted under a live doc): never recreate it.
+  if (!fs.existsSync(entry.root)) return dropDoc(entry, 4410, 'project moved');
   entry.dirty = false;
   const text = entry.ytext.toString();
   try {
     const abs = safeResolve(entry.root, entry.rel);
-    // Changes that came *from* disk don't need writing back.
-    if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || fs.readFileSync(abs, 'utf8') !== text) {
+    // Changes that came *from* disk don't need writing back (a CRLF file stays as it is).
+    const onDisk = () => {
+      const t = decodeText(fs.readFileSync(abs));
+      return t === null ? null : normEol(t);
+    };
+    if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || onDisk() !== text) {
       hooks.markSelfWrite(entry.root, entry.rel, text);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, text, 'utf8');
@@ -220,16 +279,22 @@ function readSyncReadOnly(dec, enc, ydoc, ws) {
     return;
   }
   const update = decoding.readVarUint8Array(dec);
-  if (reviewerMayApply(ydoc, update)) Y.applyUpdate(ydoc, update, ws);
-  else console.warn('[collab] Änderung eines Kommentierenden verworfen.');
+  if (reviewerMayApply(ydoc, update)) return Y.applyUpdate(ydoc, update, ws);
+  // Not silently: the client would keep the phantom text, and its later updates
+  // (comment anchors) would hang here as pending structs. 4403 = drop the cache.
+  console.warn('[collab] Änderung eines Kommentierenden abgewiesen.');
+  ws.close(4403, 'read only');
 }
 
 function handleConnection(ws, root, rel, epoch, readOnly = false) {
+  // First, before any early close: without a listener a socket error (e.g. message > maxPayload)
+  // is an uncaught exception that ends the whole server. Cleanup happens in 'close'.
+  ws.on('error', (e) => console.warn('[collab] WebSocket-Fehler', rel, e.code || e.message));
   let entry;
   try {
     entry = getDoc(root, rel);
   } catch (e) {
-    return ws.close(4404, 'not found');
+    return e.notUtf8 ? ws.close(4415, 'not utf-8') : ws.close(4404, 'not found');
   }
   // Client cache belongs to an older identity of this doc -> it must drop it
   // instead of merging (which would duplicate the whole text).
@@ -274,14 +339,46 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
 // Text changed on disk by someone other than collab (search/replace, external
 // editor, upload over an existing file): fold into the live doc if one exists,
 // otherwise the next load reconciles from disk anyway.
+// text === null: the new content is not UTF-8 (decodeText) -> the live doc can't hold it.
 function applyExternalText(root, rel, text) {
   const entry = docs.get(keyOf(root, rel));
   if (!entry) return;
-  applyText(entry.ytext, text, 'disk');
+  if (text === null) return dropDoc(entry, 4415, 'not utf-8');
+  applyText(entry.ytext, normEol(text), 'disk');
+}
+
+// Unload a live doc WITHOUT saving: the file on disk was replaced by something the doc
+// can't represent, and a pending save would overwrite it. Clients get `code`; the
+// .ystate stays, so a later UTF-8 version folds in with minimal edits (anchors kept).
+function dropDoc(entry, code, reason) {
+  clearTimeout(entry.timer);
+  entry.timer = null;
+  entry.dirty = false;
+  docs.delete(entry.key);
+  for (const ws of [...entry.conns.keys()]) {
+    try {
+      ws.close(code, reason);
+    } catch {}
+    closeConn(entry, ws);
+  }
+  entry.awareness.destroy();
+  entry.ydoc.destroy();
 }
 
 // File or folder renamed/moved/deleted: kick connected clients off the old
 // name and move/remove the persisted state along with it.
+// Project folder about to move/vanish (rename, archive, trash, account deletion): save pending
+// edits, then send everyone on it or below `dir` away with 4410 (client goes to the dashboard).
+function closeRoot(dir) {
+  dir = path.resolve(dir);
+  for (const entry of [...docs.values()]) {
+    const r = path.resolve(entry.root);
+    if (r !== dir && !r.startsWith(dir + path.sep)) continue;
+    if (entry.timer) persist(entry);
+    if (docs.get(entry.key) === entry) dropDoc(entry, 4410, 'project moved');
+  }
+}
+
 function onPathMoved(root, oldRel, newRel) {
   const prefix = oldRel + '/';
   for (const entry of [...docs.values()]) {
@@ -322,7 +419,7 @@ function readText(root, rel) {
 // fn(oldText) -> newText; returns newText. A throwing fn leaves the doc untouched.
 function editText(root, rel, fn) {
   const entry = getDoc(root, rel);
-  const next = fn(entry.ytext.toString());
+  const next = normEol(fn(entry.ytext.toString()));
   applyText(entry.ytext, next, 'mcp');
   maybeUnload(entry); // stays loaded while dirty; persist() unloads it
   return next;
@@ -334,11 +431,13 @@ function flushAll() {
 
 module.exports = {
   STATE_DIR,
+  WS_MAX_PAYLOAD,
   setHooks,
   getEpoch,
   handleConnection,
   applyExternalText,
   onPathMoved,
+  closeRoot,
   flushRoot,
   flushAll,
   applyText,

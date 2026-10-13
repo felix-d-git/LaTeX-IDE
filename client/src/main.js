@@ -1,4 +1,4 @@
-import { api, authApi, adminApi, shareApi } from './api.js';
+import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
 import { renderTree, resetTreeSelection } from './fileTree.js';
@@ -260,10 +260,8 @@ function tabIconFor(path) {
 function renderTabbar() {
   els.tabbar.innerHTML = '';
   for (const path of openOrder) {
-    const kind = fileKind(path);
-    const paneKind = kind === 'text' ? 'text' : 'preview';
-    const activePathForKind = paneKind === 'text' ? editorMgr.getActivePath() : previewMgr.getActivePath();
-    const isActive = activePaneKind === paneKind && activePathForKind === path;
+    const paneKind = editorMgr.isOpen(path) ? 'text' : 'preview';
+    const isActive = getActiveOpenPath() === path;
 
     const tab = document.createElement('div');
     tab.className = 'tab' + (isActive ? ' active' : '');
@@ -289,8 +287,7 @@ function renderTabbar() {
     close.innerHTML = '<svg class="ol-icon"><use href="#i-close"></use></svg>';
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (paneKind === 'text') editorMgr.closeTab(path);
-      else previewMgr.closeTab(path);
+      closeAnyTab(path);
       openOrder = openOrder.filter((p) => p !== path);
       renderTabbar();
     });
@@ -305,11 +302,15 @@ function renderTabbar() {
 function closeActiveTab() {
   const path = getActiveOpenPath();
   if (!path) return;
-  const paneKind = fileKind(path) === 'text' ? 'text' : 'preview';
-  if (paneKind === 'text') editorMgr.closeTab(path);
-  else previewMgr.closeTab(path);
+  closeAnyTab(path);
   openOrder = openOrder.filter((p) => p !== path);
   renderTabbar();
+}
+
+// Text files that are not UTF-8 sit in the preview pane, so close in both.
+function closeAnyTab(path) {
+  editorMgr.closeTab(path);
+  previewMgr.closeTab(path);
 }
 
 function cycleTab(delta) {
@@ -334,6 +335,7 @@ async function openFile(path, line) {
     try {
       await openSession(path);
     } catch (e) {
+      if (e.status === 415) return openLegacyFile(path, e.data && e.data.error);
       alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
       openOrder = openOrder.filter((p) => p !== path);
       renderTabbar();
@@ -360,12 +362,40 @@ async function openFile(path, line) {
   }
 }
 
+// Latin-1 etc.: read-only view; converting snapshots first (history) and then opens the editor.
+async function openLegacyFile(path, message) {
+  let file;
+  try {
+    file = await api.getFile(path);
+  } catch (e) {
+    alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
+    openOrder = openOrder.filter((p) => p !== path);
+    renderTabbar();
+    return;
+  }
+  editorMgr.closeTab(path);
+  previewMgr.openFile(path, 'legacy', {
+    message: message || 'Datei ist nicht UTF-8-kodiert.',
+    content: file.content,
+    onConvert: async () => {
+      try {
+        await api.convertUtf8(path);
+      } catch (e) {
+        alert(`Umwandeln fehlgeschlagen: ${e.message}`);
+        return;
+      }
+      previewMgr.closeTab(path);
+      openFile(path);
+    },
+  });
+  showPane('preview');
+  renderTabbar();
+  refreshTreeHighlight();
+}
+
 function closeTabsUnder(relPath) {
   const affected = openOrder.filter((p) => p === relPath || p.startsWith(relPath + '/'));
-  for (const p of affected) {
-    if (fileKind(p) === 'text') editorMgr.closeTab(p);
-    else previewMgr.closeTab(p);
-  }
+  for (const p of affected) closeAnyTab(p);
   openOrder = openOrder.filter((p) => !affected.includes(p));
   renderTabbar();
 }
@@ -517,17 +547,17 @@ async function setMainFile(path) {
 
 let currentProjectId = null;
 let treeSeq = 0;
-async function loadTree() {
+// allowSwitch: only when this window opens a project. Otherwise another project coming back means
+// another window switched the user's active project -> ask instead of silently following.
+async function loadTree({ allowSwitch = false } = {}) {
   const seq = ++treeSeq;
   const { tree, mainFile: mf, projectId } = await api.getTree();
   // A slower, older answer (e.g. old project, requested before an open) must not undo a newer one.
   if (seq !== treeSeq) return;
+  if (projectId !== currentProjectId && currentProjectId && !allowSwitch) return showProjectSwitched();
   if (projectId !== currentProjectId) {
     // Other project: tabs of the previous one point at files that don't exist here.
-    for (const p of [...openOrder]) {
-      if (fileKind(p) === 'text') editorMgr.closeTab(p);
-      else previewMgr.closeTab(p);
-    }
+    for (const p of [...openOrder]) closeAnyTab(p);
     openOrder = [];
     closeAllSessions();
     setCollabProject(projectId);
@@ -540,14 +570,35 @@ async function loadTree() {
   if (isDesktop && !offlineBanner.isOffline()) prewarm([...treeFiles()].filter((p) => fileKind(p) === 'text'));
 }
 
-async function loadProject(root) {
+async function loadProject(root, projectId) {
+  document.getElementById('project-switched')?.remove();
+  setProjectId(projectId);
   activeProjectRoot = root;
   resetTreeSelection();
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
   els.projectButton.title = root;
-  await Promise.all([loadTree(), commentsManager.loadAll(), applyRole()]);
+  await Promise.all([loadTree({ allowSwitch: true }), commentsManager.loadAll(), applyRole()]);
 }
+
+// Server refused a request (409 projectSwitched) or the tree came back for another project.
+function showProjectSwitched() {
+  if (document.getElementById('project-switched') || !activeProjectRoot) return;
+  const bar = document.createElement('div');
+  bar.id = 'project-switched';
+  bar.setAttribute('role', 'alert');
+  bar.appendChild(Object.assign(document.createElement('span'), { textContent: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.' }));
+  const here = Object.assign(document.createElement('button'), { textContent: 'Hier weiterarbeiten' });
+  here.addEventListener('click', () => openProjectByRoot(activeProjectRoot));
+  const home = Object.assign(document.createElement('button'), { textContent: 'Zur Übersicht' });
+  home.addEventListener('click', () => {
+    bar.remove();
+    projectsView.show();
+  });
+  bar.append(here, home);
+  document.body.appendChild(bar);
+}
+window.addEventListener('lide-project-switched', showProjectSwitched);
 
 async function applyRole() {
   let role = 'owner';
@@ -564,7 +615,7 @@ async function openProjectByRoot(root) {
   try {
     const result = await api.openProject(root);
     mainFile = result.mainFile;
-    await loadProject(result.activeRoot);
+    await loadProject(result.activeRoot, result.projectId);
     if (result.startFile) await openFile(result.startFile);
   } catch (e) {
     alert('Fehler beim Öffnen: ' + e.message);
@@ -602,7 +653,7 @@ els.downloadPdfBtn.addEventListener('click', async () => {
   const p = pdfViewer.getCurrentPath();
   if (!p) return alert('Noch kein PDF vorhanden - zuerst kompilieren.');
   const projectName = activeProjectRoot.split(/[\\/]/).pop() || 'dokument';
-  const res = await fetch(`/api/pdf?path=${encodeURIComponent(p)}`);
+  const res = await fetch(withPid(`/api/pdf?path=${encodeURIComponent(p)}`));
   if (!res.ok) return alert('PDF konnte nicht heruntergeladen werden.');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -647,9 +698,9 @@ const searchPanelApi = setupSearchPanel({
 });
 
 setupProjectDialog({
-  onOpened: async ({ activeRoot, mainFile: mf, startFile }) => {
+  onOpened: async ({ activeRoot, mainFile: mf, startFile, projectId }) => {
     mainFile = mf;
-    await loadProject(activeRoot);
+    await loadProject(activeRoot, projectId);
     if (startFile) await openFile(startFile);
   },
 });
@@ -776,11 +827,12 @@ editorMgr.view.dom.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const v = editorMgr.view;
   const { from, to, text } = editorMgr.getSelection();
+  const ro = v.state.readOnly;
   const replaceSel = (insert) => v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
   openDropdownAt(e.clientX, e.clientY, [
-    { label: 'Cut', shortcut: 'Ctrl X', disabled: !text, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
+    { label: 'Cut', shortcut: 'Ctrl X', disabled: !text || ro, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
     { label: 'Copy', shortcut: 'Ctrl C', disabled: !text, onClick: () => navigator.clipboard.writeText(text) },
-    { label: 'Paste', shortcut: 'Ctrl V', onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
+    { label: 'Paste', shortcut: 'Ctrl V', disabled: ro, onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
     { type: 'divider' },
     { label: 'Add comment', icon: 'comment', disabled: !text, onClick: () => commentsPanel.triggerAddComment() },
     { label: 'Jump to location in PDF', onClick: () => syncTex.syncToPdf() },
@@ -857,7 +909,16 @@ configureCollab({
     renderTabbar();
     loadTree();
   },
+  // Every open doc of the project gets 4410 at once -> one notice.
+  onProjectGone: () => {
+    if (projectGoneNotice) return;
+    projectGoneNotice = setTimeout(() => (projectGoneNotice = null), 2000);
+    closeAllSessions();
+    projectsView.show();
+    alert('Das Projekt wurde vom Eigentümer umbenannt, archiviert oder gelöscht. Deine Änderungen sind gespeichert.');
+  },
 });
+let projectGoneNotice = null;
 // Offline = the banner, nothing else: alerts that only say "server unreachable" are dropped.
 const nativeAlert = window.alert.bind(window);
 window.alert = (msg) => {
@@ -875,6 +936,27 @@ async function pollDesktopState() {
   window.dispatchEvent(new CustomEvent('lide-offline', { detail: d.online === false }));
   if (d.online && !proxyOnline && currentProjectId) loadTree().catch(() => {});
   proxyOnline = d.online !== false;
+  showSyncWarnings(d.warnings || []);
+}
+
+// Desktop sync warnings (emergency brake, case-only names): the proxy forgets them after the next
+// clean sync, so the banner keeps every text it has shown until the user closes it.
+const seenSyncWarnings = new Set();
+function showSyncWarnings(list) {
+  const fresh = list.filter((w) => !seenSyncWarnings.has(w));
+  if (!fresh.length) return;
+  let bar = document.getElementById('sync-warning');
+  if (!bar) {
+    bar = Object.assign(document.createElement('div'), { id: 'sync-warning', role: 'alert' });
+    const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
+    close.addEventListener('click', () => bar.remove());
+    bar.appendChild(close);
+    document.body.appendChild(bar);
+  }
+  for (const w of fresh) {
+    seenSyncWarnings.add(w);
+    bar.appendChild(Object.assign(document.createElement('div'), { textContent: `Lokale Kopie – ${w}` }));
+  }
 }
 fetch('/api/desktop/info')
   .then((r) => (r.ok ? r.json() : {}))
@@ -992,7 +1074,10 @@ async function checkDesktopUpdate() {
   if (!r || !r.ok) alert('Update konnte nicht geladen werden. Später erneut versuchen.');
 }
 
-connectWs({
+// Events of another project (this user's active project was switched in another window) are dropped.
+const forThisProject = (handlers) =>
+  Object.fromEntries(Object.entries(handlers).map(([k, fn]) => [k, (msg) => (msg.projectId && msg.projectId !== currentProjectId ? undefined : fn(msg))]));
+connectWs(forThisProject({
   fileChanged: (msg) => {
     editorMgr.applyExternalChange(msg.path, msg.content, msg.changedRanges);
     renderTabbar();
@@ -1003,7 +1088,11 @@ connectWs({
     loadTree();
   },
   treeChanged: () => loadTree(),
-  pdfChanged: (msg) => pdfViewer.reload(),
+  // Nur das gerade gezeigte PDF neu laden (oder das erste, falls noch keins offen ist).
+  pdfChanged: (msg) => {
+    const cur = pdfViewer.getCurrentPath();
+    if (msg.path && (!cur || msg.path === cur)) pdfViewer.load(msg.path);
+  },
   compileStatus: (msg) => {
     if (msg.status === 'running') els.compileBtn.textContent = 'Kompiliere…';
   },
@@ -1012,7 +1101,7 @@ connectWs({
     editorMgr.refreshCommentsForPath(msg.path, commentsManager.getForFile(msg.path));
     if (commentsPanel.isOpen() && editorMgr.getActivePath() === msg.path) commentsPanel.renderList();
   },
-});
+}));
 
 (async function init() {
   let join = null;

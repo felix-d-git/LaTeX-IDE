@@ -1,6 +1,7 @@
 import { StateField, StateEffect } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType } from '@codemirror/view';
 import katex from 'katex';
+import { withPid } from './api.js';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Visual-Modus wie Overleaf: dieselbe LaTeX-Quelle, nur per Dekorationen
@@ -171,7 +172,7 @@ class ImageWidget extends WidgetType {
     img.alt = this.rawPath;
     img.style.width = `${Math.round(this.width * 100)}%`;
     img.addEventListener('load', () => view.requestMeasure());
-    const url = `/api/raw?path=${encodeURIComponent(this.file)}`;
+    const url = withPid(`/api/raw?path=${encodeURIComponent(this.file)}`);
     if (/\.pdf$/i.test(this.file)) {
       pdfThumb(url).then((src) => (img.src = src)).catch(() => (img.alt = `PDF nicht lesbar: ${this.rawPath}`));
     } else {

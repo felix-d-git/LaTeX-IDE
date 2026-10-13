@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { withPid } from './api.js';
 
 // build.js copies pdfjs-dist's worker build to client/dist/pdf.worker.min.mjs
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/dist/pdf.worker.min.mjs';
@@ -12,6 +13,12 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   let currentPath = null;
   let currentPage = 1;
   let renderToken = 0;
+  // Während renderAll die Seiten neu aufbaut, stimmen Scrollposition und currentPage
+  // nicht (Spalte kurz leer → Scroll-Event meldet Seite 1). Dann gilt lastStable.
+  let rendering = false;
+  let lastStable = null;
+  // Ein gemeinsamer Worker statt eines neuen Threads je Load (#46).
+  let sharedWorker = null;
   const emptyEl = document.getElementById('pdf-empty');
   const pageWrappers = new Map(); // pageNumber -> wrapper element
 
@@ -25,11 +32,23 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     native = !!on;
     document.body.classList.toggle('pdf-native', native);
     container.querySelectorAll('.pdf-native-frame').forEach((f) => f.remove());
-    if (!native) pdfDoc = null; // nächster load() rendert wieder per PDF.js
+    // Beim Wechsel in beide Richtungen das PDF.js-Dokument freigeben; der
+    // nächste load() lädt neu (#46).
+    if (pdfDoc) pdfDoc.destroy();
+    pdfDoc = null;
+    renderToken++; // laufendes renderAll auf dem zerstörten Dokument beendet sich still
+    rendering = false;
+    lastStable = null;
     if (currentPath) load(currentPath);
   }
 
-  async function load(path, attempt = 0) {
+  // Nur ein load() gleichzeitig (#45): Kommen während eines Ladevorgangs weitere
+  // Aufrufe (Compile-Antwort + pdfChanged), wird danach genau einmal der zuletzt
+  // gewünschte Pfad geladen. So merkt sich captureScroll() nie eine halb
+  // aufgebaute Spalte.
+  let loading = null;
+  let pendingPath = null;
+  function load(path) {
     if (native) {
       currentPath = path;
       if (emptyEl && emptyEl.parentNode) emptyEl.remove();
@@ -42,28 +61,59 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
         frame.title = 'PDF';
         container.appendChild(frame);
       }
-      frame.src = `/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`;
-      return;
+      frame.src = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
+      return Promise.resolve();
     }
+    pendingPath = path;
+    if (loading) return loading;
+    loading = (async () => {
+      while (pendingPath) {
+        const p = pendingPath;
+        pendingPath = null;
+        try {
+          await loadOnce(p);
+        } catch (e) {
+          console.warn('PDF konnte nicht angezeigt werden:', e && e.message);
+        }
+      }
+    })().finally(() => {
+      loading = null;
+    });
+    return loading;
+  }
+
+  async function loadOnce(path) {
     const samePdf = path === currentPath;
     const keep = samePdf ? captureScroll() : null;
     currentPath = path;
-    const url = `/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`;
     let doc;
-    try {
-      doc = await pdfjsLib.getDocument(url).promise;
-    } catch (e) {
-      // Der Datei-Watcher meldet die PDF teils, während latexmk noch schreibt -
-      // dann liefert pdf.js einen InvalidPDFException. Einmal kurz später neu
-      // versuchen und die bisherige Ansicht so lange stehen lassen.
-      if (attempt < 2) {
-        setTimeout(() => load(path, attempt + 1), 400);
-        return;
+    for (let attempt = 0; ; attempt++) {
+      if (native) return; // inzwischen auf Browser-Viewer umgeschaltet
+      const url = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
+      sharedWorker ||= new pdfjsLib.PDFWorker();
+      const task = pdfjsLib.getDocument({ url, worker: sharedWorker });
+      try {
+        doc = await task.promise;
+        break;
+      } catch (e) {
+        task.destroy();
+        // Die PDF kann gemeldet werden, während latexmk noch schreibt - dann
+        // liefert pdf.js einen InvalidPDFException. Kurz später neu versuchen
+        // und die bisherige Ansicht so lange stehen lassen.
+        if (attempt >= 2 || pendingPath) {
+          if (!pendingPath) console.warn('PDF konnte nicht geladen werden:', e && e.message);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 400));
       }
-      console.warn('PDF konnte nicht geladen werden:', e && e.message);
+    }
+    if (native || pendingPath) {
+      doc.destroy(); // überholt: nächster Pfad lädt gleich
       return;
     }
+    const oldDoc = pdfDoc;
     pdfDoc = doc;
+    if (oldDoc && oldDoc !== doc) oldDoc.destroy();
     if (emptyEl && emptyEl.parentNode) emptyEl.remove();
     if (!samePdf) currentPage = 1;
     await renderAll(keep);
@@ -73,6 +123,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   // Position als Seite + Anteil innerhalb der Seite merken, damit sie auch
   // nach einem Zoomwechsel oder geänderter Seitenhöhe wieder passt.
   function captureScroll() {
+    if (rendering) return lastStable;
     const wrapper = pageWrappers.get(currentPage);
     if (!wrapper) return null;
     const pageTop = wrapper.offsetTop - container.offsetTop;
@@ -109,10 +160,20 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     if (!pdfDoc) return;
     const restore = keepState === undefined ? captureScroll() : keepState;
     const token = ++renderToken;
+    const doc = pdfDoc;
+    rendering = true;
+    lastStable = restore;
     container.querySelectorAll('.pdf-page').forEach((c) => c.remove());
     pageWrappers.clear();
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      const page = await pdfDoc.getPage(i);
+    for (let i = 1; i <= doc.numPages; i++) {
+      let page;
+      try {
+        page = await doc.getPage(i);
+      } catch (e) {
+        if (token !== renderToken) return; // Dokument inzwischen zerstört/ersetzt
+        rendering = false;
+        throw e;
+      }
       if (token !== renderToken) return; // neuer Renderlauf hat übernommen
       const s = await effectiveScale(page);
       if (zoomMode !== 'fixed') scale = s;
@@ -129,7 +190,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       container.appendChild(wrapper);
       pageWrappers.set(i, wrapper);
       const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      try {
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (e) {
+        if (token !== renderToken) return;
+        rendering = false;
+        throw e;
+      }
 
       wrapper.addEventListener('dblclick', (e) => {
         if (!onPdfDoubleClick) return;
@@ -142,6 +209,8 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       });
     }
     restoreScroll(restore);
+    rendering = false;
+    lastStable = captureScroll();
     updateLabels();
   }
 
@@ -202,7 +271,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
   // Sichtbare Seite aus der Scrollposition ableiten (kein pdf.js-Eventbus im
   // Einsatz, die Seiten sind einfache DOM-Kinder).
   container.addEventListener('scroll', () => {
-    if (!pdfDoc) return;
+    if (!pdfDoc || rendering) return;
     const top = container.scrollTop + 24;
     let page = 1;
     for (const [n, el] of pageWrappers) {
@@ -212,10 +281,11 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       currentPage = page;
       updateLabels();
     }
+    lastStable = captureScroll();
   });
 
   function reload() {
-    if (currentPath) load(currentPath);
+    if (currentPath) return load(currentPath);
   }
 
   function getCurrentPath() {

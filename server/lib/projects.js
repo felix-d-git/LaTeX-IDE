@@ -51,12 +51,13 @@ function listProjects(projectsDir) {
   return listEntries(projectsDir, [TRASH_DIRNAME, ARCHIVE_DIRNAME]);
 }
 
+// key: label key, distinct from an active project of the same name.
 function listTrash(projectsDir) {
-  return listEntries(path.join(projectsDir, TRASH_DIRNAME));
+  return listEntries(path.join(projectsDir, TRASH_DIRNAME)).map((p) => ({ ...p, key: `${TRASH_DIRNAME}/${p.name}` }));
 }
 
 function listArchived(projectsDir) {
-  return listEntries(path.join(projectsDir, ARCHIVE_DIRNAME));
+  return listEntries(path.join(projectsDir, ARCHIVE_DIRNAME)).map((p) => ({ ...p, key: `${ARCHIVE_DIRNAME}/${p.name}` }));
 }
 
 function assertValidName(name) {
@@ -123,6 +124,16 @@ function importZip(projectsDir, zipName, buf) {
 function trashProject(projectsDir, name) {
   const src = path.join(projectsDir, name);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
+  const trashDir = path.join(projectsDir, TRASH_DIRNAME);
+  fs.mkdirSync(trashDir, { recursive: true });
+  const dest = uniqueDest(trashDir, name);
+  fs.renameSync(src, dest);
+  return dest;
+}
+
+function trashArchivedProject(projectsDir, name) {
+  const src = path.join(projectsDir, ARCHIVE_DIRNAME, name || '');
+  if (!name || path.basename(name) !== name || !fs.existsSync(src)) throw new Error('Projekt im Archiv nicht gefunden.');
   const trashDir = path.join(projectsDir, TRASH_DIRNAME);
   fs.mkdirSync(trashDir, { recursive: true });
   const dest = uniqueDest(trashDir, name);
@@ -210,6 +221,7 @@ module.exports = {
   archiveProject,
   unarchiveProject,
   trashProject,
+  trashArchivedProject,
   restoreProject,
   deleteProjectPermanently,
   renameProject,

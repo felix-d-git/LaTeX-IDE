@@ -15,6 +15,7 @@ import { vim } from '@replit/codemirror-vim';
 import { emacs } from '@replit/codemirror-emacs';
 import { grammarDiagnostics } from './languageTool.js';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
+import { reviewerReadOnly } from './editorCommands.js';
 import { getSession, closeSession, listConflicts, conflictField, setConflictsEffect } from './collab.js';
 import { EditorState, StateField, StateEffect, Prec, Compartment } from '@codemirror/state';
 import { visualMode } from './visualEditor.js';
@@ -26,7 +27,7 @@ import { acceptCompletion, nextSnippetField, hasNextSnippetField } from '@codemi
 import { search, openSearchPanel } from '@codemirror/search';
 import { commentField, setCommentsEffect } from './comments.js';
 import { trackChanges } from './trackChanges.js';
-import { tryHandleEditorKey, isGlobalAction } from './keybindings.js';
+import { tryHandleEditorKey, isGlobalCombo } from './keybindings.js';
 import { latexCompletionSource } from './latexCompletions.js';
 
 const addFlash = StateEffect.define();
@@ -132,7 +133,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     prefs.codeCheck || prefs.grammar ? [lintGutter(), linter(lintSource, { delay: 1500 })] : [],
   ];
   let readOnly = false; // reviewer role: read + comment only
-  const readOnlyExt = () => (readOnly ? EditorState.readOnly.of(true) : []);
+  const readOnlyExt = () => (readOnly ? reviewerReadOnly : []);
   let visualOn = false;
   try {
     visualOn = localStorage.getItem('editorMode') === 'visual';
@@ -227,10 +228,10 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
                 event.stopPropagation();
                 return true;
               }
-              // Kompilieren ist global gebunden: CM-Keymaps nicht laufen lassen
-              // (sonst fügt Mod-Enter eine Leerzeile ein), Event bubbelt aber
-              // weiter zum globalen Listener, der kompiliert.
-              if (isGlobalAction(event, 'compile')) {
+              // Global gebundene Kombination: CM-Keymaps nicht laufen lassen
+              // (sonst z. B. Mod-Enter = Leerzeile, Shift-Mod-k = Zeile
+              // löschen), Event bubbelt aber weiter zum globalen Listener.
+              if (isGlobalCombo(event)) {
                 event.preventDefault();
                 return true;
               }

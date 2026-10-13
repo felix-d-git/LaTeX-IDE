@@ -1,4 +1,5 @@
 import { openDropdownAt } from './dropdown.js';
+import { withPid } from './api.js';
 
 // Mehrfachauswahl (Strg/Cmd+Klick): bleibt über Neu-Rendern erhalten, bis ein
 // normaler Klick sie aufhebt oder das Löschen durch ist.
@@ -165,7 +166,7 @@ function openNodeMenu(x, y, node, ctx, container) {
     items.push({
       label: 'Download',
       icon: 'download',
-      onClick: () => window.location.assign(`/api/raw?path=${encodeURIComponent(node.path)}`),
+      onClick: () => window.location.assign(withPid(`/api/raw?path=${encodeURIComponent(node.path)}`)),
     });
   }
   if (!isDir && ctx.onSetMain && node.name.toLowerCase().endsWith('.tex')) {

@@ -113,7 +113,7 @@ export function setupReviewPanel({ editorMgr, getActivePath }) {
       });
       actions.appendChild(acceptBtn);
       actions.appendChild(rejectBtn);
-      el.appendChild(actions);
+      if (!editorMgr.view.state.readOnly) el.appendChild(actions);
 
       el.addEventListener('click', () => {
         editorMgr.jumpToRange(item.from, item.to);

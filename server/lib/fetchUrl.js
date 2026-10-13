@@ -53,11 +53,17 @@ function get(url, hops, headers) {
     // A literal IP skips the lookup, so check it here.
     if (net.isIP(host) && isBlocked(host)) return reject(new Error('Ziel-Adresse ist nicht erlaubt (internes Netz).'));
     const lib = u.protocol === 'https:' ? https : http;
-    const req = lib.get(u, { lookup: safeLookup, timeout: TIMEOUT_MS, headers: { 'User-Agent': 'LatexWebIDE', ...headers } }, (res) => {
+    // A throw in the response callback would be an uncaught exception (server crash).
+    const onResponse = (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         if (hops >= MAX_REDIRECTS) return reject(new Error('Zu viele Weiterleitungen.'));
-        const next = new URL(res.headers.location, u);
+        let next;
+        try {
+          next = new URL(res.headers.location, u);
+        } catch {
+          return reject(new Error('Server leitet auf eine ungültige Adresse weiter.'));
+        }
         // API keys only to the host they were meant for; Accept (DOI content negotiation) may follow.
         const keep = next.host === u.host ? headers : headers.Accept ? { Accept: headers.Accept } : {};
         return resolve(get(next.href, hops + 1, keep));
@@ -81,6 +87,14 @@ function get(url, hops, headers) {
       });
       res.on('end', () => resolve({ data: Buffer.concat(chunks), finalUrl: u.href, headers: res.headers }));
       res.on('error', reject);
+    };
+    const req = lib.get(u, { lookup: safeLookup, timeout: TIMEOUT_MS, headers: { 'User-Agent': 'LatexWebIDE', ...headers } }, (res) => {
+      try {
+        onResponse(res);
+      } catch (e) {
+        res.destroy();
+        reject(e);
+      }
     });
     req.on('timeout', () => req.destroy(new Error('Zeitüberschreitung beim Download.')));
     req.on('error', reject);
