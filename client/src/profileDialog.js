@@ -1,4 +1,5 @@
 ﻿import { adminApi, authApi } from './api.js';
+import { copyText } from './clipboard.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -260,7 +261,10 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
         row.appendChild(el('span', 'invite-status', text));
         if (!invite.usedByEmail && !invite.expired) {
           const copyBtn = el('button', null, 'Link kopieren');
-          copyBtn.addEventListener('click', () => navigator.clipboard.writeText(`${baseUrl}/?invite=${invite.token}`));
+          copyBtn.addEventListener('click', async () => {
+            const link = `${baseUrl}/?invite=${invite.token}`;
+            if (!(await copyText(link))) prompt('Einladungslink (zum Kopieren markieren):', link);
+          });
           const revokeBtn = el('button', 'danger', 'Widerrufen');
           revokeBtn.addEventListener('click', async () => {
             await adminApi.revokeInvite(invite.token);

@@ -190,3 +190,12 @@ export const api = {
   replaceAll: (query, replacement, opts) =>
     req('POST', '/api/replace', { query, replacement, ...opts }),
 };
+
+// Öffentliche Basis-URL für Links, die andere nutzen sollen (Freigabe, MCP): in der
+// Desktop-App ist location.origin nur der lokale Server, der Remote-Server steht in /api/desktop/info.
+let publicOriginValue = typeof location === 'undefined' ? '' : location.origin;
+export const publicOrigin = () => publicOriginValue;
+if (typeof location !== 'undefined') fetch('/api/desktop/info')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((i) => { if (i && i.desktop && /^https?:\/\//.test(i.remote || '')) publicOriginValue = i.remote.replace(/\/+$/, ''); })
+  .catch(() => {});
