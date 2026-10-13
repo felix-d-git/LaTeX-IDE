@@ -38,6 +38,10 @@ function setHooks(h) {
   hooks = { ...hooks, ...h };
 }
 
+// CodeMirror counts CRLF as one character, Y.Text as two - every offset after a CR
+// would be off by one. So text crossing disk -> Yjs is always LF (saved back as LF).
+const normEol = (s) => s.replace(/\r\n?/g, '\n');
+
 // Minimal edits (changed lines, then changed characters within them), so comment and
 // track-change anchors, remote cursors and concurrent edits on untouched text survive
 // an external change (search/replace, restore, upload, file edited on disk).
@@ -83,8 +87,9 @@ function applyText(ytext, next, origin) {
 
 function loadDoc(root, rel) {
   const abs = safeResolve(root, rel);
-  const disk = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
-  if (disk === null) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  const raw = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
+  if (raw === null) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  const disk = normEol(raw);
   const ydoc = new Y.Doc({ gc: true });
   const sp = statePath(root, rel);
   let fromState = false;
@@ -103,7 +108,16 @@ function loadDoc(root, rel) {
     ydoc.destroy();
     return createFresh(root, rel, disk);
   }
+  // State saved before CRLF was normalized: drop each CR on its own (not applyText,
+  // which may rewrite whole lines) so comment/track-change anchors stay put.
+  const old = ytext.toString();
   let changed = false;
+  if (old.includes('\r')) {
+    ydoc.transact(() => {
+      for (let i = old.length - 1; i >= 0; i--) if (old[i] === '\r') ytext.delete(i, 1);
+    }, 'disk');
+    changed = true;
+  }
   // Disk changed while the doc was unloaded (e.g. edited outside the IDE) -> fold it in.
   if (applyText(ytext, disk, 'disk')) changed = true;
   // ... and save that at once: otherwise every load re-creates the same change with a
@@ -188,8 +202,9 @@ function persist(entry) {
   const text = entry.ytext.toString();
   try {
     const abs = safeResolve(entry.root, entry.rel);
-    // Changes that came *from* disk don't need writing back.
-    if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || fs.readFileSync(abs, 'utf8') !== text) {
+    // Changes that came *from* disk don't need writing back (a CRLF file stays as it is).
+    const onDisk = () => normEol(fs.readFileSync(abs, 'utf8'));
+    if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || onDisk() !== text) {
       hooks.markSelfWrite(entry.root, entry.rel, text);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, text, 'utf8');
@@ -317,7 +332,7 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
 function applyExternalText(root, rel, text) {
   const entry = docs.get(keyOf(root, rel));
   if (!entry) return;
-  applyText(entry.ytext, text, 'disk');
+  applyText(entry.ytext, normEol(text), 'disk');
 }
 
 // File or folder renamed/moved/deleted: kick connected clients off the old
@@ -362,7 +377,7 @@ function readText(root, rel) {
 // fn(oldText) -> newText; returns newText. A throwing fn leaves the doc untouched.
 function editText(root, rel, fn) {
   const entry = getDoc(root, rel);
-  const next = fn(entry.ytext.toString());
+  const next = normEol(fn(entry.ytext.toString()));
   applyText(entry.ytext, next, 'mcp');
   maybeUnload(entry); // stays loaded while dirty; persist() unloads it
   return next;

@@ -143,3 +143,66 @@ for (const [name, before, after] of [
     assert.strictEqual(fs.readFileSync(file, 'utf8'), after);
   });
 }
+
+// --- #27: CRLF ---------------------------------------------------------------
+
+test('CRLF file: typing at the end of line 3 lands there on disk and for others (#27)', () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'a.tex'), 'Zeile1\r\nZeile2\r\nZeile3\r\n');
+  const first = openOnce(root, 'a.tex', null, (yt) => {
+    assert.strictEqual(yt.toString(), 'Zeile1\nZeile2\nZeile3\n');
+    yt.insert(yt.toString().indexOf('Zeile3') + 6, 'X');
+  });
+  assert.strictEqual(first.text, 'Zeile1\nZeile2\nZeile3X\n');
+  assert.strictEqual(fs.readFileSync(path.join(root, 'a.tex'), 'utf8'), first.text);
+  assert.strictEqual(openOnce(root, 'a.tex', null).text, first.text);
+});
+
+test('CRLF file replaced externally while open: folded in as LF (#27)', () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'b.tex'), 'eins\n');
+  const epoch = collab.getEpoch(root, 'b.tex');
+  const doc = new Y.Doc();
+  const close = connect(root, 'b.tex', doc, epoch);
+  fs.writeFileSync(path.join(root, 'b.tex'), 'eins\r\nzwei\r\n');
+  collab.applyExternalText(root, 'b.tex', 'eins\r\nzwei\r\n');
+  assert.strictEqual(doc.getText('content').toString(), 'eins\nzwei\n');
+  close();
+  // A 'disk' change that only differs in EOL is not written back.
+  assert.strictEqual(fs.readFileSync(path.join(root, 'b.tex'), 'utf8'), 'eins\r\nzwei\r\n');
+});
+
+test('old .ystate with CRLF: CRs are removed, cached client and anchors stay intact (#27)', () => {
+  const root = tmp();
+  const text = 'Zeile1\r\nZeile2 Anker\r\nZeile3\r\n';
+  fs.writeFileSync(path.join(root, 'c.tex'), text);
+  // State as an old server wrote it: Y.Text holds the CRs.
+  const old = new Y.Doc();
+  old.getMap('meta').set('epoch', 'e1');
+  old.getText('content').insert(0, text);
+  fs.mkdirSync(path.join(root, collab.STATE_DIR), { recursive: true });
+  fs.writeFileSync(path.join(root, collab.STATE_DIR, 'c.tex.ystate'), Buffer.from(Y.encodeStateAsUpdate(old)));
+
+  const client = new Y.Doc();
+  Y.applyUpdate(client, Y.encodeStateAsUpdate(old)); // cached copy of the same epoch
+  const yt = client.getText('content');
+  const i = text.indexOf('Anker');
+  const a = Y.createRelativePositionFromTypeIndex(yt, i);
+  const b = Y.createRelativePositionFromTypeIndex(yt, i + 5);
+  assert.strictEqual(collab.getEpoch(root, 'c.tex'), 'e1');
+  const close = connect(root, 'c.tex', client, 'e1');
+  close();
+  assert.strictEqual(yt.toString(), 'Zeile1\nZeile2 Anker\nZeile3\n');
+  const from = Y.createAbsolutePositionFromRelativePosition(a, client).index;
+  const to = Y.createAbsolutePositionFromRelativePosition(b, client).index;
+  assert.strictEqual(yt.toString().slice(from, to), 'Anker');
+});
+
+test('MCP editText normalizes CRLF (#27)', () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'd.tex'), 'a\n');
+  collab.editText(root, 'd.tex', () => 'a\r\nb\r\n');
+  collab.flushAll();
+  assert.strictEqual(collab.readText(root, 'd.tex'), 'a\nb\n');
+  assert.strictEqual(fs.readFileSync(path.join(root, 'd.tex'), 'utf8'), 'a\nb\n');
+});
