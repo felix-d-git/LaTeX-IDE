@@ -1,4 +1,4 @@
-import { api, authApi, adminApi, shareApi } from './api.js';
+import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs } from './wsClient.js';
 import { renderTree, resetTreeSelection } from './fileTree.js';
@@ -547,11 +547,14 @@ async function setMainFile(path) {
 
 let currentProjectId = null;
 let treeSeq = 0;
-async function loadTree() {
+// allowSwitch: only when this window opens a project. Otherwise another project coming back means
+// another window switched the user's active project -> ask instead of silently following.
+async function loadTree({ allowSwitch = false } = {}) {
   const seq = ++treeSeq;
   const { tree, mainFile: mf, projectId } = await api.getTree();
   // A slower, older answer (e.g. old project, requested before an open) must not undo a newer one.
   if (seq !== treeSeq) return;
+  if (projectId !== currentProjectId && currentProjectId && !allowSwitch) return showProjectSwitched();
   if (projectId !== currentProjectId) {
     // Other project: tabs of the previous one point at files that don't exist here.
     for (const p of [...openOrder]) closeAnyTab(p);
@@ -567,14 +570,35 @@ async function loadTree() {
   if (isDesktop && !offlineBanner.isOffline()) prewarm([...treeFiles()].filter((p) => fileKind(p) === 'text'));
 }
 
-async function loadProject(root) {
+async function loadProject(root, projectId) {
+  document.getElementById('project-switched')?.remove();
+  setProjectId(projectId);
   activeProjectRoot = root;
   resetTreeSelection();
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
   els.projectButton.title = root;
-  await Promise.all([loadTree(), commentsManager.loadAll(), applyRole()]);
+  await Promise.all([loadTree({ allowSwitch: true }), commentsManager.loadAll(), applyRole()]);
 }
+
+// Server refused a request (409 projectSwitched) or the tree came back for another project.
+function showProjectSwitched() {
+  if (document.getElementById('project-switched') || !activeProjectRoot) return;
+  const bar = document.createElement('div');
+  bar.id = 'project-switched';
+  bar.setAttribute('role', 'alert');
+  bar.appendChild(Object.assign(document.createElement('span'), { textContent: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.' }));
+  const here = Object.assign(document.createElement('button'), { textContent: 'Hier weiterarbeiten' });
+  here.addEventListener('click', () => openProjectByRoot(activeProjectRoot));
+  const home = Object.assign(document.createElement('button'), { textContent: 'Zur Übersicht' });
+  home.addEventListener('click', () => {
+    bar.remove();
+    projectsView.show();
+  });
+  bar.append(here, home);
+  document.body.appendChild(bar);
+}
+window.addEventListener('lide-project-switched', showProjectSwitched);
 
 async function applyRole() {
   let role = 'owner';
@@ -591,7 +615,7 @@ async function openProjectByRoot(root) {
   try {
     const result = await api.openProject(root);
     mainFile = result.mainFile;
-    await loadProject(result.activeRoot);
+    await loadProject(result.activeRoot, result.projectId);
     if (result.startFile) await openFile(result.startFile);
   } catch (e) {
     alert('Fehler beim Öffnen: ' + e.message);
@@ -629,7 +653,7 @@ els.downloadPdfBtn.addEventListener('click', async () => {
   const p = pdfViewer.getCurrentPath();
   if (!p) return alert('Noch kein PDF vorhanden - zuerst kompilieren.');
   const projectName = activeProjectRoot.split(/[\\/]/).pop() || 'dokument';
-  const res = await fetch(`/api/pdf?path=${encodeURIComponent(p)}`);
+  const res = await fetch(withPid(`/api/pdf?path=${encodeURIComponent(p)}`));
   if (!res.ok) return alert('PDF konnte nicht heruntergeladen werden.');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -674,9 +698,9 @@ const searchPanelApi = setupSearchPanel({
 });
 
 setupProjectDialog({
-  onOpened: async ({ activeRoot, mainFile: mf, startFile }) => {
+  onOpened: async ({ activeRoot, mainFile: mf, startFile, projectId }) => {
     mainFile = mf;
-    await loadProject(activeRoot);
+    await loadProject(activeRoot, projectId);
     if (startFile) await openFile(startFile);
   },
 });
@@ -1049,7 +1073,10 @@ async function checkDesktopUpdate() {
   if (!r || !r.ok) alert('Update konnte nicht geladen werden. Später erneut versuchen.');
 }
 
-connectWs({
+// Events of another project (this user's active project was switched in another window) are dropped.
+const forThisProject = (handlers) =>
+  Object.fromEntries(Object.entries(handlers).map(([k, fn]) => [k, (msg) => (msg.projectId && msg.projectId !== currentProjectId ? undefined : fn(msg))]));
+connectWs(forThisProject({
   fileChanged: (msg) => {
     editorMgr.applyExternalChange(msg.path, msg.content, msg.changedRanges);
     renderTabbar();
@@ -1069,7 +1096,7 @@ connectWs({
     editorMgr.refreshCommentsForPath(msg.path, commentsManager.getForFile(msg.path));
     if (commentsPanel.isOpen() && editorMgr.getActivePath() === msg.path) commentsPanel.renderList();
   },
-});
+}));
 
 (async function init() {
   let join = null;

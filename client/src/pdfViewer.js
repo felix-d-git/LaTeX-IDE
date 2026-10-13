@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { withPid } from './api.js';
 
 // build.js copies pdfjs-dist's worker build to client/dist/pdf.worker.min.mjs
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/dist/pdf.worker.min.mjs';
@@ -42,13 +43,13 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
         frame.title = 'PDF';
         container.appendChild(frame);
       }
-      frame.src = `/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+      frame.src = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
       return;
     }
     const samePdf = path === currentPath;
     const keep = samePdf ? captureScroll() : null;
     currentPath = path;
-    const url = `/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+    const url = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
     let doc;
     try {
       doc = await pdfjsLib.getDocument(url).promise;

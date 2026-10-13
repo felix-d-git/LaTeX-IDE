@@ -5,8 +5,24 @@ function getCookie(name) {
 
 const MUTATING = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
+// Project this window shows: sent along so the server refuses (409 projectSwitched) when another
+// window/device switched the user's active project meanwhile.
+let projectId = null;
+export function setProjectId(id) {
+  projectId = id || null;
+}
+export function getProjectId() {
+  return projectId;
+}
+// For plain URLs (downloads, <img>, iframes) that can't carry the header.
+export function withPid(url) {
+  return projectId ? `${url}${url.includes('?') ? '&' : '?'}pid=${encodeURIComponent(projectId)}` : url;
+}
+const pidHeader = () => (projectId ? { 'X-Project-Id': projectId } : {});
+const switchedCheck = (data) => data && data.projectSwitched && window.dispatchEvent(new CustomEvent('lide-project-switched'));
+
 async function req(method, url, body) {
-  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  const headers = { ...(body ? { 'Content-Type': 'application/json' } : {}), ...pidHeader() };
   if (MUTATING.has(method)) {
     const csrf = getCookie('csrfToken');
     if (csrf) headers['X-CSRF-Token'] = csrf;
@@ -19,6 +35,7 @@ async function req(method, url, body) {
   const data = await res.json().catch(() => ({}));
   // Desktop app: answers from cache/local copy (or none at all) mean the server is unreachable.
   window.dispatchEvent(new CustomEvent('lide-offline', { detail: res.headers.get('X-Offline') === '1' || !!data.offline }));
+  switchedCheck(data);
   if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
@@ -115,10 +132,11 @@ export const api = {
     const csrf = getCookie('csrfToken');
     const res = await fetch('/api/tree/move', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+      headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...pidHeader() },
       body: JSON.stringify({ path: relPath, targetDir, overwrite: !!overwrite }),
     });
     const data = await res.json().catch(() => ({}));
+    switchedCheck(data);
     if (res.status === 409 && data.conflict) return { conflict: true };
     if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
     return data;

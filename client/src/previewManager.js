@@ -1,3 +1,4 @@
+import { withPid } from './api.js';
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp']);
 
 export function fileKind(relPath) {
@@ -37,7 +38,7 @@ export function createPreviewManager(container) {
       container.appendChild(box);
       return;
     }
-    const url = `/api/raw?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+    const url = withPid(`/api/raw?path=${encodeURIComponent(path)}&t=${Date.now()}`);
     if (kind === 'image') {
       const img = document.createElement('img');
       img.className = 'file-preview-image';

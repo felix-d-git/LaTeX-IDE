@@ -1,5 +1,6 @@
 import { selectAll, indentMore, indentLess } from '@codemirror/commands';
 import { yUndo as undo, yRedo as redo } from './collab.js';
+import { withPid } from './api.js';
 import { startCompletion } from '@codemirror/autocomplete';
 import { openDropdown, closeDropdown, isDropdownOpenFor, anyDropdownOpen } from './dropdown.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';
@@ -9,7 +10,7 @@ const SYMBOLS = ['α', 'β', 'π', '×', '±', '≈', '°', '§', '∞', '√'];
 // Pandoc export runs server-side; fetch instead of navigating so errors
 // (e.g. Pandoc missing) show as a message, not as a JSON page.
 async function exportAs(format) {
-  const res = await fetch(`/api/export?format=${format}`);
+  const res = await fetch(withPid(`/api/export?format=${format}`));
   if (!res.ok) return alert('Export fehlgeschlagen: ' + ((await res.json().catch(() => ({}))).error || res.status));
   const name = decodeURIComponent((res.headers.get('Content-Disposition') || '').split("''")[1] || `export.${format}`);
   const a = document.createElement('a');
@@ -62,7 +63,7 @@ export function setupMenuBar(ctx) {
           label: 'Download',
           icon: 'download',
           submenu: [
-            { label: 'Download as source (.zip)', onClick: () => window.location.assign('/api/download/zip') },
+            { label: 'Download as source (.zip)', onClick: () => window.location.assign(withPid('/api/download/zip')) },
             { label: 'Download as PDF', onClick: () => downloadPdf(ctx) },
             { label: 'Export as Word (.docx)', onClick: () => exportAs('docx') },
             { label: 'Export as Markdown (.md)', onClick: () => exportAs('md') },
@@ -198,7 +199,7 @@ export function setupMenuBar(ctx) {
 function downloadPdf(ctx) {
   const p = ctx.getPdfPath && ctx.getPdfPath();
   if (!p) return alert('Noch kein PDF vorhanden - zuerst kompilieren.');
-  window.location.assign(`/api/pdf?path=${encodeURIComponent(p)}`);
+  window.location.assign(withPid(`/api/pdf?path=${encodeURIComponent(p)}`));
 }
 
 function insertLink(view) {
@@ -244,7 +245,7 @@ export function setupProjectMenu(ctx) {
     if (isDropdownOpenFor(btn)) return closeDropdown();
     const items = [
       { label: 'Download as PDF', icon: 'download', onClick: () => downloadPdf(ctx) },
-      { label: 'Download as source (.zip)', onClick: () => window.location.assign('/api/download/zip') },
+      { label: 'Download as source (.zip)', onClick: () => window.location.assign(withPid('/api/download/zip')) },
       { type: 'divider' },
       { label: 'Make a copy', onClick: () => ctx.onMakeCopy && ctx.onMakeCopy() },
       { label: 'Word count', onClick: () => ctx.onWordCount && ctx.onWordCount() },

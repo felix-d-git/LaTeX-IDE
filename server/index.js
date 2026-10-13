@@ -128,7 +128,8 @@ const watchersByRoot = new Map(); // root -> { watcher, refCount }
 // onlyUserId: restrict to one user's connections (per-user compile events).
 function broadcast(root, msg, onlyUserId) {
   if (!wss) return;
-  const data = JSON.stringify(msg);
+  // projectId: a window still showing another project (active project switched elsewhere) ignores it.
+  const data = JSON.stringify({ ...msg, projectId: projectIdOf(root) });
   wss.clients.forEach((client) => {
     if (onlyUserId && client.userId !== onlyUserId) return;
     if (client.readyState === 1 && client.userId && state.getActiveRoot(client.userId) === root) {
@@ -156,7 +157,22 @@ function requireRoot(req, res) {
     res.status(403).json({ error: 'Kein Zugriff mehr auf dieses Projekt.' });
     return null;
   }
+  if (projectMismatch(req, root)) {
+    projectSwitchedRes(res);
+    return null;
+  }
   return root;
+}
+
+// The active project is per user, not per window: a window that still shows another project
+// sends its X-Project-Id (or ?pid=) and gets 409 instead of acting on the wrong project.
+// ponytail: stage 1 only; one project per window (resolve the root from pid) is the follow-up.
+function projectMismatch(req, root) {
+  const pid = req.get('X-Project-Id') || req.query.pid;
+  return !!pid && pid !== projectIdOf(root);
+}
+function projectSwitchedRes(res) {
+  res.status(409).json({ error: 'In einem anderen Fenster wurde ein anderes Projekt geöffnet.', projectSwitched: true });
 }
 
 // Desktop offline copy syncs every project the user owns, not just the active
@@ -506,7 +522,9 @@ app.use('/api', authMw.requireAuth);
 const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
-  if (roleOf(req.user, state.getActiveRoot(req.user.id)) === 'reviewer') {
+  const active = state.getActiveRoot(req.user.id);
+  if (active && projectMismatch(req, active)) return projectSwitchedRes(res);
+  if (roleOf(req.user, active) === 'reviewer') {
     return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
   }
   next();

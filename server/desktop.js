@@ -683,7 +683,7 @@ function serveLocal(req, res) {
 // long as offline work stays within one project.
 const cacheFile = (url) => path.join(CACHE_DIR, crypto.createHash('sha1').update(url).digest('hex') + '.json');
 const checkedOwn = new Set();
-const FORWARD_REQ = ['content-type', 'accept'];
+const FORWARD_REQ = ['content-type', 'accept', 'x-project-id'];
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control'];
 
 app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req, res) => {
