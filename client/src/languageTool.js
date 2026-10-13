@@ -6,7 +6,8 @@ import { api } from './api.js';
 // Offsets der Treffer beziehen sich trotzdem auf das Original.
 const MARKUP_RE = new RegExp(
   [
-    String.raw`(?<!\\)%[^\n]*`, // Kommentar
+    String.raw`(?<=(?:^|[^\\])(?:\\\\)*)%[^\n]*`, // Kommentar (gerade Zahl Backslashes davor, also auch nach \\)
+    '~', // geschuetztes Leerzeichen
     String.raw`\$\$[\s\S]*?\$\$|\$[^$\n]*\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)`, // Mathe
     String.raw`\\(?:begin|end|label|ref|eqref|autoref|cref|Cref|pageref|cite\w*|parencite|textcite|autocite|footcite|usepackage|documentclass|includegraphics|input|include|bibliography\w*|addbibresource|url|href)\*?(?:\[[^\]]*\])*\{[^}]*\}`,
     String.raw`\\[a-zA-Z@]+\*?|\\.`, // übrige Befehle
@@ -15,12 +16,21 @@ const MARKUP_RE = new RegExp(
   'g'
 );
 
+const REF_RE = /^\\(?:ref|eqref|autoref|cref|Cref|pageref|cite\w*|parencite|textcite|autocite|footcite)\*?[\[{]/;
+
+// Platzhalter statt Leerstring: "siehe \ref{x}" bleibt ein Satz mit Wort, "~" ist ein Leerzeichen.
+function interpretAs(m) {
+  if (m === '~') return ' ';
+  if (m.startsWith('\\begin') || m.startsWith('\\end')) return '\n\n';
+  return REF_RE.test(m) ? 'X1' : '';
+}
+
 export function annotate(text) {
   const out = [];
   let last = 0;
   for (const m of text.matchAll(MARKUP_RE)) {
     if (m.index > last) out.push({ text: text.slice(last, m.index) });
-    out.push({ markup: m[0], interpretAs: m[0].startsWith('\\begin') || m[0].startsWith('\\end') ? '\n\n' : '' });
+    out.push({ markup: m[0], interpretAs: interpretAs(m[0]) });
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });
@@ -68,8 +78,26 @@ function toastOnce(msg) {
   setTimeout(() => el.remove(), 12000);
 }
 
-export async function grammarDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onAddWord) {
-  if ((disabled && !ltUrl) || !text.trim() || Date.now() < retryAt) return [];
+// Letztes Ergebnis; veraltete Treffer werden nur behalten, solange der Text an ihrer Stelle gleich ist.
+let cache = { key: '', text: '', out: [] };
+let inflight = null;
+
+// Antwortet sofort (Cache) und fragt LanguageTool im Hintergrund; onFresh() = neu linten, wenn die Antwort da ist.
+export function grammarDiagnostics(text, prefs, onAddWord, onFresh) {
+  const key = JSON.stringify([text, prefs.lang, prefs.ltUrl, prefs.dictionary]);
+  if (cache.key !== key && !inflight && !(prefs.ltUrl ? false : disabled) && text.trim() && Date.now() >= retryAt) {
+    inflight = fetchDiagnostics(text, prefs, onAddWord)
+      .then((out) => {
+        if (!out) return; // Fehler: kein Cache, nach retryAt neu versuchen
+        cache = { key, text, out };
+        if (onFresh) onFresh();
+      })
+      .finally(() => { inflight = null; });
+  }
+  return cache.out.filter((d) => d.to <= text.length && text.slice(d.from, d.to) === cache.text.slice(d.from, d.to));
+}
+
+async function fetchDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onAddWord) {
   let matches;
   const language = lang === 'en' ? 'en-US' : 'de-DE';
   const data = JSON.stringify({ annotation: annotate(text) });
@@ -80,10 +108,10 @@ export async function grammarDiagnostics(text, { lang, dictionary = [], ltUrl = 
     if (e.status === 501) disabled = true;
     else {
       retryAt = Date.now() + 30000; // nicht bei jedem Tastendruck neu versuchen
-      if (!failed) toastOnce(`LanguageTool nicht erreichbar${ltUrl ? ` (${ltUrl})` : ''}: ${e.message}. Start mit --allow-origin '*', siehe Einstellungen → Rechtschreibung.`);
+      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Start mit --allow-origin '*', siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
       failed = true;
     }
-    return [];
+    return null;
   }
   const dict = new Set(dictionary);
   const out = [];
