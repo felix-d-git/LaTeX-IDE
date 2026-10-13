@@ -59,10 +59,15 @@ function pickStartFile(root) {
   return first;
 }
 
-const TEXT_EXTENSIONS = new Set(['.tex', '.bib', '.sty', '.bst', '.cls', '.txt', '.md', '.cfg']);
+const TEXT_EXTENSIONS = new Set([
+  '.tex', '.bib', '.sty', '.bst', '.cls', '.txt', '.md', '.cfg',
+  '.ltx', '.tikz', '.pgf', '.csv', '.tsv', '.dtx', '.ins', '.def', '.clo', '.fd', '.bbx', '.cbx', '.lbx',
+]);
+const TEXT_BASENAMES = new Set(['.latexmkrc', 'latexmkrc']); // no extension (path.extname('.latexmkrc') === '')
 
 function isTextFile(relPath) {
-  return TEXT_EXTENSIONS.has(path.extname(relPath).toLowerCase());
+  const base = path.posix.basename(String(relPath).replace(/\\/g, '/')).toLowerCase();
+  return TEXT_EXTENSIONS.has(path.extname(base)) || TEXT_BASENAMES.has(base);
 }
 
 function safeResolve(root, relPath) {
