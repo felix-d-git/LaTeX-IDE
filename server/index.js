@@ -69,6 +69,12 @@ const app = express();
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
 app.set('trust proxy', 'loopback, uniquelocal');
+// Marks every answer as coming from the app itself: the desktop app treats 502-504 only without it
+// (= tunnel/proxy, server unreachable) as offline, not e.g. a LanguageTool failure.
+app.use((req, res, next) => {
+  res.setHeader('X-Latex-IDE', '1');
+  next();
+});
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));

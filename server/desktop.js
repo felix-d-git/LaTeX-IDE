@@ -107,13 +107,15 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {})
     throw new Offline(e.message);
   }
   // Funnel down / Pi off: Tailscale answers with 502/503/504 instead of a refused connection.
-  if ([502, 503, 504].includes(res.status)) {
+  // A 5xx from the app itself (X-Latex-IDE header, e.g. LanguageTool down) goes to the client as is.
+  if (tunnelDown(res)) {
     setOnline(false);
     throw new Offline(`HTTP ${res.status}`);
   }
   if (res.status === 401) setToken(null); // revoked or expired - log in again
   return res;
 }
+const tunnelDown = (res) => [502, 503, 504].includes(res.status) && !res.headers.get('x-latex-ide');
 let online = true;
 const wsSockets = new Set(); // proxied browser sockets - dropped when we go offline so the client notices at once
 
@@ -127,7 +129,7 @@ function setOnline(v) {
   else for (const s of wsSockets) s.destroy();
 }
 
-// Active health check: any HTTP answer except the tunnel's 502-504 = server reachable.
+// Active health check: any HTTP answer except the tunnel's 502-504 (no app header) = server reachable.
 // Every 2 s with a 2 s limit -> offline shows within ~4 s, recovery within ~2 s.
 let pinging = false;
 async function pingRemote() {
@@ -135,7 +137,7 @@ async function pingRemote() {
   pinging = true;
   try {
     const r = await fetch(REMOTE + '/', { method: 'HEAD', signal: AbortSignal.timeout(2000), redirect: 'manual' });
-    setOnline(![502, 503, 504].includes(r.status));
+    setOnline(!tunnelDown(r));
   } catch {
     setOnline(false);
   } finally {
