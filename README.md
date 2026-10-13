@@ -90,6 +90,8 @@ liegen alle Nutzerdaten nur verschluesselt (AES-256-GCM, Dateinamen als HMAC) in
 beim Start dorthin und spiegelt Aenderungen entprellt zurueck. Falscher Schluessel = Start
 bricht ab. Bestehende Daten einmalig uebernehmen:
 `DATA_KEY=… VAULT_DIR=… node server/lib/vault.js encrypt <alter-Datenordner>` (Klartext bleibt, danach selbst loeschen).
+`VAULT_DIR` darf nicht in `DATA_DIR` liegen (und umgekehrt) und muss beschreibbar sein, sonst bricht der Start ab;
+ohne Docker `DATA_DIR` dafuer explizit setzen (Standard ist die Repo-Wurzel).
 Nicht gespiegelt: Build-Ausgaben, `desktop/`, `texlive`. Ohne Schluessel kein Zugriff: Schluessel separat sichern.
 
 ### Entwicklung (ohne Docker)

@@ -92,7 +92,17 @@ function start() {
   const vaultDir = path.resolve(VAULT_DIR);
   let v, seen;
   try {
+    // Vault im gespiegelten Ordner (oder umgekehrt) spiegelt seine eigenen Eintraege endlos.
+    const within = (a, b) => { const r = path.relative(b, a); return !r || (!r.startsWith('..') && !path.isAbsolute(r)); };
+    if (within(vaultDir, dataDir) || within(dataDir, vaultDir)) {
+      throw new Error(`VAULT_DIR (${vaultDir}) darf nicht in DATA_DIR (${dataDir}) liegen und umgekehrt - DATA_DIR explizit auf einen eigenen Ordner setzen`);
+    }
     v = makeVault(DATA_KEY, vaultDir);
+    fs.mkdirSync(vaultDir, { recursive: true });
+    // Ohne Schreibrecht laege alles nur im (fluechtigen) DATA_DIR. .tmp raeumt restore() auf.
+    const probe = path.join(vaultDir, '.schreibtest.tmp');
+    try { fs.writeFileSync(probe, ''); fs.unlinkSync(probe); }
+    catch (e) { throw new Error(`VAULT_DIR ${vaultDir} nicht beschreibbar: ${e.message}`); }
     fs.mkdirSync(dataDir, { recursive: true });
     ({ seen } = restore(v, vaultDir, dataDir));
   } catch (e) {

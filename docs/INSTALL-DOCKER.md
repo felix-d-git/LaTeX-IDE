@@ -88,6 +88,8 @@ mkdir -p "$LATEX_DATA_DIR/vault" && sudo chown 1000:1000 "$LATEX_DATA_DIR/vault"
 docker compose -f docker-compose.pi.yml up -d --build
 ```
 
+- Der Vault-Ordner muss vorher existieren und UID 1000 gehören (Zeile `mkdir`/`chown`
+  oben). Sonst bricht der Container-Start mit „VAULT_DIR … nicht beschreibbar“ ab.
 - TeX Live 2025 vorher auf dem Host installieren (install-tl, Ziel z. B. auf der SSD).
 - `DATA_KEY` getrennt von den Daten sichern (Passwortmanager): ohne ihn sind
   Daten und Backups unlesbar.
