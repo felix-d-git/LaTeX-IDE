@@ -172,6 +172,7 @@ function broadcast(root, msg, onlyUserId) {
 // delete+put renames) - their comments stay and get re-attached by comments.listAll.
 function pathMoved(root, oldRel, newRel) {
   collab.onPathMoved(root, oldRel, newRel);
+  state.movePathInMainFile(root, oldRel, newRel);
   if (comments.movePath(root, oldRel, newRel)) broadcast(root, { type: 'commentsChanged', path: newRel || oldRel });
 }
 
@@ -537,7 +538,7 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 // --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
 // Projects a user can reach (own + shared) as { id, name, shared }; id = stable project id used in MCP tokens.
 function mcpProjects(user) {
-  const own = projects.listProjects(userProjectsDir(user)).filter((p) => !(user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const own = projects.listProjects(userProjectsDir(user), user.isAdmin ? ['users'] : []).map((p) => p.root);
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
@@ -880,8 +881,7 @@ app.get('/api/collab/manifest', (req, res) => {
 app.get('/api/collab/owned', (req, res) => {
   const dir = userProjectsDir(req.user);
   const list = projects
-    .listProjects(dir)
-    .filter((p) => !(req.user.isAdmin && p.name === 'users'))
+    .listProjects(dir, req.user.isAdmin ? ['users'] : [])
     .map((p) => ({ name: p.name, projectId: projectIdOf(path.join(dir, p.name)) }));
   res.json({ projects: list });
 });
@@ -931,7 +931,7 @@ function importSourceRoot(req, id) {
 app.get('/api/import/projects', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const own = projects.listProjects(userProjectsDir(req.user)).filter((p) => !(req.user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const own = projects.listProjects(userProjectsDir(req.user), req.user.isAdmin ? ['users'] : []).map((p) => p.root);
   const roots = [...own, ...sharedRootsOf(req.user.id)]
     .map((r) => path.resolve(r))
     .filter((r) => r !== path.resolve(root) && importSourceRoot(req, projectIdOf(r)));
@@ -1088,7 +1088,7 @@ app.get('/api/projects/list', (req, res) => {
   res.json({
     activeRoot: state.getActiveRoot(req.user.id),
     recentRoots: state.getRecentRoots(req.user.id),
-    localProjects: projects.listProjects(projectsDir).filter((p) => !(req.user.isAdmin && p.name === 'users')),
+    localProjects: projects.listProjects(projectsDir, req.user.isAdmin ? ['users'] : []),
     sharedProjects: sharedRootsOf(req.user.id)
       .filter((root) => fs.existsSync(root))
       .map((root) => {
@@ -1170,6 +1170,7 @@ app.post('/api/projects/copy', (req, res) => {
     const projectsDir = userProjectsDir(req.user);
     const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
     projectFresh(req, projectsDir, root);
+    state.copyRoot(path.join(projectsDir, req.body.name), root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });

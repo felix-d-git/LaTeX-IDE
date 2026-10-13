@@ -5,15 +5,17 @@ const { isUtf8 } = require('buffer');
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.latex-ide-out', '.trash', '.latex-ide-history', '.latex-ide-yjs']);
 const IGNORED_EXT = new Set([
   '.aux', '.log', '.out', '.toc', '.lof', '.lot', '.fls',
-  '.fdb_latexmk', '.synctex.gz', '.bbl', '.blg', '.bcf', '.run.xml',
+  '.fdb_latexmk', '.bbl', '.blg', '.bcf',
 ]);
+// Mehrteilige Endungen: path.extname liefert nur die letzte.
+const IGNORED_SUFFIX = ['.synctex.gz', '.run.xml'];
 const IGNORED_FILES = new Set(['.latex-ide-comments.json']);
 
 function isIgnored(name) {
   if (IGNORED_DIRS.has(name)) return true;
-  if (IGNORED_FILES.has(name)) return true;
-  const ext = path.extname(name).toLowerCase();
-  return IGNORED_EXT.has(ext);
+  if (IGNORED_FILES.has(name) || name.startsWith('.latex-ide-comments.json.')) return true; // inkl. .tmp/.corrupt
+  const lower = name.toLowerCase();
+  return IGNORED_EXT.has(path.extname(lower)) || IGNORED_SUFFIX.some((s) => lower.endsWith(s));
 }
 
 function buildTree(root, relDir = '') {
@@ -59,7 +61,10 @@ function pickStartFile(root) {
   return first;
 }
 
-const TEXT_EXTENSIONS = new Set(['.tex', '.bib', '.sty', '.bst', '.cls', '.txt', '.md', '.cfg']);
+const TEXT_EXTENSIONS = new Set([
+  '.tex', '.ltx', '.bib', '.sty', '.cls', '.bst', '.bbx', '.cbx', '.lbx', '.dbx', '.def', '.dtx', '.ins', '.clo', '.cfg',
+  '.tikz', '.pgf', '.csv', '.dat', '.lua', '.txt', '.md',
+]);
 
 function isTextFile(relPath) {
   return TEXT_EXTENSIONS.has(path.extname(relPath).toLowerCase());
@@ -95,4 +100,21 @@ function toUtf8Text(buf) {
 
 const NOT_UTF8_MSG = 'Datei ist nicht UTF-8-kodiert (vermutlich Latin-1/Windows-1252). Zum Bearbeiten bitte nach UTF-8 umwandeln.';
 
-module.exports = { buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
+// Wie safeResolve, aber die Projektwurzel selbst ist kein gültiges Ziel (delete/rename/move).
+function resolveEntry(root, relPath) {
+  const abs = safeResolve(root, String(relPath ?? ''));
+  if (abs === path.resolve(root)) throw new Error('Die Projektwurzel kann nicht verändert werden.');
+  return abs;
+}
+
+function sameEntry(a, b) {
+  try {
+    const x = fs.lstatSync(a, { bigint: true });
+    const y = fs.lstatSync(b, { bigint: true });
+    return x.ino !== 0n && x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { sameEntry, resolveEntry, buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };

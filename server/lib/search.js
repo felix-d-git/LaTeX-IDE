@@ -12,8 +12,9 @@ function flattenFiles(nodes, out = []) {
 
 function toRegex(query, { regex, caseSensitive, wholeWord }) {
   let pattern = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (wholeWord) pattern = `\\b${pattern}\\b`;
-  return new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+  // \b kennt nur ASCII-Wortzeichen: mit Unicode-Lookarounds sind ä/ö/ü/ß Wortzeichen.
+  if (wholeWord) pattern = `(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`;
+  return new RegExp(pattern, (caseSensitive ? 'g' : 'gi') + (wholeWord ? 'u' : ''));
 }
 
 function searchProject(root, query, opts = {}) {
@@ -24,7 +25,7 @@ function searchProject(root, query, opts = {}) {
   for (const relPath of files) {
     const abs = path.join(root, relPath);
     const content = fs.readFileSync(abs, 'utf8');
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     lines.forEach((lineText, idx) => {
       re.lastIndex = 0;
       let match;
@@ -42,6 +43,8 @@ function searchProject(root, query, opts = {}) {
 }
 
 function replaceInProject(root, query, replacement, opts = {}) {
+  // Leere Suche matcht überall und würde jede Datei zerstören.
+  if (!query || typeof replacement !== 'string') throw new Error('Suchbegriff und Ersetzung sind erforderlich.');
   const re = toRegex(query, opts);
   const files = flattenFiles(buildTree(root));
   let totalReplacements = 0;
