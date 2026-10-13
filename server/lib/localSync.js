@@ -68,7 +68,14 @@ async function syncFolder(dir, indexPath, io) {
     const s = server.get(rel) || null;
     const l = local.get(rel) || null;
     const act = decide(s, l, index[rel]);
-    if (act === 'download') write(rel, await io.download(rel));
+    let got = s; // hash of what we now have locally = the next sync's base
+    // Base = hash of the bytes actually written: the file may change between manifest and download.
+    const pull = async () => {
+      const buf = await io.download(rel);
+      write(rel, buf);
+      got = sha1(buf);
+    };
+    if (act === 'download') await pull();
     else if (act === 'deleteLocal') fs.rmSync(abs(rel), { force: true });
     else if (act === 'upload') await io.upload(rel, fs.readFileSync(abs(rel)));
     else if (act === 'deleteRemote') await io.remove(rel);
@@ -77,12 +84,12 @@ async function syncFolder(dir, indexPath, io) {
       const mine = fs.readFileSync(abs(rel));
       write(copy, mine);
       await io.upload(copy, mine);
-      write(rel, await io.download(rel));
+      await pull();
       index[copy] = sha1(mine);
       conflicts.push(rel);
     }
     if (act === 'deleteLocal' || act === 'deleteRemote' || (act === 'same' && !s)) delete index[rel];
-    else index[rel] = act === 'upload' ? l : s;
+    else index[rel] = act === 'upload' ? l : got;
   }
   writeJson(indexPath, index);
   return { mainFile: man.mainFile, settings: man.settings || {}, projectId: man.projectId, conflicts };
