@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { renderTree } from './fileTree.js';
 
-const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', restore: 'Wiederhergestellt' };
+const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', autocompile: 'Auto-Kompilieren', restore: 'Wiederhergestellt' };
 
 function formatDateHeader(iso) {
   return new Date(iso).toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });

@@ -114,7 +114,7 @@ function maybeAutocompile(root, userId) {
   if (!main) return;
   const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && state.getActiveRoot(c.userId) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
-  for (const u of users) runCompile(root, main, u).catch(() => {});
+  for (const u of users) runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
 }
 
 // Multiple users can have different projects open at the same time, so
@@ -1430,7 +1430,8 @@ app.post('/api/main-file', (req, res) => {
 let compileChain = Promise.resolve();
 const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
 
-function runCompile(root, main, userId, meta) {
+// opts.auto: autocompile run - its version snapshot is throttled like autosave.
+function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const outRel = outRelFor(root, userId);
   const key = path.join(root, outRel);
   // Group mode: everyone on the project sees the run; individual: only the compiling user.
@@ -1440,7 +1441,7 @@ function runCompile(root, main, userId, meta) {
   const run = compileChain
     .then(() => {
       queuedCompile.delete(key);
-      return doCompile(root, main, outRel, to, meta);
+      return doCompile(root, main, outRel, to, meta, auto);
     })
     .catch((e) => {
       // Otherwise every client's status would stay on 'running'.
@@ -1463,7 +1464,7 @@ function safeSnapshot(root, opts) {
   }
 }
 
-async function doCompile(root, main, outRel, to, meta) {
+async function doCompile(root, main, outRel, to, meta, auto) {
   collab.flushRoot(root);
   const t0 = Date.now();
   const result = await compile(root, main, state.getProjectSettings(root), outRel);
@@ -1476,7 +1477,7 @@ async function doCompile(root, main, outRel, to, meta) {
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
   broadcast(root, { type: 'compileStatus', status, log: result.log }, to);
   if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath }, to);
-  safeSnapshot(root, { trigger: 'compile' });
+  safeSnapshot(root, { trigger: auto ? 'autocompile' : 'compile' });
   if (result.pdfPath) {
     try {
       wordCountByOut.set(path.join(root, outRel), wordcount.countWords(root, main));
