@@ -20,7 +20,7 @@ function load() {
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('kein JSON-Objekt');
     } catch (e) {
       try { fs.copyFileSync(DATA_PATH, `${DATA_PATH}.corrupt-${Date.now()}`); } catch (_) { /* best effort */ }
-      throw new Error(`auth-data.json ist beschädigt (${e.message}). Kopie als .corrupt-* gesichert; Datei prüfen oder aus dem Backup wiederherstellen: ${DATA_PATH}`);
+      throw new Error(`auth-data.json ist beschädigt/nicht lesbar (${e.message}). Kopie als .corrupt-* gesichert; Datei prüfen oder aus dem Backup wiederherstellen: ${DATA_PATH}`);
     }
     for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!Array.isArray(data[k])) data[k] = [];
     data.mcpTokens.forEach(migrateMcpToken);

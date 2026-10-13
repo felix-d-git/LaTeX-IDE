@@ -75,6 +75,9 @@ test('treeOps: Projektwurzel geschützt, Groß/Klein-Umbenennung erlaubt', () =>
 test('state.copyRoot kopiert Hauptdatei/Einstellungen, nicht Freigaben', () => {
   const dir = tmp('lide-state-');
   test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // getMainFile ignores a main file that does not exist (P12-B)
+  fs.mkdirSync(path.join(dir, 'b'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'b', 'haupt.tex'), 'x');
   const code = `
     const s = require(${JSON.stringify(path.join(__dirname, '..', 'server', 'state.js'))});
     const a = ${JSON.stringify(path.join(dir, 'a'))}, b = ${JSON.stringify(path.join(dir, 'b'))};
