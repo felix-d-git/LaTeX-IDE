@@ -112,6 +112,7 @@ function start() {
   console.log(`[vault] ${seen.size} Eintraege nach ${dataDir} entschluesselt`);
 
   const timers = new Map();
+  const mirrored = new Map(); // rel -> mtimeMs zuletzt gespiegelt (flush findet ungemeldete Schreibvorgaenge)
   const rel = (abs) => path.relative(dataDir, abs).split(path.sep).join('/');
   const sync = (r) => {
     timers.delete(r);
@@ -119,9 +120,9 @@ function start() {
     let st;
     try { st = fs.statSync(abs); } catch { return v.del(r); }
     if (!st.isFile()) return;
-    if (seen.get(r) === st.mtimeMs) { seen.delete(r); return; } // gerade erst wiederhergestellt
+    if (seen.get(r) === st.mtimeMs) { seen.delete(r); mirrored.set(r, st.mtimeMs); return; } // gerade erst wiederhergestellt
     seen.delete(r);
-    try { v.put(r, fs.readFileSync(abs)); } catch (e) { console.error(`[vault] Spiegeln von ${r} fehlgeschlagen: ${e.message}`); }
+    try { v.put(r, fs.readFileSync(abs)); mirrored.set(r, st.mtimeMs); } catch (e) { console.error(`[vault] Spiegeln von ${r} fehlgeschlagen: ${e.message}`); }
   };
   const queue = (abs) => {
     const r = rel(abs);
@@ -139,6 +140,22 @@ function start() {
   active = {
     flush() {
       for (const [r, t] of [...timers]) { clearTimeout(t); sync(r); }
+      // Dateien, deren Watcher-Event noch nicht da war (Schreiben kurz vor dem Beenden).
+      const walk = (dir) => {
+        let ents = [];
+        try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const d of ents) {
+          const abs = path.join(dir, d.name);
+          const r = rel(abs);
+          if (!r || r.startsWith('..') || v.excluded(r)) continue;
+          if (d.isDirectory()) walk(abs);
+          else if (d.isFile()) {
+            const st = fs.statSync(abs, { throwIfNoEntry: false });
+            if (st && mirrored.get(r) !== st.mtimeMs && seen.get(r) !== st.mtimeMs) sync(r);
+          }
+        }
+      };
+      walk(dataDir);
       return watcher.close();
     },
   };

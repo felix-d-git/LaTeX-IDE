@@ -86,6 +86,14 @@ for src in "$SCRIPT_DIR"/*; do
     rm -rf "$APP_DIR/$name"
     cp -R "$src" "$APP_DIR/$name"
 done
+# Paket ohne eingebaute Server-Adresse (z. B. direkt von GitHub): abfragen, sonst beendet sich die App.
+if [ ! -f "$APP_DIR/server.json" ]; then
+    while :; do
+        read -r -p "Adresse deines LatexIDE-Servers (http:// oder https://...): " SRV_URL
+        case "$SRV_URL" in http://*|https://*) break ;; *) echo "Bitte mit http:// oder https:// beginnen." ;; esac
+    done
+    printf '{"remoteUrl":"%s"}\n' "${SRV_URL%/}" > "$APP_DIR/server.json"
+fi
 if ! (cd "$APP_DIR" && "$NODE_DIR/bin/node" -e "for (const m of ['express', 'ws', 'http-proxy']) require.resolve(m)"); then
     echo "App-Abhaengigkeiten fehlen in $APP_DIR/node_modules - Installation abgebrochen." >&2
     exit 1

@@ -90,3 +90,5 @@ Repository öffentlich ist, beide Einträge löschen.
 Ohne Token: Banner zeigt keine Updates (Fehler „GitHub HTTP 404“ nur im
 API-Ergebnis), die Desktop-Downloads im Profil melden „kein Installationspaket
 verfügbar“, und das Skript bricht mit „Repo privat ohne GITHUB_TOKEN“ ab.
+
+Das GitHub-Repo fuer Update-Check und Downloads steht in `UPDATE_REPO` (`.env`, Standard `felix-d-git/latex-web-ide`); Forks setzen es auf ihr eigenes Repo.

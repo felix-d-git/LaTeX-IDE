@@ -128,6 +128,9 @@ services:
       - /pfad/zu/texlive:/data/texlive:ro
 ```
 
+Der Ordner muss `<Jahr>/bin/<arch>` enthalten (Jahr 2025–2027, `x86_64-linux` oder
+`aarch64-linux`). Prüfen: `docker compose exec app latexmk -v`.
+
 Eigene Anpassungen (Port, Speicherlimit, Proxy-Netz) gehören immer in
 `docker-compose.override.yml` – Updates fassen die Datei nicht an.
 

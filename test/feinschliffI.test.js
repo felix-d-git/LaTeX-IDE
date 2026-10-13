@@ -19,3 +19,12 @@ test('.env.example setzt PUBLIC_URL nicht aktiv', () => {
   const s = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
   assert.ok(!/^PUBLIC_URL=/m.test(s));
 });
+
+test('renamePath: nur Groß-/Kleinschreibung ändern', () => {
+  const treeOps = require('../server/lib/treeOps');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fsI-'));
+  fs.writeFileSync(path.join(root, 'a.tex'), 'x');
+  assert.strictEqual(treeOps.renamePath(root, 'a.tex', 'A.tex'), 'A.tex');
+  assert.ok(fs.readdirSync(root).includes('A.tex'));
+  fs.rmSync(root, { recursive: true, force: true });
+});

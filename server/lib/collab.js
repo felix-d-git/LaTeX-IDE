@@ -386,7 +386,8 @@ function onPathMoved(root, oldRel, newRel) {
   const prefix = oldRel + '/';
   for (const entry of [...docs.values()]) {
     if (entry.root !== root || (entry.rel !== oldRel && !entry.rel.startsWith(prefix))) continue;
-    if (entry.timer) persist(entry);
+    // Deleted (newRel null): a flush would write the file back; rename/move: flush before the file operation.
+    if (newRel) { if (entry.timer) persist(entry); } else { clearTimeout(entry.timer); entry.timer = null; entry.dirty = false; }
     for (const ws of [...entry.conns.keys()]) {
       try {
         ws.close(4404, 'moved');

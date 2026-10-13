@@ -118,7 +118,6 @@ export const api = {
   assignLabel: (keys, labelId, on) => req('POST', '/api/labels/assign', { keys, labelId, on }),
   getTree: () => req('GET', '/api/tree'),
   getFile: (relPath) => req('GET', `/api/file?path=${encodeURIComponent(relPath)}`),
-  saveFile: (relPath, content) => req('PUT', '/api/file', { path: relPath, content }),
   convertUtf8: (relPath) => req('POST', '/api/file/convert-utf8', { path: relPath }),
   setMainFile: (relPath) => req('POST', '/api/main-file', { path: relPath }),
   createFolder: (relPath) => req('POST', '/api/tree/folder', { path: relPath }),

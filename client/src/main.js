@@ -1084,6 +1084,12 @@ connectWs(forThisProject({
     loadTree();
   },
   treeChanged: () => loadTree(),
+  reconnected: async () => {
+    loadTree();
+    await commentsManager.loadAll();
+    const p = editorMgr.getActivePath();
+    if (p) editorMgr.refreshCommentsForPath(p, commentsManager.getForFile(p));
+  },
   // Nur das gerade gezeigte PDF neu laden (oder das erste, falls noch keins offen ist).
   pdfChanged: (msg) => {
     const cur = pdfViewer.getCurrentPath();

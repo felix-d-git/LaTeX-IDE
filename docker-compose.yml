@@ -1,7 +1,7 @@
 # LatexIDE-Server selbst hosten (Linux oder Docker Desktop unter Windows/macOS).
-# Einrichtung: siehe README.md, Abschnitt "Selbst hosten".
+# Einrichtung: siehe docs/INSTALL-DOCKER.md.
 #   cp .env.example .env   # ausfuellen
-#   mkdir -p data          # vorher anlegen, sonst gehoert er root
+#   mkdir -p data && sudo chown 1000:1000 data   # Container laeuft als uid 1000
 #   docker compose up -d --build
 # Eigene Anpassungen (Ports, Limits, Reverse-Proxy-Netz) in docker-compose.override.yml,
 # dann bleiben sie bei Updates erhalten.
