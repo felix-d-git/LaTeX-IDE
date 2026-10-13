@@ -22,8 +22,9 @@ export const DEFAULT_BINDINGS = {
   toggleSearch: { label: 'Projektsuche umschalten', scope: 'global', combos: ['ctrl+shift+f'] },
   toggleHistory: { label: 'Verlauf umschalten', scope: 'global', combos: ['ctrl+shift+h'] },
   closeTab: { label: 'Aktiven Tab schließen', scope: 'global', combos: ['ctrl+shift+w'] },
-  nextTab: { label: 'Nächster Tab', scope: 'global', combos: ['ctrl+shift+arrowright'] },
-  prevTab: { label: 'Vorheriger Tab', scope: 'global', combos: ['ctrl+shift+arrowleft'] },
+  // Nicht Strg+Umschalt+Pfeil: das markiert im Editor wortweise.
+  nextTab: { label: 'Nächster Tab', scope: 'global', combos: ['ctrl+alt+pagedown'] },
+  prevTab: { label: 'Vorheriger Tab', scope: 'global', combos: ['ctrl+alt+pageup'] },
   addComment: { label: 'Kommentar zur Auswahl hinzufügen', scope: 'editor', combos: ['ctrl+shift+m'] },
   syncToPdf: { label: 'Cursor-Position im PDF anzeigen', scope: 'editor', combos: ['ctrl+shift+j'] },
 };
@@ -118,11 +119,27 @@ export function tryHandleEditorKey(event, view) {
   return true;
 }
 
-// Für Editor-Tasten, die global gebunden sind und CodeMirrors eigene
-// Default-Bindung verdrängen sollen (Strg+Enter = insertBlankLine).
-export function isGlobalAction(event, actionId) {
+// Global gebundene Kombination im Editor: CodeMirrors eigene Bindung darf
+// nicht zusätzlich laufen (Strg+Umschalt+K = deleteLine, Strg+Enter =
+// insertBlankLine). Der Aufrufer ruft preventDefault, das Event bubbelt aber
+// weiter zum globalen Listener, der die Aktion ausführt.
+export function isGlobalCombo(event) {
   const combo = comboFromEvent(event);
-  return !!combo && findAction(combo, 'global') === actionId;
+  return !!combo && !!findAction(combo, 'global');
+}
+
+// Globale Aktionen nicht aus Dialogen, Eingabefeldern oder bei sichtbarer
+// Projektübersicht (dort nur deren Umschalter), sonst laufen sie im
+// verdeckten Editor bzw. zusätzlich zur Taste im Feld (Strg+Enter im
+// Kommentarfeld). Im Editor setzt CodeMirror-Handler selbst preventDefault.
+export function globalHotkeyAllowed(event, actionId, doc = document) {
+  const t = event.target;
+  const inEditor = !!t?.closest?.('.cm-editor');
+  if (event.defaultPrevented && !inEditor) return false;
+  if ([...doc.querySelectorAll('.modal-backdrop')].some((b) => b.getClientRects().length)) return false;
+  if (!inEditor && t?.closest?.('input, textarea, select, [contenteditable="true"]')) return false;
+  if (doc.getElementById('main')?.classList.contains('hidden')) return actionId === 'toggleAllProjects';
+  return true;
 }
 
 let globalListenerAttached = false;
@@ -135,6 +152,7 @@ export function initGlobalHotkeys() {
     if (!combo) return;
     const actionId = findAction(combo, 'global');
     if (!actionId || !handlers[actionId]) return;
+    if (!globalHotkeyAllowed(event, actionId)) return;
     event.preventDefault();
     handlers[actionId](event);
   });

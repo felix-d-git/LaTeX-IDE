@@ -26,7 +26,7 @@ import { acceptCompletion, nextSnippetField, hasNextSnippetField } from '@codemi
 import { search, openSearchPanel } from '@codemirror/search';
 import { commentField, setCommentsEffect } from './comments.js';
 import { trackChanges } from './trackChanges.js';
-import { tryHandleEditorKey, isGlobalAction } from './keybindings.js';
+import { tryHandleEditorKey, isGlobalCombo } from './keybindings.js';
 import { latexCompletionSource } from './latexCompletions.js';
 
 const addFlash = StateEffect.define();
@@ -227,10 +227,10 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
                 event.stopPropagation();
                 return true;
               }
-              // Kompilieren ist global gebunden: CM-Keymaps nicht laufen lassen
-              // (sonst fügt Mod-Enter eine Leerzeile ein), Event bubbelt aber
-              // weiter zum globalen Listener, der kompiliert.
-              if (isGlobalAction(event, 'compile')) {
+              // Global gebundene Kombination: CM-Keymaps nicht laufen lassen
+              // (sonst z. B. Mod-Enter = Leerzeile, Shift-Mod-k = Zeile
+              // löschen), Event bubbelt aber weiter zum globalen Listener.
+              if (isGlobalCombo(event)) {
                 event.preventDefault();
                 return true;
               }
