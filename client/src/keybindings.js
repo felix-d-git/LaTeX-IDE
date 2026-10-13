@@ -129,7 +129,7 @@ export function isGlobalCombo(event) {
 }
 
 // Globale Aktionen nicht aus Dialogen, Eingabefeldern oder bei sichtbarer
-// Projektübersicht (dort nur deren Umschalter), sonst laufen sie im
+// Projektübersicht/Verlaufsansicht (dort nur deren Umschalter), sonst laufen sie im
 // verdeckten Editor bzw. zusätzlich zur Taste im Feld (Strg+Enter im
 // Kommentarfeld). Im Editor setzt CodeMirror-Handler selbst preventDefault.
 export function globalHotkeyAllowed(event, actionId, doc = document) {
@@ -138,7 +138,7 @@ export function globalHotkeyAllowed(event, actionId, doc = document) {
   if (event.defaultPrevented && !inEditor) return false;
   if ([...doc.querySelectorAll('.modal-backdrop')].some((b) => b.getClientRects().length)) return false;
   if (!inEditor && t?.closest?.('input, textarea, select, [contenteditable="true"]')) return false;
-  if (doc.getElementById('main')?.classList.contains('hidden')) return actionId === 'toggleAllProjects';
+  if (doc.getElementById('main')?.classList.contains('hidden')) return actionId === 'toggleAllProjects' || actionId === 'toggleHistory';
   return true;
 }
 

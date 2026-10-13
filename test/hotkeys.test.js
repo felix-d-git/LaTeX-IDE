@@ -39,5 +39,7 @@ test('globale Aktion: im Editor ja (trotz preventDefault), in Feldern/Dialogen/√
   assert.equal(globalHotkeyAllowed(key('e', ['ctrl', 'shift'], target()), 'toggleErrors', doc({ modal: true })), false);
   assert.equal(globalHotkeyAllowed(key('f', ['ctrl'], target()), 'searchInFile', doc({ dashboard: true })), false);
   assert.equal(globalHotkeyAllowed(key('o', ['ctrl', 'shift'], target()), 'toggleAllProjects', doc({ dashboard: true })), true);
+  // Verlaufsansicht blendet #main ebenso aus: Strg+Umschalt+H muss sie wieder schlie√üen.
+  assert.equal(globalHotkeyAllowed(key('h', ['ctrl', 'shift'], target()), 'toggleHistory', doc({ dashboard: true })), true);
   assert.equal(globalHotkeyAllowed(key('e', ['ctrl', 'shift'], target()), 'toggleErrors', doc()), true);
 });
