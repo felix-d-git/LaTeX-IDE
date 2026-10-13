@@ -802,7 +802,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
     const abs = safeResolve(root, rel);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(buf).digest('hex'));
+    if (isTextFile(rel)) state.markSelfWrite(abs, buf);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
     if (isTextFile(rel)) collab.applyExternalText(root, rel, decodeText(buf));
@@ -895,7 +895,7 @@ function appendOrUpload(root, dir, name, text, replace = false) {
     const old = replace ? '' : decodeText(fs.readFileSync(abs));
     if (old === null) throw new Error(NOT_UTF8_MSG);
     const content = replace ? text : old.replace(/\s*$/, '\n\n') + text;
-    state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
+    state.markSelfWrite(abs, content);
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
     return relPath;
@@ -1310,8 +1310,7 @@ app.put('/api/file', (req, res) => {
   try {
     const { path: relPath, content } = req.body;
     const abs = safeResolve(root, relPath);
-    const hash = crypto.createHash('sha1').update(content).digest('hex');
-    state.selfWrittenHashes.set(relPath, hash);
+    state.markSelfWrite(abs, content);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
@@ -1779,7 +1778,7 @@ app.post('/api/history/restore', (req, res) => {
     if (buf === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
     collab.flushRoot(root);
     history.snapshot(root, { trigger: 'restore' }); // aktuellen Stand sichern
-    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(buf).digest('hex'));
+    state.markSelfWrite(abs, buf);
     fs.writeFileSync(abs, buf);
     collab.applyExternalText(root, file, decodeText(buf)); // live fuer alle offenen Editoren
     const entry = safeSnapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
@@ -1827,7 +1826,7 @@ app.post('/api/file/convert-utf8', (req, res) => {
     collab.flushRoot(root);
     history.snapshot(root, { label: `Vor UTF-8-Umwandlung: ${file}`, trigger: 'restore' });
     const content = toUtf8Text(buf);
-    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
+    state.markSelfWrite(abs, content);
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, file, content);
     res.json({ ok: true, converted: true });
@@ -1845,7 +1844,7 @@ app.post('/api/replace', (req, res) => {
     const result = replaceInProject(root, query, replacement, { regex, caseSensitive, wholeWord });
     for (const f of result.changedFiles) {
       const content = fs.readFileSync(path.join(root, f.file), 'utf8');
-      state.selfWrittenHashes.set(f.file, crypto.createHash('sha1').update(content).digest('hex'));
+      state.markSelfWrite(path.join(root, f.file), content);
       collab.applyExternalText(root, f.file, content);
       broadcast(root, { type: 'fileChanged', path: f.file, content, changedRanges: [], source: 'replace' });
     }
@@ -1867,7 +1866,7 @@ wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD })
 const yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 
 collab.setHooks({
-  markSelfWrite: (root, rel, text) => state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(text).digest('hex')),
+  markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
   onPersist: (root) => {
     safeSnapshot(root, { trigger: 'autosave' });
     maybeAutocompile(root, null);

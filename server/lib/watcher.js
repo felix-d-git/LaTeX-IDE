@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { diffLines } = require('diff');
 const { isIgnored, isTextFile, decodeText } = require('./fsTree');
-const { selfWrittenHashes } = require('../state');
+const { takeSelfWrite } = require('../state');
 const { OUT_DIR } = require('./compile');
 
 function hashOf(content) {
@@ -58,10 +58,8 @@ function startWatcher(root, broadcast) {
     const content = decodeText(buf);
 
     const newHash = hashOf(buf);
-    const expectedSelfHash = selfWrittenHashes.get(relPath);
-    if (expectedSelfHash === newHash) {
+    if (takeSelfWrite(absPath, newHash)) {
       // This is the echo of our own save via PUT /api/file - not an external edit.
-      selfWrittenHashes.delete(relPath);
       lastContent.set(relPath, content);
       return;
     }

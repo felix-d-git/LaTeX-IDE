@@ -248,7 +248,24 @@ function moveLabelKey(userId, oldKey, newKey) {
 // Tracks hashes of content this server itself just wrote, so the
 // file watcher can tell "external edit" (e.g. Claude Code) apart from
 // our own save round-trip and only flash-highlight real external changes.
-const selfWrittenHashes = new Map();
+// Keyed by absolute path: every new project has a main.tex, a relative key collides across projects.
+const selfWrites = new Map(); // path.resolve(abs) -> { hash, at }
+const SELF_WRITE_TTL_MS = 10000; // entries without a watcher echo (binary, no watcher) expire
+
+function markSelfWrite(abs, content) {
+  selfWrites.set(path.resolve(abs), { hash: require('crypto').createHash('sha1').update(content).digest('hex'), at: Date.now() });
+}
+
+// true = this change is the echo of our own write (entry consumed).
+function takeSelfWrite(abs, hash) {
+  const k = path.resolve(abs);
+  const e = selfWrites.get(k);
+  if (!e) return false;
+  if (Date.now() - e.at > SELF_WRITE_TTL_MS) { selfWrites.delete(k); return false; }
+  if (e.hash !== hash) return false;
+  selfWrites.delete(k);
+  return true;
+}
 
 module.exports = {
   workspace,
@@ -262,7 +279,8 @@ module.exports = {
   setProjectSettings,
   addCompileTime,
   getCompileTimes,
-  selfWrittenHashes,
+  markSelfWrite,
+  takeSelfWrite,
   getShares,
   setShares,
   sharedRootsFor,
