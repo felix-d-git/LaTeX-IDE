@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { diffLines } = require('diff');
-const { isIgnored, isTextFile } = require('./fsTree');
+const { isIgnored, isTextFile, decodeText } = require('./fsTree');
 const { selfWrittenHashes } = require('../state');
 const { OUT_DIR } = require('./compile');
 
@@ -48,14 +48,16 @@ function startWatcher(root, broadcast) {
 
     if (!isTextFile(relPath)) return;
 
-    let content;
+    let buf;
     try {
-      content = fs.readFileSync(absPath, 'utf8');
+      buf = fs.readFileSync(absPath);
     } catch (e) {
       return;
     }
+    // null = not UTF-8 -> collab drops the live doc instead of folding in U+FFFD.
+    const content = decodeText(buf);
 
-    const newHash = hashOf(content);
+    const newHash = hashOf(buf);
     const expectedSelfHash = selfWrittenHashes.get(relPath);
     if (expectedSelfHash === newHash) {
       // This is the echo of our own save via PUT /api/file - not an external edit.
@@ -65,7 +67,7 @@ function startWatcher(root, broadcast) {
     }
 
     const previous = lastContent.has(relPath) ? lastContent.get(relPath) : content;
-    const diff = diffLines(previous, content);
+    const diff = content === null || previous === null ? [] : diffLines(previous, content);
 
     let lineCursor = 0;
     const changedRanges = [];

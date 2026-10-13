@@ -12,7 +12,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored } = require('./lib/fsTree');
+const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -753,7 +753,7 @@ app.get('/api/collab/epoch', (req, res) => {
     safeResolve(root, req.query.path);
     res.json({ projectId: projectIdOf(root), epoch: collab.getEpoch(root, req.query.path), maxPayload: collab.WS_MAX_PAYLOAD });
   } catch (e) {
-    res.status(404).json({ error: e.message });
+    res.status(e.notUtf8 ? 415 : 404).json({ error: e.message, notUtf8: !!e.notUtf8 });
   }
 });
 
@@ -805,7 +805,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     state.selfWrittenHashes.set(rel, crypto.createHash('sha1').update(buf).digest('hex'));
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
-    if (isTextFile(rel)) collab.applyExternalText(root, rel, buf.toString('utf8'));
+    if (isTextFile(rel)) collab.applyExternalText(root, rel, decodeText(buf));
     safeSnapshot(root, { trigger: 'autosave' });
     res.json({ ok: true });
   } catch (e) {
@@ -892,7 +892,9 @@ function appendOrUpload(root, dir, name, text, replace = false) {
     // Bestehende .bib ergänzen, auch wenn sie gerade live bearbeitet wird.
     collab.flushRoot(root);
     const relPath = path.relative(root, abs).split(path.sep).join('/');
-    const content = replace ? text : fs.readFileSync(abs, 'utf8').replace(/\s*$/, '\n\n') + text;
+    const old = replace ? '' : decodeText(fs.readFileSync(abs));
+    if (old === null) throw new Error(NOT_UTF8_MSG);
+    const content = replace ? text : old.replace(/\s*$/, '\n\n') + text;
     state.selfWrittenHashes.set(relPath, crypto.createHash('sha1').update(content).digest('hex'));
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, relPath, content);
@@ -1288,7 +1290,11 @@ app.get('/api/file', (req, res) => {
     const abs = safeResolve(root, req.query.path);
     collab.flushRoot(root);
     if (isTextFile(req.query.path)) {
-      res.json({ path: req.query.path, content: fs.readFileSync(abs, 'utf8'), binary: false });
+      const buf = fs.readFileSync(abs);
+      const text = decodeText(buf);
+      if (text !== null) return res.json({ path: req.query.path, content: text, binary: false });
+      // Read-only view of a Latin-1 file; editing needs "Nach UTF-8 umwandeln".
+      res.json({ path: req.query.path, content: new TextDecoder('windows-1252').decode(buf), binary: false, notUtf8: true });
     } else {
       const buf = fs.readFileSync(abs);
       res.json({ path: req.query.path, content: buf.toString('base64'), binary: true });
@@ -1392,7 +1398,7 @@ app.post('/api/tree/upload', (req, res) => {
     const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
     // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
     if (req.body.overwrite && isTextFile(relPath)) {
-      collab.applyExternalText(root, relPath, Buffer.from(req.body.content, 'base64').toString('utf8'));
+      collab.applyExternalText(root, relPath, decodeText(Buffer.from(req.body.content, 'base64')));
     }
     res.json({ ok: true, path: relPath });
   } catch (e) {
@@ -1769,13 +1775,13 @@ app.post('/api/history/restore', (req, res) => {
   try {
     if (!id || !file || !isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('id und Textdatei sind erforderlich.');
     const abs = safeResolve(root, file);
-    const content = history.readSnapshotFile(root, id, file);
-    if (content === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
+    const buf = history.readSnapshotBuffer(root, id, file);
+    if (buf === null) throw new Error('Datei war in dieser Version nicht vorhanden.');
     collab.flushRoot(root);
     history.snapshot(root, { trigger: 'restore' }); // aktuellen Stand sichern
-    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
-    fs.writeFileSync(abs, content, 'utf8');
-    collab.applyExternalText(root, file, content); // live fuer alle offenen Editoren
+    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(buf).digest('hex'));
+    fs.writeFileSync(abs, buf);
+    collab.applyExternalText(root, file, decodeText(buf)); // live fuer alle offenen Editoren
     const entry = safeSnapshot(root, { label: `Wiederhergestellt: ${file}`, trigger: 'restore' });
     res.json({ ok: true, entry });
   } catch (e) {
@@ -1802,6 +1808,29 @@ app.get('/api/search', (req, res) => {
       wholeWord: wholeWord === 'true',
     });
     res.json({ results });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Latin-1 -> UTF-8, only on request; the snapshot before it keeps the original bytes.
+app.post('/api/file/convert-utf8', (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (!canWriteRoot(req.user, root)) return res.status(403).json({ error: 'Kein Schreibrecht.' });
+  const file = String((req.body && req.body.path) || '');
+  try {
+    if (!isTextFile(file) || isIgnored(file.split('/')[0])) throw new Error('Keine Textdatei.');
+    const abs = safeResolve(root, file);
+    const buf = fs.readFileSync(abs);
+    if (decodeText(buf) !== null) return res.json({ ok: true, converted: false });
+    collab.flushRoot(root);
+    history.snapshot(root, { label: `Vor UTF-8-Umwandlung: ${file}`, trigger: 'restore' });
+    const content = toUtf8Text(buf);
+    state.selfWrittenHashes.set(file, crypto.createHash('sha1').update(content).digest('hex'));
+    fs.writeFileSync(abs, content, 'utf8');
+    collab.applyExternalText(root, file, content);
+    res.json({ ok: true, converted: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

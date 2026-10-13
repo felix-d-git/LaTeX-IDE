@@ -12,8 +12,31 @@ export function createPreviewManager(container) {
   const tabs = new Set();
   let activePath = null;
 
-  function render(path, kind) {
+  function render(path, kind, legacy) {
     container.innerHTML = '';
+    if (kind === 'legacy') {
+      // Text file that is not UTF-8: shown read-only, editing only after converting.
+      const box = document.createElement('div');
+      box.className = 'file-preview-legacy';
+      const bar = document.createElement('div');
+      bar.className = 'file-preview-legacy-bar';
+      const msg = document.createElement('span');
+      msg.textContent = legacy.message;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'primary';
+      btn.textContent = 'Nach UTF-8 umwandeln';
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        Promise.resolve(legacy.onConvert()).finally(() => (btn.disabled = false));
+      });
+      bar.append(msg, btn);
+      const pre = document.createElement('pre');
+      pre.textContent = legacy.content;
+      box.append(bar, pre);
+      container.appendChild(box);
+      return;
+    }
     const url = `/api/raw?path=${encodeURIComponent(path)}&t=${Date.now()}`;
     if (kind === 'image') {
       const img = document.createElement('img');
@@ -28,10 +51,10 @@ export function createPreviewManager(container) {
     }
   }
 
-  function openFile(path, kind) {
+  function openFile(path, kind, legacy) {
     tabs.add(path);
     activePath = path;
-    render(path, kind);
+    render(path, kind, legacy);
   }
 
   function closeTab(path) {

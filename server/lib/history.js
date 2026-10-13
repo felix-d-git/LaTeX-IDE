@@ -60,7 +60,8 @@ function walkTextFiles(root, relDir = '', out = []) {
 function sameFiles(root, prev, files) {
   if (prev.files.length !== files.length || prev.files.some((f, i) => f !== files[i])) return false;
   try {
-    return files.every((f) => readSnapshotFile(root, prev.id, f) === readCurrentFile(root, f));
+    // Bytes, not decoded text: two Latin-1 files differing in an umlaut decode to the same U+FFFD.
+    return files.every((f) => readSnapshotBuffer(root, prev.id, f).equals(fs.readFileSync(path.join(root, f))));
   } catch (e) {
     return false; // unreadable -> treat as changed
   }
@@ -133,6 +134,11 @@ function readSnapshotFile(root, id, relPath) {
   return fs.readFileSync(abs, 'utf8');
 }
 
+function readSnapshotBuffer(root, id, relPath) {
+  const abs = path.join(historyRoot(root), SNAPSHOTS_DIR, id, relPath);
+  return fs.existsSync(abs) ? fs.readFileSync(abs) : null;
+}
+
 function readCurrentFile(root, relPath) {
   const abs = path.join(root, relPath);
   if (!fs.existsSync(abs)) return null;
@@ -153,4 +159,4 @@ function diffBetween(root, fromId, toId, relPath) {
   return diffLines(oldContent, newContent);
 }
 
-module.exports = { snapshot, readSnapshotFile, list, getEntry, addLabel, diffBetween, HISTORY_DIR };
+module.exports = { snapshot, readSnapshotFile, readSnapshotBuffer, list, getEntry, addLabel, diffBetween, HISTORY_DIR };

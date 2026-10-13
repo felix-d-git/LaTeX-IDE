@@ -19,7 +19,7 @@ const awarenessProtocol = require('y-protocols/awareness');
 const encoding = require('lib0/encoding');
 const decoding = require('lib0/decoding');
 const { diffLines, diffChars } = require('diff');
-const { safeResolve } = require('./fsTree');
+const { safeResolve, decodeText, NOT_UTF8_MSG } = require('./fsTree');
 
 const STATE_DIR = '.latex-ide-yjs';
 const MSG_SYNC = 0;
@@ -87,8 +87,10 @@ function applyText(ytext, next, origin) {
 
 function loadDoc(root, rel) {
   const abs = safeResolve(root, rel);
-  const raw = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
-  if (raw === null) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  if (!fs.existsSync(abs)) throw Object.assign(new Error('Datei nicht gefunden.'), { notFound: true });
+  const raw = decodeText(fs.readFileSync(abs));
+  // Seeding a Latin-1 file would turn every umlaut into U+FFFD on the first save.
+  if (raw === null) throw Object.assign(new Error(NOT_UTF8_MSG), { notUtf8: true });
   const disk = normEol(raw);
   const ydoc = new Y.Doc({ gc: true });
   const sp = statePath(root, rel);
@@ -203,7 +205,10 @@ function persist(entry) {
   try {
     const abs = safeResolve(entry.root, entry.rel);
     // Changes that came *from* disk don't need writing back (a CRLF file stays as it is).
-    const onDisk = () => normEol(fs.readFileSync(abs, 'utf8'));
+    const onDisk = () => {
+      const t = decodeText(fs.readFileSync(abs));
+      return t === null ? null : normEol(t);
+    };
     if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || onDisk() !== text) {
       hooks.markSelfWrite(entry.root, entry.rel, text);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -284,7 +289,7 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
   try {
     entry = getDoc(root, rel);
   } catch (e) {
-    return ws.close(4404, 'not found');
+    return e.notUtf8 ? ws.close(4415, 'not utf-8') : ws.close(4404, 'not found');
   }
   // Client cache belongs to an older identity of this doc -> it must drop it
   // instead of merging (which would duplicate the whole text).
@@ -329,10 +334,30 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
 // Text changed on disk by someone other than collab (search/replace, external
 // editor, upload over an existing file): fold into the live doc if one exists,
 // otherwise the next load reconciles from disk anyway.
+// text === null: the new content is not UTF-8 (decodeText) -> the live doc can't hold it.
 function applyExternalText(root, rel, text) {
   const entry = docs.get(keyOf(root, rel));
   if (!entry) return;
+  if (text === null) return dropDoc(entry, 4415, 'not utf-8');
   applyText(entry.ytext, normEol(text), 'disk');
+}
+
+// Unload a live doc WITHOUT saving: the file on disk was replaced by something the doc
+// can't represent, and a pending save would overwrite it. Clients get `code`; the
+// .ystate stays, so a later UTF-8 version folds in with minimal edits (anchors kept).
+function dropDoc(entry, code, reason) {
+  clearTimeout(entry.timer);
+  entry.timer = null;
+  entry.dirty = false;
+  docs.delete(entry.key);
+  for (const ws of [...entry.conns.keys()]) {
+    try {
+      ws.close(code, reason);
+    } catch {}
+    closeConn(entry, ws);
+  }
+  entry.awareness.destroy();
+  entry.ydoc.destroy();
 }
 
 // File or folder renamed/moved/deleted: kick connected clients off the old

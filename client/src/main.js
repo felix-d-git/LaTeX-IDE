@@ -260,10 +260,8 @@ function tabIconFor(path) {
 function renderTabbar() {
   els.tabbar.innerHTML = '';
   for (const path of openOrder) {
-    const kind = fileKind(path);
-    const paneKind = kind === 'text' ? 'text' : 'preview';
-    const activePathForKind = paneKind === 'text' ? editorMgr.getActivePath() : previewMgr.getActivePath();
-    const isActive = activePaneKind === paneKind && activePathForKind === path;
+    const paneKind = editorMgr.isOpen(path) ? 'text' : 'preview';
+    const isActive = getActiveOpenPath() === path;
 
     const tab = document.createElement('div');
     tab.className = 'tab' + (isActive ? ' active' : '');
@@ -289,8 +287,7 @@ function renderTabbar() {
     close.innerHTML = '<svg class="ol-icon"><use href="#i-close"></use></svg>';
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (paneKind === 'text') editorMgr.closeTab(path);
-      else previewMgr.closeTab(path);
+      closeAnyTab(path);
       openOrder = openOrder.filter((p) => p !== path);
       renderTabbar();
     });
@@ -305,11 +302,15 @@ function renderTabbar() {
 function closeActiveTab() {
   const path = getActiveOpenPath();
   if (!path) return;
-  const paneKind = fileKind(path) === 'text' ? 'text' : 'preview';
-  if (paneKind === 'text') editorMgr.closeTab(path);
-  else previewMgr.closeTab(path);
+  closeAnyTab(path);
   openOrder = openOrder.filter((p) => p !== path);
   renderTabbar();
+}
+
+// Text files that are not UTF-8 sit in the preview pane, so close in both.
+function closeAnyTab(path) {
+  editorMgr.closeTab(path);
+  previewMgr.closeTab(path);
 }
 
 function cycleTab(delta) {
@@ -334,6 +335,7 @@ async function openFile(path, line) {
     try {
       await openSession(path);
     } catch (e) {
+      if (e.status === 415) return openLegacyFile(path, e.data && e.data.error);
       alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
       openOrder = openOrder.filter((p) => p !== path);
       renderTabbar();
@@ -360,12 +362,40 @@ async function openFile(path, line) {
   }
 }
 
+// Latin-1 etc.: read-only view; converting snapshots first (history) and then opens the editor.
+async function openLegacyFile(path, message) {
+  let file;
+  try {
+    file = await api.getFile(path);
+  } catch (e) {
+    alert(`Datei kann nicht geöffnet werden: ${path}\n${e.message}`);
+    openOrder = openOrder.filter((p) => p !== path);
+    renderTabbar();
+    return;
+  }
+  editorMgr.closeTab(path);
+  previewMgr.openFile(path, 'legacy', {
+    message: message || 'Datei ist nicht UTF-8-kodiert.',
+    content: file.content,
+    onConvert: async () => {
+      try {
+        await api.convertUtf8(path);
+      } catch (e) {
+        alert(`Umwandeln fehlgeschlagen: ${e.message}`);
+        return;
+      }
+      previewMgr.closeTab(path);
+      openFile(path);
+    },
+  });
+  showPane('preview');
+  renderTabbar();
+  refreshTreeHighlight();
+}
+
 function closeTabsUnder(relPath) {
   const affected = openOrder.filter((p) => p === relPath || p.startsWith(relPath + '/'));
-  for (const p of affected) {
-    if (fileKind(p) === 'text') editorMgr.closeTab(p);
-    else previewMgr.closeTab(p);
-  }
+  for (const p of affected) closeAnyTab(p);
   openOrder = openOrder.filter((p) => !affected.includes(p));
   renderTabbar();
 }
@@ -524,10 +554,7 @@ async function loadTree() {
   if (seq !== treeSeq) return;
   if (projectId !== currentProjectId) {
     // Other project: tabs of the previous one point at files that don't exist here.
-    for (const p of [...openOrder]) {
-      if (fileKind(p) === 'text') editorMgr.closeTab(p);
-      else previewMgr.closeTab(p);
-    }
+    for (const p of [...openOrder]) closeAnyTab(p);
     openOrder = [];
     closeAllSessions();
     setCollabProject(projectId);

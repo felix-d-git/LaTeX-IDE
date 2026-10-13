@@ -189,6 +189,10 @@ async function createSession(path) {
     } else if (code === 4404) {
       closeSession(path);
       hooks.onGone(path);
+    } else if (code === 4415) {
+      // File was replaced by a non-UTF-8 one: reopening shows it read-only.
+      closeSession(path);
+      hooks.onReset(path);
     } else if (code === 1009) {
       alert(
         `Diese Änderung ist zu groß für die Live-Synchronisierung (max. ${Math.round(maxPayload / 1048576)} MB) und wurde NICHT auf dem Server gespeichert. ` +

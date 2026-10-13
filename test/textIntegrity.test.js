@@ -206,3 +206,64 @@ test('MCP editText normalizes CRLF (#27)', () => {
   assert.strictEqual(collab.readText(root, 'd.tex'), 'a\nb\n');
   assert.strictEqual(fs.readFileSync(path.join(root, 'd.tex'), 'utf8'), 'a\nb\n');
 });
+
+// --- #43: Latin-1 --------------------------------------------------------------
+
+const LATIN1 = Buffer.from('\\usepackage[latin1]{inputenc}\nGr\xf6\xdfe und \xdcbung\n', 'latin1');
+
+test('Latin-1 file: no live doc, the socket is closed with 4415, disk untouched (#43)', () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'l.tex'), LATIN1);
+  assert.throws(() => collab.getEpoch(root, 'l.tex'), (e) => e.notUtf8 === true);
+  const ws = new EventEmitter();
+  ws.readyState = 1;
+  ws.close = (code) => (ws.closeCode = code);
+  collab.handleConnection(ws, root, 'l.tex', null);
+  assert.strictEqual(ws.closeCode, 4415);
+  assert.throws(() => collab.editText(root, 'l.tex', (t) => t + 'x'), /nicht UTF-8/);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'l.tex')), LATIN1);
+});
+
+test('live doc replaced by a Latin-1 file: clients dropped, pending edit not written over it (#43)', () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'm.tex'), 'Größe\n');
+  const epoch = collab.getEpoch(root, 'm.tex');
+  const doc = new Y.Doc();
+  const ws = connect(root, 'm.tex', doc, epoch);
+  doc.getText('content').insert(0, 'neu '); // pending save (500 ms timer)
+  fs.writeFileSync(path.join(root, 'm.tex'), LATIN1);
+  collab.applyExternalText(root, 'm.tex', null);
+  collab.flushAll();
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'm.tex')), LATIN1);
+  ws();
+});
+
+test('UTF-8 helpers: decodeText, conversion with inputenc (#43)', () => {
+  const { decodeText, toUtf8Text } = require('../server/lib/fsTree');
+  assert.strictEqual(decodeText(LATIN1), null);
+  assert.strictEqual(decodeText(Buffer.from('\uFEFFäb', 'utf8')), 'äb');
+  assert.strictEqual(toUtf8Text(LATIN1), '\\usepackage[utf8]{inputenc}\nGröße und Übung\n');
+  assert.strictEqual(toUtf8Text(Buffer.from('\\usepackage[ansinew]{inputenc} \x80', 'latin1')), '\\usepackage[utf8]{inputenc} €');
+});
+
+test('replaceInProject skips files that are not UTF-8 (#43)', () => {
+  const { replaceInProject } = require('../server/lib/search');
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'a.tex'), 'und\n');
+  fs.writeFileSync(path.join(root, 'b.tex'), LATIN1);
+  const r = replaceInProject(root, 'und', 'and', {});
+  assert.deepStrictEqual(r.changedFiles, [{ file: 'a.tex', count: 1 }]);
+  assert.deepStrictEqual(r.skippedFiles, ['b.tex']);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'b.tex')), LATIN1);
+});
+
+test('history: Latin-1 byte change makes a snapshot, snapshot bytes kept (#43)', () => {
+  const history = require('../server/lib/history');
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'a.tex'), LATIN1);
+  const s1 = history.snapshot(root, { trigger: 'compile' });
+  fs.writeFileSync(path.join(root, 'a.tex'), Buffer.from('Gr\xe4\xdfe\n', 'latin1'));
+  const s2 = history.snapshot(root, { trigger: 'compile' });
+  assert.ok(s2, 'changed Latin-1 bytes must give a new snapshot');
+  assert.deepStrictEqual(history.readSnapshotBuffer(root, s1.id, 'a.tex'), LATIN1);
+});
