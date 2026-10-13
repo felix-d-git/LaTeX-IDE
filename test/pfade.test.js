@@ -13,8 +13,45 @@ function tmp() {
   return d;
 }
 
-process.env.DATA_DIR = tmp();
+// Old install with relative DATA_DIR: relative root keys next to absolute ones (shares were always absolute).
+const DATA = tmp();
+const BASE = path.join(__dirname, '..');
+const relA = 'data/projects/A';
+const absA = path.resolve(BASE, relA);
+fs.writeFileSync(path.join(DATA, 'workspace.json'), JSON.stringify({
+  activeRootByUser: { u1: relA },
+  recentRootsByUser: { u1: [relA, absA, 'data/projects/B'] },
+  mainFileByRoot: { [relA]: 'thesis.tex', [absA]: 'main.tex' },
+  settingsByRoot: { [relA]: { compiler: 'xelatex' }, [absA]: { compiler: 'pdflatex' } },
+  compileTimesByRoot: { [relA]: [{ ms: 1, at: 1 }, { ms: 3, at: 3 }], [absA]: [{ ms: 2, at: 2 }] },
+  sharesByRoot: { [absA]: ['u2'] },
+}));
+process.env.DATA_DIR = DATA;
 const state = require('../server/state');
+
+test('relative Projektpfade aus workspace.json werden einmalig absolut (#34)', () => {
+  const ws = JSON.parse(fs.readFileSync(path.join(DATA, 'workspace.json'), 'utf8'));
+  assert.strictEqual(ws.activeRootByUser.u1, absA);
+  assert.deepStrictEqual(ws.recentRootsByUser.u1, [absA, path.resolve(BASE, 'data/projects/B')]);
+  assert.strictEqual(ws.mainFileByRoot[absA], 'thesis.tex'); // relative (UI) entry wins
+  assert.strictEqual(ws.settingsByRoot[absA].compiler, 'xelatex');
+  assert.deepStrictEqual(ws.compileTimesByRoot[absA].map((e) => e.ms), [1, 2, 3]); // merged
+  assert.deepStrictEqual(ws.sharesByRoot[absA], ['u2']);
+  for (const k of ['mainFileByRoot', 'settingsByRoot', 'compileTimesByRoot']) {
+    assert.ok(Object.keys(ws[k]).every((r) => path.isAbsolute(r)), k);
+  }
+});
+
+test('Projektschlüssel unabhängig von der Schreibweise des Pfads (#34)', () => {
+  const root = path.join(tmp(), 'P');
+  const odd = root + path.sep + '.' + path.sep; // trailing "./"
+  state.setProjectSettings(odd, { compiler: 'lualatex' });
+  state.setMainFile(path.relative(process.cwd(), root), 'doc.tex');
+  state.setActiveRoot('u3', odd);
+  assert.strictEqual(state.getProjectSettings(root).compiler, 'lualatex');
+  assert.strictEqual(state.getMainFile(root), 'doc.tex');
+  assert.strictEqual(state.getActiveRoot('u3'), root);
+});
 
 test('Selbstschreib-Erkennung nach absolutem Pfad: gleichnamige Datei in zwei Projekten (#33)', async () => {
   const { startWatcher } = require('../server/lib/watcher');

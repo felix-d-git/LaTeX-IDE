@@ -1,4 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
+// otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
+if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirname, '..', process.env.DATA_DIR);
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
@@ -59,7 +62,7 @@ function activeMainPdfAbs(root, userId) {
 }
 
 const PORT = process.env.PORT || 3077;
-const PROJECTS_DIR = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
+const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
 
 const app = express();
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
@@ -1022,7 +1025,7 @@ function resolveProjectRoot(projectsDir, name) {
 }
 
 app.post('/api/projects/open', (req, res) => {
-  const { root } = req.body;
+  const root = req.body.root ? path.resolve(String(req.body.root)) : '';
   if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     return res.status(400).json({ error: 'Ordner nicht gefunden.' });
   }
@@ -1055,7 +1058,7 @@ app.post('/api/projects/create', (req, res) => {
 app.post('/api/projects/rename', (req, res) => {
   const { oldName, newName } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, oldName || '');
+  const root = path.resolve(path.join(projectsDir, oldName || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses umbenannt wird.' });
   }
@@ -1083,7 +1086,7 @@ app.post('/api/projects/copy', (req, res) => {
 app.post('/api/projects/archive', (req, res) => {
   const { name } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, name || '');
+  const root = path.resolve(path.join(projectsDir, name || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses archiviert wird.' });
   }
@@ -1244,7 +1247,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
 app.post('/api/projects/trash', (req, res) => {
   const { name } = req.body;
   const projectsDir = userProjectsDir(req.user);
-  const root = path.join(projectsDir, name || '');
+  const root = path.resolve(path.join(projectsDir, name || ''));
   if (state.getActiveRoot(req.user.id) === root) {
     return res.status(400).json({ error: 'Bitte zuerst ein anderes Projekt öffnen, bevor dieses in den Papierkorb verschoben wird.' });
   }

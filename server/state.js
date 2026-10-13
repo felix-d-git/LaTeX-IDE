@@ -30,6 +30,40 @@ if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { e
 if (!workspace.labelsByUser) workspace.labelsByUser = {};
 if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root -> [{ ms, at, estimateMs? }], letzte 10 Läufe
 
+// Every root key is absolute + normalized; a relative DATA_DIR (./data) used to store relative ones.
+const rk = (r) => (r ? path.resolve(r) : r);
+const ROOT_MAPS = ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot'];
+
+// One-time: relative roots from older installs -> absolute against the repo root (where index.js
+// resolves DATA_DIR). Collisions: the relative entry came from the UI and wins for settings/main
+// file; compile times are merged; shares/roles/links were always stored absolute, those win.
+function migrateRelativeRoots(ws, base) {
+  const abs = (r) => path.resolve(base, r);
+  let changed = false;
+  for (const m of [ws.activeRootByUser]) {
+    for (const [u, r] of Object.entries(m)) if (r && abs(r) !== r) { m[u] = abs(r); changed = true; }
+  }
+  for (const [u, list] of Object.entries(ws.recentRootsByUser)) {
+    if (!Array.isArray(list)) continue;
+    const next = [...new Set(list.map(abs))];
+    if (next.length !== list.length || next.some((r, i) => r !== list[i])) { ws.recentRootsByUser[u] = next; changed = true; }
+  }
+  for (const k of ROOT_MAPS) {
+    const m = ws[k];
+    for (const r of Object.keys(m)) {
+      const a = abs(r);
+      if (a === r) continue;
+      changed = true;
+      if (m[a] === undefined) m[a] = m[r];
+      else if (k === 'compileTimesByRoot') m[a] = [...m[a], ...m[r]].sort((x, y) => (x.at || 0) - (y.at || 0)).slice(-10);
+      else if (k === 'settingsByRoot' || k === 'mainFileByRoot') m[a] = m[r];
+      delete m[r];
+    }
+  }
+  return changed;
+}
+if (migrateRelativeRoots(workspace, path.join(__dirname, '..'))) saveWorkspace(workspace);
+
 // One-time migration: pre-auth workspace.json had a single global
 // activeRoot/recentRoots (single-user tool). Once the admin account exists,
 // server/index.js calls this once so the admin keeps their previously
@@ -37,10 +71,10 @@ if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root ->
 function migrateLegacyGlobalState(adminUserId) {
   if (workspace.activeRoot === undefined && workspace.recentRoots === undefined) return;
   if (!workspace.activeRootByUser[adminUserId] && workspace.activeRoot) {
-    workspace.activeRootByUser[adminUserId] = workspace.activeRoot;
+    workspace.activeRootByUser[adminUserId] = path.resolve(__dirname, '..', workspace.activeRoot);
   }
   if (!workspace.recentRootsByUser[adminUserId] && Array.isArray(workspace.recentRoots)) {
-    workspace.recentRootsByUser[adminUserId] = workspace.recentRoots;
+    workspace.recentRootsByUser[adminUserId] = [...new Set(workspace.recentRoots.map((r) => path.resolve(__dirname, '..', r)))];
   }
   delete workspace.activeRoot;
   delete workspace.recentRoots;
@@ -48,6 +82,7 @@ function migrateLegacyGlobalState(adminUserId) {
 }
 
 function setActiveRoot(userId, root) {
+  root = rk(root);
   workspace.activeRootByUser[userId] = root;
   const recent = workspace.recentRootsByUser[userId] || [];
   workspace.recentRootsByUser[userId] = [root, ...recent.filter((r) => r !== root)].slice(0, 10);
@@ -63,31 +98,33 @@ function getRecentRoots(userId) {
 }
 
 function setMainFile(root, relPath) {
-  workspace.mainFileByRoot[root] = relPath;
+  workspace.mainFileByRoot[rk(root)] = relPath;
   saveWorkspace(workspace);
 }
 
 function getMainFile(root) {
-  return workspace.mainFileByRoot[root] || null;
+  return workspace.mainFileByRoot[rk(root)] || null;
 }
 
 // Dauer jedes Compile-Laufs (Web + MCP): Basis der Schätzung und des Vergleichs Schätzung/Ist.
 function addCompileTime(root, entry) {
+  root = rk(root);
   workspace.compileTimesByRoot[root] = [...(workspace.compileTimesByRoot[root] || []), entry].slice(-10);
   saveWorkspace(workspace);
 }
 
 function getCompileTimes(root) {
-  return workspace.compileTimesByRoot[root] || [];
+  return workspace.compileTimesByRoot[rk(root)] || [];
 }
 
 const DEFAULT_PROJECT_SETTINGS = { compiler: 'pdflatex', stopOnFirstError: false, autocompile: false };
 
 function getProjectSettings(root) {
-  return { ...DEFAULT_PROJECT_SETTINGS, ...(workspace.settingsByRoot[root] || {}) };
+  return { ...DEFAULT_PROJECT_SETTINGS, ...(workspace.settingsByRoot[rk(root)] || {}) };
 }
 
 function setProjectSettings(root, partial) {
+  root = rk(root);
   workspace.settingsByRoot[root] = { ...getProjectSettings(root), ...partial };
   saveWorkspace(workspace);
   return workspace.settingsByRoot[root];
@@ -96,20 +133,22 @@ function setProjectSettings(root, partial) {
 // --- Sharing: root -> [userId] of members besides the owner ---
 
 function getShares(root) {
-  return workspace.sharesByRoot[root] || [];
+  return workspace.sharesByRoot[rk(root)] || [];
 }
 
 function setShares(root, userIds) {
+  root = rk(root);
   if (userIds.length) workspace.sharesByRoot[root] = userIds;
   else delete workspace.sharesByRoot[root];
   saveWorkspace(workspace);
 }
 
 function getRole(root, userId) {
-  return (workspace.rolesByRoot[root] || {})[userId] || 'editor';
+  return (workspace.rolesByRoot[rk(root)] || {})[userId] || 'editor';
 }
 
 function setRole(root, userId, role) {
+  root = rk(root);
   const m = { ...(workspace.rolesByRoot[root] || {}) };
   if (role === 'reviewer') m[userId] = role;
   else delete m[userId];
@@ -121,13 +160,14 @@ function setRole(root, userId, role) {
 // Link je Rolle: { token, maxUses (0 = unbegrenzt), uses }. Alte Einträge waren nur der Token-String.
 function getShareLinks(root) {
   const m = {};
-  for (const [role, l] of Object.entries(workspace.shareLinksByRoot[root] || {})) {
+  for (const [role, l] of Object.entries(workspace.shareLinksByRoot[rk(root)] || {})) {
     m[role] = typeof l === 'string' ? { token: l, maxUses: 0, uses: 0 } : l;
   }
   return m;
 }
 
 function setShareLink(root, role, link) {
+  root = rk(root);
   const m = { ...getShareLinks(root) };
   if (link) m[role] = link;
   else delete m[role];
@@ -160,7 +200,9 @@ function sharedRootsFor(userId) {
 
 // Project renamed: carry its per-root settings/main file/shares over.
 function moveRoot(oldRoot, newRoot) {
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot']) {
+  oldRoot = rk(oldRoot);
+  newRoot = rk(newRoot);
+  for (const k of ROOT_MAPS) {
     if (workspace[k][oldRoot] === undefined) continue;
     workspace[k][newRoot] = workspace[k][oldRoot];
     delete workspace[k][oldRoot];
@@ -175,7 +217,7 @@ function purgeUser(userId, ownDir) {
   delete workspace.recentRootsByUser[userId];
   delete workspace.labelsByUser[userId];
   const own = (r) => r === ownDir || r.startsWith(ownDir + require('path').sep);
-  for (const k of ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot']) {
+  for (const k of ROOT_MAPS) {
     for (const r of Object.keys(workspace[k])) if (own(r)) delete workspace[k][r];
   }
   for (const m of Object.values(workspace.rolesByRoot)) delete m[userId];
@@ -291,6 +333,7 @@ module.exports = {
   findShareLink,
   useShareLink,
   moveRoot,
+  migrateRelativeRoots,
   purgeUser,
   LABEL_COLORS,
   getLabels,
