@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const httpProxy = require('http-proxy');
-const { compile, findMainCandidate, OUT_DIR } = require('./lib/compile');
+const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
@@ -563,7 +563,7 @@ app.get('/api/wordcount', (req, res) => {
 });
 
 function mainPdf(proj) {
-  const abs = path.join(proj.dir, OUT_DIR, proj.mainFile.replace(/\.tex$/i, '.pdf'));
+  const abs = path.join(proj.dir, OUT_DIR, pdfNameFor(proj.mainFile));
   return fs.existsSync(abs) ? abs : null;
 }
 

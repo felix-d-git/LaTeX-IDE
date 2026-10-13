@@ -16,7 +16,7 @@ const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
 const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR, BACKEND } = require('./lib/compile');
+const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, replaceInProject, collectRefs } = require('./lib/search');
@@ -58,7 +58,7 @@ function outRelFor(root, userId) {
 function activeMainPdfAbs(root, userId) {
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return null;
-  return path.join(root, outRelFor(root, userId), main.replace(/\.tex$/i, '.pdf'));
+  return path.join(root, outRelFor(root, userId), pdfNameFor(main));
 }
 
 const PORT = process.env.PORT || 3077;
@@ -1237,7 +1237,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   const main = state.getMainFile(root) || findMainCandidate(root);
   if (!main) return res.status(404).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
-  const pdfAbs = path.join(root, outRelFor(root, req.user.id), main.replace(/\.tex$/i, '.pdf'));
+  const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.pdf"`);
@@ -1411,7 +1411,14 @@ app.post('/api/tree/upload', (req, res) => {
 app.post('/api/main-file', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
+  const prev = state.getMainFile(root);
   state.setMainFile(root, req.body.path);
+  // main.tex and thesis/main.tex both write main.pdf: drop the other file's
+  // output so download/SyncTeX don't serve it until the next compile. Queued
+  // behind running compiles so it doesn't pull the directory from under latexmk.
+  if (prev && req.body.path && prev !== req.body.path && pdfNameFor(prev) === pdfNameFor(req.body.path)) {
+    compileChain = compileChain.then(() => fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true })).catch(() => {});
+  }
   res.json({ ok: true });
 });
 

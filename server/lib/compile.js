@@ -72,6 +72,12 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
+// TeX writes <output-directory>/<jobname>.pdf, jobname = basename of the main
+// file (latexmk runs without -cd from the project root).
+function pdfNameFor(mainRelPath) {
+  return path.basename(mainRelPath).replace(/\.tex$/i, '.pdf');
+}
+
 // outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
 function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs = COMPILE_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -83,6 +89,11 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
     const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir };
+    // \input/\includegraphics relative to a main file in a subfolder (cwd stays the
+    // root, see pdfNameFor). "./" keeps log paths in the "(./x.tex" form parseLog
+    // reads; the trailing separator appends TeX's default search path.
+    const mainDir = path.dirname(mainRelPath).split(path.sep).join('/');
+    if (mainDir !== '.') env.TEXINPUTS = `./${mainDir}${path.delimiter}${process.env.TEXINPUTS || ''}`;
     const proc = spawn(cmd, args, { cwd: root, env, detached: !isWin, windowsHide: true });
     running.add(proc);
 
@@ -131,7 +142,7 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
 
     proc.on('close', (code) => {
       if (settled) return;
-      const pdfName = mainRelPath.replace(/\.tex$/i, '.pdf');
+      const pdfName = pdfNameFor(mainRelPath);
       const pdfAbs = path.join(outDir, pdfName);
       const pdfExists = fs.existsSync(pdfAbs);
       const { errors, warnings, infos } = parseLog(log, root);
@@ -221,4 +232,4 @@ function parseLog(log, root) {
   return { errors, warnings, infos };
 }
 
-module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND, COMPILE_TIMEOUT_MS };
+module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS };
