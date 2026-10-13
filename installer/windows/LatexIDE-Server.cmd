@@ -7,6 +7,7 @@ set "APPDIR=%~dp0"
 if "%APPDIR:~-1%"=="\" set "APPDIR=%APPDIR:~0,-1%"
 
 set "PATH=%APPDIR%\node;%LOCALAPPDATA%\LatexIDE\texlive\2025\bin\windows;%PATH%"
+if "%PORT%"=="" if exist "%APPDIR%\.env" for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b /c:"PORT=" "%APPDIR%\.env" 2^>nul`) do set "PORT=%%b"
 if "%PORT%"=="" set "PORT=3077"
 
 start "LatexIDE Server" /min "%APPDIR%\node\node.exe" "%APPDIR%\server\index.js"

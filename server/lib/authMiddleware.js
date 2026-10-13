@@ -34,7 +34,9 @@ const SESSION_SECRET = loadSessionSecret();
 
 const sessionStore = new FileStore({
   path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),
+  ttl: REMEMBER_ME_MAX_AGE / 1000, // default 1 h would expire idle sessions despite the cookie lifetime
   logFn: () => {},
+  ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
 function createSessionMiddleware() {
@@ -115,7 +117,9 @@ function requireAuth(req, res, next) {
 
 // ponytail: in-memory fixed-window limiter, resets on restart - enough for a handful of users behind one Funnel.
 const hits = new Map();
-function rateLimit(name, max, windowMs, keyFn = (req) => req.ip) {
+// countIf(res): only answers matching it use up the budget (e.g. failed logins). Counted up front so parallel
+// bursts stay limited; a non-matching answer gives the slot back.
+function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {}) {
   return (req, res, next) => {
     const key = `${name}:${keyFn(req)}`;
     const now = Date.now();
@@ -125,6 +129,7 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip) {
       hits.set(key, e);
     }
     e.count += 1;
+    if (countIf) res.on('finish', () => { if (!countIf(res) && e.count > 0) e.count -= 1; });
     if (e.count > max) {
       res.set('Retry-After', String(Math.ceil((e.resetAt - now) / 1000)));
       return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });

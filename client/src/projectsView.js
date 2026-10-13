@@ -13,9 +13,10 @@ function formatLastModified(ms) {
   return new Date(ms).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function triggerDownload(url) {
+function triggerDownload(url, filename) {
   const a = document.createElement('a');
   a.href = url;
+  if (filename) a.download = filename;
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
@@ -95,7 +96,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
   async function refresh() {
     const data = await api.listProjects();
-    cache = data;
+    cache = { localProjects: [], sharedProjects: [], trashedProjects: [], archivedProjects: [], labels: { labels: [], assign: {} }, labelColors: [], ...data };
     render();
   }
 
@@ -219,7 +220,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     const sel = selected.size;
     bulkBar.classList.toggle('hidden', !sel);
     selectAll.checked = visibleKeys.length > 0 && visibleKeys.every((k) => selected.has(k));
-    if (!sel) return labelMenu.classList.add('hidden');
+    if (!sel) return labelMenuFromBulk && labelMenu.classList.add('hidden');
     const owned = ownedSelected().length > 0;
     bulkCount.textContent = `${sel} ausgewählt`;
     bulkTrash.classList.toggle('hidden', mode === 'trash' || !owned);
@@ -272,7 +273,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
 
   // --- Labels ---
 
+  let labelMenuFromBulk = false; // Zeilen-Menü darf beim Neu-Rendern offen bleiben
   function openLabelMenu(keys, anchor) {
+    labelMenuFromBulk = anchor === bulkLabels;
     labelMenu.innerHTML = '';
     if (!cache.labels.labels.length) labelMenu.textContent = 'Noch keine Labels (links anlegen).';
     for (const l of cache.labels.labels) {
@@ -481,6 +484,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   btnCloseCopy.addEventListener('click', hideCopyDialog);
   btnCancelCopy.addEventListener('click', hideCopyDialog);
   btnConfirmCopy.addEventListener('click', confirmCopyDialog);
+  copyNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmCopyDialog();
+  });
 
   async function downloadPdf(name) {
     try {
@@ -489,7 +495,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'PDF nicht verfügbar.');
       }
-      triggerDownload(api.projectPdfUrl(name));
+      const blobUrl = URL.createObjectURL(await res.blob()); // einmal laden, nicht ein zweites Mal per Link
+      triggerDownload(blobUrl, `${name}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
     } catch (e) {
       alert(e.message);
     }

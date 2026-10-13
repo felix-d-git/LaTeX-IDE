@@ -44,6 +44,7 @@ test('relative Projektpfade aus workspace.json werden einmalig absolut (#34)', (
 
 test('Projektschlüssel unabhängig von der Schreibweise des Pfads (#34)', () => {
   const root = path.join(tmp(), 'P');
+  fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'doc.tex'), 'x');
   const odd = root + path.sep + '.' + path.sep; // trailing "./"
   state.setProjectSettings(odd, { compiler: 'lualatex' });
   state.setMainFile(path.relative(process.cwd(), root), 'doc.tex');

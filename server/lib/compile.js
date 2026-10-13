@@ -75,7 +75,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // TeX writes <output-directory>/<jobname>.pdf, jobname = basename of the main
 // file (latexmk runs without -cd from the project root).
 function pdfNameFor(mainRelPath) {
-  return path.basename(mainRelPath).replace(/\.tex$/i, '.pdf');
+  return String(mainRelPath).split(/[\\/]/).pop().replace(/\.tex$/i, '.pdf');
 }
 
 // outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
@@ -88,7 +88,8 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
 
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
-    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir };
+    // max_print_line & Co.: kein harter Umbruch der Log-Zeilen nach 79 Zeichen (Pfade/Warnungen bleiben ganz).
+    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir, max_print_line: '10000', error_line: '254', half_error_line: '238' };
     // \input/\includegraphics relative to a main file in a subfolder (cwd stays the
     // root, see pdfNameFor). "./" keeps log paths in the "(./x.tex" form parseLog
     // reads; the trailing separator appends TeX's default search path.
@@ -98,8 +99,11 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     running.add(proc);
 
     let log = '';
+    // setEncoding (StringDecoder): Umlaute werden an Chunkgrenzen nicht zerrissen.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
     const onData = (d) => {
-      log += d.toString();
+      log += d;
       // Keep start and end - that's where the error lines are.
       if (log.length > MAX_LOG) log = log.slice(0, 1e6) + '\n[… gekürzt …]\n' + log.slice(-2e6);
     };
@@ -198,7 +202,13 @@ function parseLog(log, root) {
   const seen = new Set();
   // latexmk on Windows emits \r\n; JS regex `.` doesn't match \r, so a
   // trailing \r would stop `$` from ever matching - normalize line endings first.
-  const lines = log.split(/\r?\n/);
+  let lines = log.split(/\r?\n/);
+  // latexmk wertet mehrere Läufe aus: nur ab dem letzten TeX-Lauf zählen (alte "undefined citation"/"Rerun" sind erledigt).
+  let start = 0;
+  lines.forEach((l, i) => {
+    if (/^Run number \d+ of rule '(?:pdf|xe|lua|)latex'/.test(l)) start = i;
+  });
+  lines = lines.slice(start);
   // ponytail: Datei für Warnungen = zuletzt geöffnete "(./x.tex" im Log; schließende
   // Klammern werden ignoriert, kann also nach Ende eines \input falsch zuordnen.
   let currentFile = null;
@@ -215,10 +225,12 @@ function parseLog(log, root) {
   };
   lines.forEach((line, i) => {
     for (const open of line.matchAll(/\((\.\/[^\s()]+\.tex)/g)) currentFile = normalizeTexPath(root, open[1]);
-    let m = line.match(/^(?:error: )?(.*\.tex):(\d+):\s*(.*)$/); // tectonic prefixes "error: "
+    let m = line.match(/^(?:error: )?(.*\.(?:tex|sty|cls|bbl|def|cfg|clo|ltx|tikz|pgf|lua)):(\d+):\s*(.*)$/); // tectonic prefixes "error: "
     // TeX bricht Log-Zeilen hart nach 79 Zeichen um - Fehlermeldung wieder zusammensetzen.
     for (let j = i; m && lines[j].length >= 79 && j + 1 < lines.length; j++) m[3] += lines[j + 1];
     if (m) return push(errors, { file: normalizeTexPath(root, m[1]), line: Number(m[2]), message: m[3].trim() }, i);
+    m = line.match(/^(?:ERROR|FATAL) - (.*)$/); // biber
+    if (m) return push(errors, { file: '', line: null, message: `biber: ${m[1].trim()}` }, i);
     m = line.match(/^((?:LaTeX|Package|Class) .*Warning: .*)$/);
     if (m) {
       // Warnungen laufen oft über mehrere Zeilen, die Zeilennummer steht am Ende.

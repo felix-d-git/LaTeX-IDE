@@ -1,4 +1,4 @@
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
 if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirname, '..', process.env.DATA_DIR);
@@ -55,8 +55,24 @@ function outRelFor(root, userId) {
   return state.getProjectSettings(root).compileMode === 'group' ? OUT_DIR : path.join(OUT_DIR, `u-${userId}`);
 }
 
+// Saved main file, repaired if it was renamed/moved/deleted meanwhile: falls back to the auto-detected one (and saves it).
+function mainFileOf(root) {
+  const saved = state.getMainFile(root);
+  if (saved) {
+    try {
+      if (fs.statSync(safeResolve(root, saved)).isFile()) return saved;
+    } catch {}
+  }
+  let found = null;
+  try {
+    found = findMainCandidate(root) || null;
+  } catch {}
+  if (found !== saved) state.setMainFile(root, found);
+  return found;
+}
+
 function activeMainPdfAbs(root, userId) {
-  const main = state.getMainFile(root) || findMainCandidate(root);
+  const main = mainFileOf(root);
   if (!main) return null;
   return path.join(root, outRelFor(root, userId), pdfNameFor(main));
 }
@@ -99,6 +115,7 @@ function streamFile(res, abs) {
     .on('error', () => {
       if (res.headersSent) return res.destroy();
       res.removeHeader('Content-Disposition');
+      res.removeHeader('Content-Type');
       res.status(404).json({ error: 'Datei nicht gefunden.' });
     })
     .pipe(res);
@@ -110,13 +127,25 @@ const AUTOCOMPILE_THROTTLE_MS = 5000;
 const wordCountByOut = new Map(); // abs output dir -> { words, headers, mathInline, mathDisplay }, refreshed on each successful compile
 
 // userId = who saved; null (collab persist) = everyone who has the project open.
+// Throttled calls are not dropped: the last one is replayed once the window is over.
+const autocompileTimers = new Map(); // root -> timer of the pending trailing run
 function maybeAutocompile(root, userId) {
   const settings = state.getProjectSettings(root);
   if (!settings.autocompile) return;
-  const last = lastAutocompileAt.get(root) || 0;
-  if (Date.now() - last < AUTOCOMPILE_THROTTLE_MS) return;
+  const wait = AUTOCOMPILE_THROTTLE_MS - (Date.now() - (lastAutocompileAt.get(root) || 0));
+  if (wait > 0) {
+    if (!autocompileTimers.has(root)) {
+      const t = setTimeout(() => {
+        autocompileTimers.delete(root);
+        maybeAutocompile(root, null);
+      }, wait);
+      t.unref();
+      autocompileTimers.set(root, t);
+    }
+    return;
+  }
   lastAutocompileAt.set(root, Date.now());
-  const main = state.getMainFile(root) || findMainCandidate(root);
+  const main = mainFileOf(root);
   if (!main) return;
   const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && wsRoot(c) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
@@ -172,6 +201,7 @@ function broadcast(root, msg, onlyUserId) {
 // delete+put renames) - their comments stay and get re-attached by comments.listAll.
 function pathMoved(root, oldRel, newRel) {
   collab.onPathMoved(root, oldRel, newRel);
+  state.movePathInMainFile(root, oldRel, newRel);
   if (comments.movePath(root, oldRel, newRel)) broadcast(root, { type: 'commentsChanged', path: newRel || oldRel });
 }
 
@@ -257,6 +287,7 @@ const labelKeyOf = (projectsDir, root) => path.relative(projectsDir, root).split
 function projectMoved(req, projectsDir, oldRoot, newRoot) {
   kickRoot(path.resolve(oldRoot));
   state.moveRoot(oldRoot, newRoot, isParked(newRoot) ? null : newRoot);
+  auth.moveMcpProject(projectIdOf(oldRoot), isParked(newRoot) ? null : projectIdOf(newRoot));
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, oldRoot), labelKeyOf(projectsDir, newRoot));
   const w = watchersByRoot.get(path.resolve(oldRoot));
   if (w) {
@@ -272,6 +303,7 @@ function projectMoved(req, projectsDir, oldRoot, newRoot) {
 // New project folder (create/copy/import) or permanently deleted one: no leftovers of an earlier project at that path.
 function projectFresh(req, projectsDir, root) {
   state.dropRoot(root);
+  auth.moveMcpProject(projectIdOf(root), null);
   state.moveLabelKey(req.user.id, labelKeyOf(projectsDir, root), null);
 }
 
@@ -331,10 +363,14 @@ function baseUrl(req) {
   return process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 }
 
-const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000);
+// Only failed attempts use up the budget (many users behind one IP); separate buckets per purpose.
+const failed = (res) => res.statusCode >= 400 && res.statusCode !== 429;
+const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
-const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000);
+const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 
 // Never throws (see mailer.sendMailSafe); result.error is set when delivery failed.
 function sendVerifyMail(req, user) {
@@ -431,6 +467,8 @@ app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
 
 app.post('/api/auth/reset-password', limitToken, ah(async (req, res) => {
   const { token, password } = req.body;
+  // Check first: a typo must not burn the single-use link.
+  try { auth.validatePassword(password); } catch (e) { return res.status(400).json({ error: e.message }); }
   const user = auth.consumeResetToken(token || '');
   if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
   try {
@@ -455,7 +493,8 @@ app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res
     token: i.token,
     createdAt: i.createdAt,
     expiresAt: i.expiresAt,
-    usedByEmail: i.usedBy ? (auth.findUserById(i.usedBy) || {}).email || null : null,
+    usedAt: i.usedAt || null,
+    usedByEmail: i.usedBy ? (auth.findUserById(i.usedBy) || {}).email || '(Konto gelöscht)' : null,
     expired: !i.usedBy && new Date(i.expiresAt).getTime() < Date.now(),
   }));
   res.json({ invites, baseUrl: baseUrl(req) });
@@ -537,7 +576,7 @@ app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res
 // --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
 // Projects a user can reach (own + shared) as { id, name, shared }; id = stable project id used in MCP tokens.
 function mcpProjects(user) {
-  const own = projects.listProjects(userProjectsDir(user)).filter((p) => !(user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const own = projects.listProjects(userProjectsDir(user), user.isAdmin ? ['users'] : []).map((p) => p.root);
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
@@ -585,7 +624,7 @@ app.get('/api/desktop/download/:os', ah(async (req, res) => {
 
 // --- Account (logged in) ---
 
-app.post('/api/auth/change-password', limitLogin, ah(async (req, res) => {
+app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!(await auth.verifyPassword(req.user, currentPassword))) {
     return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
@@ -681,9 +720,12 @@ app.get('/api/auth/desktop-tokens', (req, res) => {
 
 // MCP tokens: single rights (perms) for all projects or per selected project; shown once, only the hash is stored.
 // Creating and changing the rights need the browser session.
-function mcpScope(req) {
-  if (!req.session || req.session.userId !== req.user.id) throw Object.assign(new Error('Nur aus einer Browser-Anmeldung heraus möglich.'), { status: 403 });
-  const ids = new Set(mcpProjects(req.user).map((p) => p.id));
+// Local mode has no session (everything runs as the one admin) -> allowed without Bearer. `existing`: ids already in the
+// token's saved scope stay allowed (project may be unreachable by now) - only new unreachable ids are refused.
+function mcpScope(req, existing) {
+  const browser = req.session && req.session.userId === req.user.id;
+  if (!browser && !(authMw.LOCAL_MODE && !req.headers.authorization)) throw Object.assign(new Error('Nur aus einer Browser-Anmeldung heraus möglich.'), { status: 403 });
+  const ids = new Set([...mcpProjects(req.user).map((p) => p.id), ...Object.keys((existing && existing.projects) || {})]);
   const sel = req.body.projects && typeof req.body.projects === 'object' ? req.body.projects : null;
   if (sel) for (const id of Object.keys(sel)) if (!ids.has(id)) throw Object.assign(new Error('Kein Zugriff auf Projekt ' + id), { status: 403 });
   return { perms: req.body.perms, projects: sel };
@@ -699,7 +741,8 @@ app.post('/api/auth/mcp-token', (req, res) => {
 
 app.patch('/api/auth/mcp-tokens/:id', (req, res) => {
   try {
-    if (!auth.updateMcpToken(req.user.id, req.params.id, { name: req.body.name, ...mcpScope(req) })) return res.status(404).json({ error: 'Token nicht gefunden.' });
+    const existing = auth.listMcpTokens(req.user.id).find((t) => t.id === req.params.id);
+    if (!existing || !auth.updateMcpToken(req.user.id, req.params.id, { name: req.body.name, ...mcpScope(req, existing) })) return res.status(404).json({ error: 'Token nicht gefunden.' });
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
@@ -850,27 +893,42 @@ app.get('/api/collab/epoch', (req, res) => {
   }
 });
 
+// sha1 of one file, recomputed only when size/mtime/ctime changed since the last manifest.
+const manifestCache = new Map(); // abs path -> { size, mtimeMs, ctimeMs, sha1 }
+function fileSha1(abs) {
+  const st = fs.statSync(abs);
+  const c = manifestCache.get(abs);
+  if (c && c.size === st.size && c.mtimeMs === st.mtimeMs && c.ctimeMs === st.ctimeMs) return { size: st.size, sha1: c.sha1 };
+  const buf = fs.readFileSync(abs);
+  const sha1 = crypto.createHash('sha1').update(buf).digest('hex');
+  manifestCache.set(abs, { size: buf.length, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, sha1 });
+  return { size: buf.length, sha1 };
+}
+
 // File list with hashes for the desktop app's local compile mirror.
 app.get('/api/collab/manifest', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   collab.flushRoot(root);
   const files = [];
+  const seen = new Set();
   const walk = (rel) => {
     for (const d of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
       if (isIgnored(d.name)) continue;
       const r = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) walk(r);
       else if (d.isFile()) {
-        const buf = fs.readFileSync(path.join(root, r));
-        files.push({ path: r, size: buf.length, sha1: crypto.createHash('sha1').update(buf).digest('hex') });
+        const abs = path.join(root, r);
+        seen.add(abs);
+        files.push({ path: r, ...fileSha1(abs) });
       }
     }
   };
   walk('');
+  for (const k of manifestCache.keys()) if (k.startsWith(root + path.sep) && !seen.has(k)) manifestCache.delete(k);
   res.json({
     projectId: projectIdOf(root),
-    mainFile: state.getMainFile(root) || findMainCandidate(root),
+    mainFile: mainFileOf(root),
     settings: state.getProjectSettings(root),
     files,
   });
@@ -880,11 +938,23 @@ app.get('/api/collab/manifest', (req, res) => {
 app.get('/api/collab/owned', (req, res) => {
   const dir = userProjectsDir(req.user);
   const list = projects
-    .listProjects(dir)
-    .filter((p) => !(req.user.isAdmin && p.name === 'users'))
+    .listProjects(dir, req.user.isAdmin ? ['users'] : [])
     .map((p) => ({ name: p.name, projectId: projectIdOf(path.join(dir, p.name)) }));
   res.json({ projects: list });
 });
+
+// Optional ?base=<sha1 from the manifest | 'none'>: the sync run only overwrites/deletes what it last saw
+// (live edits of collaborators during the run are not lost). Without base: old behaviour.
+function checkSyncBase(req, root, abs) {
+  const base = req.query.base;
+  if (base === undefined) return true;
+  collab.flushRoot(root); // live edits are on disk before comparing
+  let cur = 'none';
+  try {
+    if (fs.statSync(abs).isFile()) cur = fileSha1(abs).sha1;
+  } catch {}
+  return base === cur;
+}
 
 // Desktop sync upload/delete of one file (bytes as body) in an owned project.
 app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
@@ -894,6 +964,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     const rel = String(req.query.path || '');
     if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
     const abs = safeResolve(root, rel);
+    if (!checkSyncBase(req, root, abs)) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (isTextFile(rel)) state.markSelfWrite(abs, buf);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -911,6 +982,8 @@ app.delete('/api/collab/raw', (req, res) => {
   if (!root) return;
   try {
     if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    collab.flushRoot(root);
+    if (!checkSyncBase(req, root, safeResolve(root, String(req.query.path || '')))) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     treeOps.trashPath(root, req.query.path);
     collab.onPathMoved(root, req.query.path, null);
     res.json({ ok: true });
@@ -931,7 +1004,7 @@ function importSourceRoot(req, id) {
 app.get('/api/import/projects', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const own = projects.listProjects(userProjectsDir(req.user)).filter((p) => !(req.user.isAdmin && p.name === 'users')).map((p) => p.root);
+  const own = projects.listProjects(userProjectsDir(req.user), req.user.isAdmin ? ['users'] : []).map((p) => p.root);
   const roots = [...own, ...sharedRootsOf(req.user.id)]
     .map((r) => path.resolve(r))
     .filter((r) => r !== path.resolve(root) && importSourceRoot(req, projectIdOf(r)));
@@ -962,13 +1035,27 @@ app.post('/api/import/project-file', (req, res) => {
   }
 });
 
-app.post('/api/import/url', limitToken, ah(async (req, res) => {
+// File name derived from the URL: invalid characters replaced, extension from the content type when the URL has none.
+const EXT_BY_TYPE = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/svg+xml': '.svg', 'image/webp': '.webp', 'text/plain': '.txt', 'application/x-bibtex': '.bib' };
+function nameFromUrl(finalUrl, headers = {}) {
+  let last = '';
+  try {
+    last = decodeURIComponent(new URL(finalUrl).pathname.split('/').pop() || '');
+  } catch {
+    last = '';
+  }
+  let name = last.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '').trim().slice(0, 120) || 'download';
+  const ext = EXT_BY_TYPE[String(headers['content-type'] || '').split(';')[0].trim().toLowerCase()];
+  if (ext && !path.extname(name)) name += ext;
+  return name;
+}
+
+app.post('/api/import/url', limitImport, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
-    const { data, finalUrl } = await fetchUrl(req.body.url);
-    const fromUrl = decodeURIComponent(new URL(finalUrl).pathname.split('/').pop() || '');
-    const name = String(req.body.name || '').trim() || fromUrl || 'download';
+    const { data, finalUrl, headers } = await fetchUrl(req.body.url);
+    const name = String(req.body.name || '').trim() || nameFromUrl(finalUrl, headers);
     res.json({ path: treeOps.uploadFile(root, req.body.dir, name, data.toString('base64')) });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -987,6 +1074,7 @@ function appendOrUpload(root, dir, name, text, replace = false) {
     const relPath = path.relative(root, abs).split(path.sep).join('/');
     const old = replace ? '' : decodeText(fs.readFileSync(abs));
     if (old === null) throw new Error(NOT_UTF8_MSG);
+    safeSnapshot(root, { trigger: 'import', label: `Vor Literatur-Import: ${relPath}` });
     const content = replace ? text : old.replace(/\s*$/, '\n\n') + text;
     state.markSelfWrite(abs, content);
     fs.writeFileSync(abs, content, 'utf8');
@@ -996,7 +1084,7 @@ function appendOrUpload(root, dir, name, text, replace = false) {
   return treeOps.uploadFile(root, dir, name, Buffer.from(text).toString('base64'));
 }
 
-app.post('/api/import/doi', limitToken, ah(async (req, res) => {
+app.post('/api/import/doi', limitImport, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const doi = String(req.body.doi || '').trim().replace(/^(https?:\/\/(dx\.)?doi\.org\/|doi:)/i, '');
@@ -1029,12 +1117,14 @@ app.post('/api/zotero', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/import/zotero', limitToken, ah(async (req, res) => {
+app.post('/api/import/zotero', limitImport, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const z = req.user.zotero;
   if (!z) return res.status(400).json({ error: 'Zuerst unter Einstellungen ▸ Literatur den Zotero-Zugang eintragen.' });
   const format = req.body.format === 'biblatex' ? 'biblatex' : 'bibtex';
+  const name = String(req.body.name || 'zotero.bib').trim();
+  if (!/\.bib$/i.test(name)) return res.status(400).json({ error: 'Dateiname muss auf .bib enden.' });
   const base = `https://api.zotero.org/${z.libraryType === 'group' ? 'groups' : 'users'}/${z.libraryId}/items/top?format=${format}&limit=100`;
   const headers = { 'Zotero-API-Version': '3', ...(z.apiKey ? { 'Zotero-API-Key': z.apiKey } : {}) };
   try {
@@ -1043,6 +1133,7 @@ app.post('/api/import/zotero', limitToken, ah(async (req, res) => {
     for (let start = 0, total = 1; start < total && start < 5000; start += 100) {
       const { data, headers: h } = await fetchUrl(`${base}&start=${start}`, headers);
       total = Number(h['total-results']) || 0;
+      if (total > 5000) throw new Error(`Die Bibliothek hat ${total} Einträge (Limit 5000). Bitte über eine Collection aufteilen.`);
       parts.push(data.toString('utf8').trim());
       const backoff = Number(h.backoff) || 0;
       if (backoff && start + 100 < total) {
@@ -1050,8 +1141,6 @@ app.post('/api/import/zotero', limitToken, ah(async (req, res) => {
         await new Promise((r) => setTimeout(r, backoff * 1000));
       }
     }
-    const name = String(req.body.name || 'zotero.bib').trim();
-    if (!/\.bib$/i.test(name)) return res.status(400).json({ error: 'Dateiname muss auf .bib enden.' });
     res.json({ path: appendOrUpload(root, req.body.dir, name, parts.filter(Boolean).join('\n\n') + '\n', true) });
   } catch (e) {
     res.status(400).json({ error: 'Zotero: ' + e.message });
@@ -1088,12 +1177,12 @@ app.get('/api/projects/list', (req, res) => {
   res.json({
     activeRoot: state.getActiveRoot(req.user.id),
     recentRoots: state.getRecentRoots(req.user.id),
-    localProjects: projects.listProjects(projectsDir).filter((p) => !(req.user.isAdmin && p.name === 'users')),
+    localProjects: projects.listProjects(projectsDir, req.user.isAdmin ? ['users'] : []),
     sharedProjects: sharedRootsOf(req.user.id)
       .filter((root) => fs.existsSync(root))
       .map((root) => {
         const owner = auth.findUserById(ownerIdOf(root));
-        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?', lastModified: fs.statSync(root).mtimeMs };
+        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?', lastModified: projects.getLastModified(root) };
       }),
     trashedProjects: projects.listTrash(projectsDir),
     archivedProjects: projects.listArchived(projectsDir),
@@ -1128,7 +1217,7 @@ app.post('/api/projects/open', (req, res) => {
   state.setActiveRoot(req.user.id, root);
   if (previousRoot && previousRoot !== root) releaseWatcher(previousRoot);
   if (previousRoot !== root) ensureWatcher(root);
-  const main = state.getMainFile(root) || findMainCandidate(root);
+  const main = mainFileOf(root);
   if (main) state.setMainFile(root, main);
   // Startdatei beim Öffnen: flachste main.tex, sonst erste .tex (nicht die gespeicherte Hauptdatei).
   const startFile = pickStartFile(root);
@@ -1168,8 +1257,10 @@ app.post('/api/projects/rename', (req, res) => {
 app.post('/api/projects/copy', (req, res) => {
   try {
     const projectsDir = userProjectsDir(req.user);
+    collab.flushRoot(path.resolve(path.join(projectsDir, req.body.name || ''))); // live edits into the copy
     const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
     projectFresh(req, projectsDir, root);
+    state.copyRoot(path.join(projectsDir, req.body.name), root);
     res.json({ root });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1252,7 +1343,7 @@ app.get('/api/projects/download/zip', (req, res) => {
     let folder = path.basename(root);
     for (let i = 2; used.has(folder); i++) folder = `${path.basename(root)}_${i}`;
     used.add(folder);
-    archive.directory(root, folder, (entry) => (entry.name.split('/').slice(1).some((p) => isIgnored(p)) ? false : entry));
+    archive.directory(root, folder, (entry) => (entry.name.split('/').some((p) => isIgnored(p)) ? false : entry));
   }
   archive.finalize();
 });
@@ -1315,8 +1406,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
   }
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   collab.flushRoot(root);
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.zip"`);
+  res.attachment(`${req.params.name}.zip`); // RFC 5987 filename*: names outside Latin-1 no longer make setHeader throw
   const archive = archiver('zip', { zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1335,12 +1425,11 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
     return res.status(400).json({ error: e.message });
   }
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
-  const main = state.getMainFile(root) || findMainCandidate(root);
+  const main = mainFileOf(root);
   if (!main) return res.status(404).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
   const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}.pdf"`);
+  res.attachment(`${req.params.name}.pdf`);
   streamFile(res, pdfAbs);
 });
 
@@ -1399,7 +1488,7 @@ app.delete('/api/projects/trash/:name', (req, res) => {
 app.get('/api/tree', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  res.json({ tree: buildTree(root), mainFile: state.getMainFile(root), projectId: projectIdOf(root) });
+  res.json({ tree: buildTree(root), mainFile: mainFileOf(root), projectId: projectIdOf(root) });
 });
 
 app.get('/api/file', (req, res) => {
@@ -1502,6 +1591,7 @@ app.delete('/api/tree', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    collab.flushRoot(root); // a pending edit would otherwise recreate the deleted file
     treeOps.deletePath(root, req.query.path);
     pathMoved(root, req.query.path, null);
     res.json({ ok: true });
@@ -1584,12 +1674,13 @@ function safeSnapshot(root, opts) {
 }
 
 async function doCompile(root, main, outRel, to, meta, auto) {
+  lastAutocompileAt.set(root, Date.now()); // the flush below must not trigger a second autocompile
   collab.flushRoot(root);
   const t0 = Date.now();
   const result = await compile(root, main, state.getProjectSettings(root), outRel);
   result.durationMs = Date.now() - t0;
   try {
-    state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
+    if (result.pdfPath) state.addCompileTime(root, { ms: result.durationMs, at: new Date().toISOString(), ...meta });
   } catch (e) {
     console.error('[compile] Laufzeit nicht gespeichert:', e.message);
   }
@@ -1610,7 +1701,7 @@ async function doCompile(root, main, outRel, to, meta, auto) {
 app.post('/api/compile', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const main = state.getMainFile(root) || findMainCandidate(root);
+  const main = mainFileOf(root);
   if (!main) return res.status(400).json({ error: 'Keine .tex-Hauptdatei gefunden.' });
   try {
     res.json(await runCompile(root, main, req.user.id));
@@ -1692,7 +1783,7 @@ app.get('/api/raw', (req, res) => {
 app.get('/api/export', ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
-  const main = state.getMainFile(root);
+  const main = mainFileOf(root);
   if (!main) return res.status(400).json({ error: 'Keine Hauptdatei festgelegt.' });
   collab.flushRoot(root);
   try {
@@ -1711,8 +1802,7 @@ app.get('/api/download/zip', (req, res) => {
   if (!root) return;
   const name = path.basename(root) || 'project';
   collab.flushRoot(root);
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="${name}.zip"`);
+  res.attachment(`${name}.zip`);
   const archive = archiver('zip', { zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -2080,6 +2170,7 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
+    if (msg && msg.type === 'ping') return ws.readyState === 1 && ws.send('{"type":"pong"}'); // client heartbeat
     if (!msg || msg.type !== 'subscribe') return;
     const user = auth.findUserById(ws.userId);
     const r = user && msg.projectId ? windowRoot({ user, get: () => String(msg.projectId), query: {} }) : {};
@@ -2110,7 +2201,7 @@ async function bootstrapAdmin() {
   if (!email || !password) {
     console.warn(
       '[auth] ADMIN_EMAIL/ADMIN_PASSWORD nicht gesetzt - lege Fallback-Admin admin@local.host / bitte-sofort-aendern an. ' +
-        'UNBEDINGT direkt nach dem ersten Login das Passwort über "Passwort vergessen" ändern, oder die Umgebungsvariablen setzen und den Server neu starten.'
+        'UNBEDINGT direkt nach dem ersten Login das Passwort im Profil ändern. ADMIN_* wirken nur beim allerersten Start (leerer Datenordner).'
     );
   }
   const adminUser = await auth.createUser({
@@ -2137,7 +2228,7 @@ function shutdown() {
   vault.flush();
   process.exit(0);
 }
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, shutdown);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK']) process.on(sig, shutdown);
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 process.on('uncaughtException', (e) => {
   console.error('[uncaughtException]', e);

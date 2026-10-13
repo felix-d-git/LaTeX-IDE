@@ -47,6 +47,10 @@ Name: "desktopicon"; Description: "Desktop-Verknuepfung anlegen"; GroupDescripti
 ; Sonst bleiben bei Updates entfernte Pakete liegen (bis 0.5.0 z. B. @napi-rs/canvas mit Skia).
 ; node_modules enthaelt keine Nutzerdaten (.env liegt direkt in {app}, Daten unter {localappdata}\LatexIDE).
 Type: filesandordirs; Name: "{app}\node_modules"
+; Ebenso server/ und client/: sonst bleiben von neuen Versionen entfernte Dateien liegen.
+; .env und server.json liegen direkt in {app} und bleiben unberuehrt. node/ bleibt (laufender Server sperrt node.exe).
+Type: filesandordirs; Name: "{app}\server"
+Type: filesandordirs; Name: "{app}\client"
 
 [Files]
 Source: "{#StagingDir}\*"; DestDir: "{app}"; Excludes: "\node_modules\.cache\*"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -121,6 +125,12 @@ end;
 procedure InitializeWizard;
 begin
   TrailerUrl := ReadTrailerUrl;
+  // Setup mit eingebauter Server-Adresse macht aus einer Server-/Lokal-Installation die Desktop-App.
+  if (TrailerUrl <> '') and (GetPreviousData('Mode', 'desktop') <> 'desktop') then
+    if SuppressibleMsgBox('Dieses Setup stammt von einem Server und installiert die Desktop-App. ' +
+      'Die bestehende Installation (eigener Server bzw. lokal) wuerde dadurch umgestellt. ' +
+      'Zum Aktualisieren stattdessen das Setup von GitHub verwenden.' + #13#10#13#10 + 'Trotzdem fortfahren?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDYES) = IDNO then Abort;
 
   ModePage := CreateInputOptionPage(wpSelectDir,
     'Betriebsart', 'Wie soll LatexIDE auf diesem Rechner laufen?',
@@ -180,7 +190,7 @@ begin
   if CurPageID = AdminPage.ID then
   begin
     Pw := AdminPage.Values[1];
-    if (Pos('@', AdminPage.Values[0]) = 0) or (Length(Pw) < 8) or (Pos('''', Pw) > 0) then
+    if (Pos('@', AdminPage.Values[0]) = 0) or (Pos('.', Copy(AdminPage.Values[0], Pos('@', AdminPage.Values[0]) + 1, MaxInt)) = 0) or (Length(Pw) < 8) or (Pos('''', Pw) > 0) then
     begin
       MsgBox('Bitte eine E-Mail-Adresse und ein Passwort mit mindestens 8 Zeichen (ohne Apostroph) angeben.', mbError, MB_OK);
       Result := False;
@@ -258,16 +268,21 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Base, LocalCopy, Msg: String;
+  Base, LocalCopy, Msg, AppDir: String;
+  IsServerInstall: Boolean;
   Code: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
   Base := ExpandConstant('{localappdata}\LatexIDE');
   LocalCopy := LocalCopyDir;
+  IsServerInstall := FileExists(ExpandConstant('{app}\.env')) or DirExists(Base + '\server-data');
 
   // Laufenden Server/App dieser Installation beenden, sonst sind Dateien gesperrt.
-  Exec('powershell.exe', '-NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like ''' +
-    ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  // Pfad fuer PowerShell: Apostrophe verdoppeln, StartsWith statt -like (dort sind [ ] Platzhalter).
+  AppDir := ExpandConstant('{app}');
+  StringChangeEx(AppDir, '''', '''''', True);
+  Exec('powershell.exe', '-NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+    AppDir + '\'', ''OrdinalIgnoreCase'') } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, Code);
 
   // TeX Live und Caches sind keine Nutzerdaten.
   DelTree(Base + '\texlive', True, True, True);
@@ -276,8 +291,13 @@ begin
   // Projektdaten nur nach Rueckfrage (bei stiller Deinstallation: behalten).
   if not UninstallSilent and (DirExists(Base) or (LocalCopy <> '')) then
   begin
-    Msg := 'Sollen auch deine Projekte und Einstellungen geloescht werden?' + #13#10#13#10 +
-      Base + #13#10;
+    if IsServerInstall then
+      Msg := 'ACHTUNG: Dieser Rechner IST der Server. "Ja" loescht alle Konten und alle Projekte ' +
+        'aller Nutzer unwiderruflich (auch die Einstellungen in der .env).' + #13#10#13#10 +
+        'Sollen wirklich alle Server-Daten geloescht werden?' + #13#10#13#10 + Base + #13#10
+    else
+      Msg := 'Sollen auch deine Projekte und Einstellungen geloescht werden?' + #13#10#13#10 +
+        Base + #13#10;
     if LocalCopy <> '' then Msg := Msg + LocalCopy + ' (lokale Kopie)' + #13#10;
     Msg := Msg + #13#10 + 'Projekte auf einem Server bleiben dort erhalten. Lokale Projekte und noch nicht ' +
       'abgeglichene Offline-Aenderungen gehen verloren - vorher ggf. in LatexIDE unter ' +
@@ -286,6 +306,7 @@ begin
     if MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
     begin
       DelTree(Base, True, True, True);
+      DeleteFile(ExpandConstant('{app}\.env'));
       if LocalCopy <> '' then DelTree(LocalCopy, True, True, True);
     end;
   end;
@@ -297,4 +318,4 @@ end;
 ; Von [Code] erzeugte Dateien.
 Type: files; Name: "{app}\server.json"
 Type: files; Name: "{app}\install.json"
-Type: files; Name: "{app}\.env"
+; .env bleibt bei "Projekte behalten" (und stiller Deinstallation) liegen; CurUninstallStepChanged loescht sie bei "Ja".

@@ -29,7 +29,7 @@ function symbol(name, detail) {
 
 const GREEK_LETTERS = [
   'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta',
-  'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'omicron', 'pi', 'rho',
+  'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'rho',
   'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega',
 ].map((name) => symbol(name, `griechischer Buchstabe (${name})`));
 
@@ -161,12 +161,15 @@ async function argumentSource(context) {
   const m = ref || cite;
   if (!m) return null;
   // Bei \cite{a,b nur den letzten Key ersetzen.
-  const from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
+  let from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
+  while (from < m.to && /\s/.test(context.state.sliceDoc(from, from + 1))) from++; // \cite{a, b}
   const { labels, bibKeys } = await getRefs();
   if (ref) return { from, to: m.to, options: labels.map((l) => ({ label: l, type: 'variable', detail: 'label' })), validFor: /^[^},]*$/ };
   // Einstellungen ▸ Literatur: nur gewählte .bib-Dateien; "erweitert" sucht auch in Titel/Autor.
   const prefs = referencePrefs();
-  const keys = bibKeys.filter((b) => !prefs.bibFiles.length || prefs.bibFiles.includes(b.file));
+  // Auswahl gilt global: nur Dateien zählen, die es in diesem Projekt gibt (sonst leer -> alle)
+  const chosen = prefs.bibFiles.filter((f) => bibKeys.some((b) => b.file === f));
+  const keys = bibKeys.filter((b) => !chosen.length || chosen.includes(b.file));
   const option = (b) => ({ label: b.key, type: 'variable', detail: (b.author || 'bib').split(/\s+and\s+/)[0], info: b.title || undefined });
   if (prefs.search !== 'advanced') return { from, to: m.to, options: keys.map(option), validFor: /^[^},]*$/ };
   const q = context.state.sliceDoc(from, m.to).toLowerCase();

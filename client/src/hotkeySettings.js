@@ -138,11 +138,18 @@ export function setupHotkeySettings() {
     const combo = comboFromEvent(e);
     if (!combo) return; // just a bare modifier key, keep waiting
     if (!requiresModifier(combo)) {
-      alert('Hotkeys benötigen mindestens eine Modifikatortaste (Strg/Alt/Umschalt), damit normales Tippen nicht blockiert wird.');
+      alert('Hotkeys benötigen mindestens eine Modifikatortaste (Strg/Alt/Cmd), damit normales Tippen nicht blockiert wird.');
       return;
     }
     const bindings = getEffectiveBindings();
     const def = bindings[capturingFor];
+    const clash = Object.entries(bindings).find(([id, d]) => id !== capturingFor && d.scope === def.scope && d.combos.includes(combo));
+    if (clash && !confirm(`„${combo}" ist schon „${clash[1].label}" zugeordnet. Dort entfernen und hier verwenden?`)) {
+      capturingFor = null;
+      render();
+      return;
+    }
+    if (clash) setCombosForAction(clash[0], clash[1].combos.filter((c) => c !== combo));
     if (!def.combos.includes(combo)) {
       setCombosForAction(capturingFor, [...def.combos, combo]);
     }

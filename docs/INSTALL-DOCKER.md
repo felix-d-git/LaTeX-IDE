@@ -30,7 +30,7 @@ cd latex-web-ide
 git checkout "$(git describe --tags --abbrev=0)"   # neuestes Release statt Entwicklungsstand
 cp .env.example .env
 nano .env                                          # PUBLIC_URL, ADMIN_EMAIL, ADMIN_PASSWORD
-mkdir -p data                                      # vorher anlegen, sonst gehört er root
+mkdir -p data && sudo chown 1000:1000 data         # vorher anlegen; der Container läuft als uid 1000, sonst Neustartschleife
 docker compose up -d --build                       # erster Build dauert (TeX Live)
 ```
 
@@ -54,7 +54,7 @@ anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen
 | `LATEX_DATA_DIR` | Datenordner auf dem Host (Standard `./data`). |
 | `TEXLIVE` | `apt` (Debian-Paket im Image, Standard) oder `host` (eigenes TeX Live einhängen). |
 | `UPDATE_MODE` | `notify` / `button` / `auto` / `off`, siehe [UPDATES.md](UPDATES.md). |
-| `DATA_KEY`, `VAULT_DIR` | Daten verschlüsselt auf der Platte, siehe README „Verschlüsselte Daten“. |
+| `DATA_KEY`, `VAULT_DIR` | Daten verschlüsselt auf der Platte, siehe README „Verschlüsselte Daten“. Nur mit `docker-compose.pi.yml` lauffähig (tmpfs + Vault-Volume), nicht mit `docker-compose.yml`. |
 | `SMTP_*` | Mailversand für Einladungen/Passwort-Reset (ohne: Links im Log). |
 
 ## Von außen erreichbar machen
@@ -71,6 +71,20 @@ latex.example.org {
 }
 ```
 
+Beispiel nginx (Host-Header und Websocket-Upgrade sind Pflicht, sonst scheitern Login-Prüfung und `/ws`):
+
+```
+location / {
+    proxy_pass http://127.0.0.1:3077;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+Apache: `ProxyPreserveHost On` plus `mod_proxy_wstunnel`.
+
 Ohne eigene Domain: **Tailscale Funnel**. `docker-compose.pi.yml` bringt dafür einen
 Tailscale-Container mit (`TS_AUTHKEY` in `.env`, Adresse dann
 `https://latex.<tailnet>.ts.net`).
@@ -81,7 +95,7 @@ Variante mit Tailscale Funnel, Speicherlimits, TeX Live vom Host und
 verschlüsselten Daten (Klartext nur im RAM):
 
 ```bash
-node server/lib/vault.js keygen          # bzw. im Container: docker run --rm latex-collab node server/lib/vault.js keygen
+openssl rand -hex 32                     # zweimal: DATA_KEY und SESSION_SECRET (kein Node/Image nötig)
 # .env: DATA_KEY, SESSION_SECRET, ADMIN_*, PUBLIC_URL, TS_AUTHKEY,
 #       LATEX_DATA_DIR=/pfad/auf/ssd, LATEX_TEXLIVE_DIR=/pfad/zu/texlive
 mkdir -p "$LATEX_DATA_DIR/vault" && sudo chown 1000:1000 "$LATEX_DATA_DIR/vault"
@@ -113,6 +127,9 @@ services:
     volumes:
       - /pfad/zu/texlive:/data/texlive:ro
 ```
+
+Der Ordner muss `<Jahr>/bin/<arch>` enthalten (Jahr 2025–2027, `x86_64-linux` oder
+`aarch64-linux`). Prüfen: `docker compose exec app latexmk -v`.
 
 Eigene Anpassungen (Port, Speicherlimit, Proxy-Netz) gehören immer in
 `docker-compose.override.yml` – Updates fassen die Datei nicht an.
@@ -201,7 +218,9 @@ Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
 Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
 <https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
 `THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
-Quellcode der IDE selbst liegt im Image unter `/app`.
+Quellcode der IDE: die zur Laufzeit nötigen Quelltexte liegen im Image unter `/app`; der
+vollständige Quellcode einschließlich Build- und Hilfsskripten (`scripts/`, `installer/`,
+`.github/`) liegt unter der `/source`-Adresse des Servers (Tag dieser Version).
 
 Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
 und LGPL-3.0 (jeweils §6 d) über diese Hinweise und snapshot.debian.org

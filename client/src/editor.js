@@ -84,7 +84,7 @@ const editorTheme = EditorView.theme(
   {
     '&': { fontSize: '12px', backgroundColor: 'var(--ol-surface)', color: 'var(--ol-text)' },
     '.cm-scroller': {
-      lineHeight: '19.2px',
+      lineHeight: 'var(--ol-editor-lh, 19.2px)',
       fontFamily: 'var(--ol-font-mono)',
     },
     '.cm-content': { padding: '4px 0 50vh' },
@@ -93,8 +93,8 @@ const editorTheme = EditorView.theme(
       backgroundColor: 'var(--ol-gutter-bg)',
       color: 'var(--ol-gutter-fg)',
       border: 'none',
-      fontSize: '12px',
-      lineHeight: '19.2px',
+      fontSize: 'var(--ol-editor-fs, 12px)',
+      lineHeight: 'var(--ol-editor-lh, 19.2px)',
     },
     '.cm-activeLine': { backgroundColor: 'var(--ol-active-line)' },
     '.cm-activeLineGutter': { backgroundColor: 'var(--ol-active-gutter)', minWidth: '20px' },
@@ -150,7 +150,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   function emptyState() {
     return EditorState.create({
       doc: '% Datei aus dem Dateibaum links öffnen…',
-      extensions: [editorTheme],
+      extensions: [editorTheme, EditorState.readOnly.of(true), EditorView.editable.of(false)], // placeholder is not a file
     });
   }
 
@@ -260,17 +260,23 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   // Requires an open collab session for path (collab.openSession).
   function openFile(path) {
     if (activePath && tabs.has(activePath)) {
-      tabs.get(activePath).state = view.state;
+      const t = tabs.get(activePath);
+      t.state = view.state;
+      t.scroll = view.scrollDOM.scrollTop;
     }
     const session = getSession(path);
     const cached = tabs.get(path);
     // An inactive tab's state doesn't receive remote edits (the sync plugin
     // only runs in the view) - rebuild it if the shared text moved on.
     if (!cached || cached.state.doc.toString() !== session.ytext.toString()) {
-      tabs.set(path, { state: buildState(path) });
+      tabs.set(path, { state: buildState(path), scroll: cached ? cached.scroll : null });
     }
     activePath = path;
     view.setState(tabs.get(path).state);
+    // setState resets the scroll position: restore it, else bring the cursor into view
+    const saved = tabs.get(path).scroll;
+    if (saved != null) requestAnimationFrame(() => (view.scrollDOM.scrollTop = saved));
+    else view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: 'center' }) });
     refreshConflicts(path);
     view.focus();
   }
@@ -318,14 +324,6 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     setTimeout(() => view.dispatch({ effects: clearFlash.of(null) }), 3000);
   }
 
-  function getTabs() {
-    return [...tabs.keys()];
-  }
-
-  function isDirty() {
-    return false; // saved continuously via Yjs
-  }
-
   // Öffnet CodeMirrors Suchen/Ersetzen-Leiste unten im Editor (Strg+F,
   // Menü Edit > Find, Lupe in der Formatierungsleiste).
   function openSearch() {
@@ -351,8 +349,11 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   // so one call affects every tab immediately - the view/container element
   // is shared across tabs, only its EditorState is swapped on tab switch.
   function setFontSettings({ fontSize, fontFamily, lineHeight }) {
-    if (fontSize) view.dom.style.fontSize = fontSize;
-    if (lineHeight) view.dom.style.lineHeight = lineHeight;
+    if (fontSize) {
+      view.dom.style.fontSize = fontSize;
+      view.dom.style.setProperty('--ol-editor-fs', fontSize);
+    }
+    if (lineHeight) view.dom.style.setProperty('--ol-editor-lh', lineHeight); // .cm-scroller/.cm-gutters read it
     const scroller = view.dom.querySelector('.cm-scroller');
     if (fontFamily && scroller) scroller.style.fontFamily = fontFamily;
   }
@@ -382,13 +383,15 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
       for (const e of compileEntries) {
         if (e.file !== path || !e.line) continue;
         const line = doc.line(Math.min(e.line, doc.lines));
-        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message + (fixHint(e.message, line.text) ? `\nVermutlicher Fix: ${fixHint(e.message, line.text)}` : ''), source: 'LaTeX' });
+        // Kontext wie im Fehlerpanel: TeX-Quellzeile bis zur Fehlerstelle, nicht die ganze Zeile
+        const hint = fixHint(e.message, (e.raw || '').match(/^l\.\d+ (.*)$/m)?.[1]);
+        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message + (hint ? `\nVermutlicher Fix: ${hint}` : ''), source: 'LaTeX' });
       }
       // Live beim Tippen, ohne Kompilieren
       if (path && /\.(tex|ltx|sty|cls)$/i.test(path)) out.push(...latexSyntaxDiagnostics(doc.toString()));
     }
     if (prefs.grammar && path && /\.(tex|ltx|bib|md|txt)$/i.test(path)) {
-      out.push(...(await grammarDiagnostics(doc.toString(), prefs, (word) => addDictionaryWord && addDictionaryWord(word))));
+      out.push(...grammarDiagnostics(doc.toString(), prefs, (word) => addDictionaryWord && addDictionaryWord(word), () => forceLinting(v)));
     }
     // Doc may have moved on while LanguageTool answered.
     return v.state.doc === doc ? out : out.filter((d) => d.to <= v.state.doc.length);
@@ -441,8 +444,6 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     getActivePath,
     isOpen,
     applyExternalChange,
-    getTabs,
-    isDirty,
     getSelection,
     openSearch,
     jumpToRange,

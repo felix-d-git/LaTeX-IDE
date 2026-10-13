@@ -1,10 +1,11 @@
+import { clearPdfThumbs } from './visualEditor.js';
 import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs, wsSubscribe } from './wsClient.js';
 import { renderTree, resetTreeSelection } from './fileTree.js';
 import { createEditorManager } from './editor.js';
 import {
-  configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts, prewarm,
+  configureCollab, setCollabUser, setCollabProject, openSession, closeAllSessions, openTexts, listConflicts, prewarm, trackPosition,
 } from './collab.js';
 import { createPdfViewer } from './pdfViewer.js';
 import { setupSearchPanel } from './searchPanel.js';
@@ -100,7 +101,7 @@ const editorMgr = createEditorManager(els.editorContainer, {
   onCommentClick: (id) => commentsPanel && commentsPanel.highlightComment(id),
   onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(id),
   onDocChanged: () => {
-    if (reviewPanel && reviewPanel.isOpen()) reviewPanel.render();
+    scheduleReviewRender();
     scheduleOutlineRefresh();
   },
   onSelectionChanged: () => scheduleOutlineRefresh(),
@@ -150,6 +151,7 @@ function relativeTo(fromDir, target) {
 async function insertDroppedImages(files, pos) {
   const path = editorMgr.getActivePath();
   if (!path) return;
+  const where = trackPosition(path, pos); // the upload takes a while - edits meanwhile shift the drop point
   const dir = dirOf(path) ? `${dirOf(path)}/Bilder` : 'Bilder';
   const blocks = [];
   try {
@@ -168,7 +170,7 @@ async function insertDroppedImages(files, pos) {
   await loadTree();
   if (!blocks.length || editorMgr.getActivePath() !== path) return;
   const view = editorMgr.view;
-  const line = view.state.doc.lineAt(Math.min(pos, view.state.doc.length));
+  const line = view.state.doc.lineAt(Math.min(where() ?? pos, view.state.doc.length));
   const empty = !line.text.trim();
   const at = empty ? line.from : line.to;
   const insert = (empty ? '' : '\n') + blocks.join('\n');
@@ -276,8 +278,7 @@ function renderTabbar() {
 
     const label = document.createElement('span');
     label.className = 'tab-label';
-    const dirty = paneKind === 'text' && editorMgr.isDirty(path);
-    label.textContent = path.split('/').pop() + (dirty ? ' •' : '');
+    label.textContent = path.split('/').pop();
     content.appendChild(label);
 
     const close = document.createElement('button');
@@ -287,9 +288,7 @@ function renderTabbar() {
     close.innerHTML = '<svg class="ol-icon"><use href="#i-close"></use></svg>';
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      closeAnyTab(path);
-      openOrder = openOrder.filter((p) => p !== path);
-      renderTabbar();
+      closeTabs([path]);
     });
     content.appendChild(close);
 
@@ -302,9 +301,23 @@ function renderTabbar() {
 function closeActiveTab() {
   const path = getActiveOpenPath();
   if (!path) return;
-  closeAnyTab(path);
-  openOrder = openOrder.filter((p) => p !== path);
+  closeTabs([path]);
+}
+
+// Closes tabs; if the active one is among them the neighbour takes over (else the view is cleared).
+function closeTabs(paths) {
+  const active = getActiveOpenPath();
+  const idx = active ? openOrder.indexOf(active) : -1;
+  for (const p of paths) closeAnyTab(p);
+  openOrder = openOrder.filter((p) => !paths.includes(p));
   renderTabbar();
+  if (!active || !paths.includes(active)) return;
+  const next = openOrder[Math.min(idx, openOrder.length - 1)];
+  if (next) openFile(next);
+  else {
+    refreshTreeHighlight();
+    if (outline) outline.render();
+  }
 }
 
 // Text files that are not UTF-8 sit in the preview pane, so close in both.
@@ -321,13 +334,21 @@ function cycleTab(delta) {
   openFile(openOrder[nextIdx]);
 }
 
+let reviewTimer = null;
+function scheduleReviewRender() {
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(() => reviewPanel && reviewPanel.isOpen() && reviewPanel.render(), 300);
+}
+
 let outlineTimer = null;
 function scheduleOutlineRefresh() {
   clearTimeout(outlineTimer);
   outlineTimer = setTimeout(() => outline && outline.render(), 400);
 }
 
+let openSeq = 0;
 async function openFile(path, line) {
+  const my = ++openSeq; // a slow earlier open must not override a later one
   const kind = fileKind(path);
   if (!openOrder.includes(path)) openOrder.push(path);
 
@@ -341,6 +362,7 @@ async function openFile(path, line) {
       renderTabbar();
       return;
     }
+    if (my !== openSeq || !openOrder.includes(path)) return; // superseded or tab closed meanwhile
     editorMgr.openFile(path);
     showPane('text');
   } else {
@@ -393,11 +415,16 @@ async function openLegacyFile(path, message) {
   refreshTreeHighlight();
 }
 
-function closeTabsUnder(relPath) {
+// `to` given (rename/move): tabs follow to the new path; otherwise (delete) they close.
+function closeTabsUnder(relPath, to) {
   const affected = openOrder.filter((p) => p === relPath || p.startsWith(relPath + '/'));
+  if (to == null) return closeTabs(affected);
+  const active = getActiveOpenPath();
+  const remap = (p) => to + p.slice(relPath.length);
   for (const p of affected) closeAnyTab(p);
-  openOrder = openOrder.filter((p) => !affected.includes(p));
+  openOrder = openOrder.map((p) => (affected.includes(p) ? remap(p) : p));
   renderTabbar();
+  if (active && affected.includes(active)) openFile(remap(active));
 }
 
 function createTreeFolder(parentPath) {
@@ -413,8 +440,8 @@ async function renameTreeNode(relPath, isDir, currentName) {
   if (!newName || newName === currentName) return;
   try {
     await api.renamePath(relPath, newName);
-    closeTabsUnder(relPath); // renamed path's tabs would otherwise point at a now-nonexistent file
     await loadTree();
+    closeTabsUnder(relPath, (relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/') + 1) : '') + newName);
   } catch (e) {
     alert('Fehler beim Umbenennen: ' + e.message);
   }
@@ -454,8 +481,8 @@ async function moveTreeNode(sourcePath, targetDir) {
       if (!confirm(`"${name}" existiert bereits im Zielordner. Überschreiben?`)) return;
       result = await api.movePath(sourcePath, targetDir, true);
     }
-    closeTabsUnder(sourcePath); // moved path's tabs would otherwise point at a now-nonexistent location
     await loadTree();
+    closeTabsUnder(sourcePath, (targetDir ? targetDir.replace(/\/$/, '') + '/' : '') + sourcePath.split('/').pop());
   } catch (e) {
     alert('Fehler beim Verschieben: ' + e.message);
   }
@@ -560,6 +587,12 @@ async function loadTree() {
     setCollabProject(projectId);
     currentProjectId = projectId;
     renderTabbar();
+    // PDF, log, code-check marks and outline of the old project must not linger.
+    pdfViewer.clear();
+    els.pdfLogView.textContent = '';
+    errorPanel.setLog({});
+    editorMgr.setCompileDiagnostics({});
+    if (outline) outline.render();
   }
   currentTree = tree;
   mainFile = mf;
@@ -596,11 +629,13 @@ function showProjectGone() {
 }
 window.addEventListener('lide-project-gone', showProjectGone);
 
+let myRole = 'owner';
 async function applyRole() {
   let role = 'owner';
   try {
     role = (await shareApi.get()).myRole;
   } catch {}
+  myRole = role;
   const reviewer = role === 'reviewer';
   editorMgr.setReadOnly(reviewer);
   document.body.classList.toggle('role-reviewer', reviewer);
@@ -621,11 +656,18 @@ async function openProjectByRoot(root) {
 // --- Kompilieren (R6: Zustand steckt im Button und im Badge, keine
 //     eigene Statuszeile) ------------------------------------------------
 
-let autoCompile = localStorage.getItem('latex-ide-autocompile') === '1';
+// Autocompile is a server-side project setting (same as in Settings); the old local switch did nothing.
+try {
+  localStorage.removeItem('latex-ide-autocompile');
+} catch {}
 
-els.compileOptionsBtn.addEventListener('click', (e) => {
+els.compileOptionsBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   if (isDropdownOpenFor(els.compileOptionsBtn)) return closeDropdown();
+  let autoCompile = false;
+  try {
+    autoCompile = !!(await api.getSettings()).settings.autocompile;
+  } catch {}
   openDropdown(
     els.compileOptionsBtn,
     [
@@ -634,10 +676,7 @@ els.compileOptionsBtn.addEventListener('click', (e) => {
       {
         label: 'Automatisch kompilieren (beim Speichern)',
         checked: autoCompile,
-        onClick: () => {
-          autoCompile = !autoCompile;
-          localStorage.setItem('latex-ide-autocompile', autoCompile ? '1' : '0');
-        },
+        onClick: () => api.saveSettings({ autocompile: !autoCompile }).catch((err) => alert('Einstellung konnte nicht gespeichert werden: ' + err.message)),
       },
       { label: 'Logs anzeigen', icon: 'bug', onClick: () => errorPanel.show() },
     ],
@@ -697,6 +736,7 @@ setupProjectDialog({
   onOpened: async ({ activeRoot, mainFile: mf, startFile, projectId }) => {
     mainFile = mf;
     await loadProject(activeRoot, projectId);
+    projectsView.hide();
     if (startFile) await openFile(startFile);
   },
 });
@@ -710,6 +750,7 @@ commentsPanel = setupCommentsPanel({
   commentsManager,
   editorMgr,
   currentUser,
+  getRole: () => myRole,
   getActivePath: () => editorMgr.getActivePath(),
 });
 
@@ -718,9 +759,13 @@ reviewPanel = setupReviewPanel({
   getActivePath: () => editorMgr.getActivePath(),
 });
 
-document.getElementById('review-mode-select').addEventListener('change', (e) => {
-  setReviewingMode(e.target.value === 'reviewing');
-});
+{
+  const sel = document.getElementById('review-mode-select');
+  sel.value = 'editing'; // Browser-Wiederherstellung nach Reload ignorieren
+  sel.addEventListener('change', (e) => {
+    setReviewingMode(e.target.value === 'reviewing');
+  });
+}
 
 const newFileDialog = setupNewFileDialog({
   onCreated: async (newPath) => {
@@ -809,9 +854,16 @@ const menuCtx = {
   onToggleOutline: () => document.querySelector('.outline-toggle').click(),
   getToolbarVisible: () => editorToolbar.isVisible(),
   onToggleToolbar: () => editorToolbar.setVisible(!editorToolbar.isVisible()),
-  onMakeCopy: () => {
-    const name = activeProjectRoot.split(/[\\/]/).pop();
-    if (name) projectsView.showCopyDialogFor(name);
+  onDownloadPdf: () => els.downloadPdfBtn.click(),
+  // Kopieren geht serverseitig per Namen im eigenen Projektordner: nur für eigene Projekte.
+  onMakeCopy: async () => {
+    try {
+      const own = (await api.listProjects()).localProjects.find((p) => p.root === activeProjectRoot);
+      if (own) projectsView.showCopyDialogFor(own.name);
+      else alert('Nur eigene Projekte können kopiert werden.');
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+    }
   },
 };
 
@@ -857,14 +909,11 @@ document.getElementById('btn-cancel-comment-2').addEventListener('click', () =>
   document.getElementById('btn-cancel-comment').click()
 );
 
+// Escape schließt Dialoge über modals.js (einzeln, oberster zuerst); hier nur der Fokusmodus,
+// und nur wenn nichts anderes die Taste schon verbraucht hat.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  hotkeySettings.hide();
-  shareDialog.hide();
-  settingsDialog.hide();
-  profileDialog.hide();
-  adminDialog.hide();
-  helpDialog.hide();
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if ([...document.querySelectorAll('.modal-backdrop')].some((b) => b.getClientRects().length)) return;
   if (appEl.classList.contains('layout-focus')) applyLayout('split');
 });
 
@@ -900,9 +949,7 @@ configureCollab({
     if (openOrder.includes(path)) openFile(path);
   },
   onGone: (path) => {
-    editorMgr.closeTab(path);
-    openOrder = openOrder.filter((p) => p !== path);
-    renderTabbar();
+    closeTabs([path]);
     loadTree();
   },
   // Every open doc of the project gets 4410 at once -> one notice.
@@ -918,7 +965,7 @@ let projectGoneNotice = null;
 // Offline = the banner, nothing else: alerts that only say "server unreachable" are dropped.
 const nativeAlert = window.alert.bind(window);
 window.alert = (msg) => {
-  if (offlineBanner.isOffline() && /offline|nicht erreichbar|Failed to fetch/i.test(String(msg))) return;
+  if (offlineBanner.isOffline() && /offline|nicht erreichbar|Failed to fetch/i.test(String(msg)) && !/noch nie geöffnet/.test(String(msg))) return; // that one explains why a click does nothing
   nativeAlert(msg);
 };
 
@@ -1083,21 +1130,39 @@ connectWs(forThisProject({
     closeTabsUnder(msg.path);
     loadTree();
   },
-  treeChanged: () => loadTree(),
+  treeChanged: () => { clearPdfThumbs(); loadTree(); },
   // Nur das gerade gezeigte PDF neu laden (oder das erste, falls noch keins offen ist).
   pdfChanged: (msg) => {
     const cur = pdfViewer.getCurrentPath();
     if (msg.path && (!cur || msg.path === cur)) pdfViewer.load(msg.path);
   },
   compileStatus: (msg) => {
-    if (msg.status === 'running') els.compileBtn.textContent = 'Kompiliere…';
+    if (msg.status === 'running') {
+      els.compileBtn.textContent = 'Kompiliere…';
+      return;
+    }
+    // Final state (also for runs started in another window / by autocompile): never stay on "Kompiliere…".
+    els.compileBtn.disabled = false;
+    els.compileBtn.textContent = 'Kompilieren';
+    if (typeof msg.log === 'string') els.pdfLogView.textContent = msg.log;
   },
   commentsChanged: async (msg) => {
     await commentsManager.loadAll();
     editorMgr.refreshCommentsForPath(msg.path, commentsManager.getForFile(msg.path));
     if (commentsPanel.isOpen() && editorMgr.getActivePath() === msg.path) commentsPanel.renderList();
   },
-}));
+}), {
+  // Events were missed while disconnected: reload tree and (re)subscribe happens in the client.
+  // Events missed while disconnected: reload tree and comments.
+  onReconnect: async () => {
+    if (!currentProjectId) return;
+    loadTree().catch(() => {});
+    await commentsManager.loadAll();
+    const p = editorMgr.getActivePath();
+    if (p) editorMgr.refreshCommentsForPath(p, commentsManager.getForFile(p));
+  },
+  onUnauthorized: () => location.reload(),
+});
 
 (async function init() {
   let join = null;

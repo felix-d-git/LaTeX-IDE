@@ -3,7 +3,8 @@ const path = require('path');
 const { safeResolve } = require('./fsTree');
 
 function stripComments(text) {
-  return text.replace(/(^|[^\\])%.*$/gm, '$1');
+  // Gerade Anzahl Backslashes vor % (\\%) = Zeilenumbruch + Kommentar; \% bleibt literal.
+  return text.replace(/(^|[^\\])((?:\\\\)*)%.*$/gm, '$1$2');
 }
 
 // Follows \input{...}/\include{...} one level deep so chapter files split out
@@ -18,7 +19,7 @@ function expandInputs(root, text, depth = 0) {
       // \input{../../other-user/x} must not read outside the project.
       const abs = safeResolve(root, relPath);
       if (!fs.existsSync(abs)) return '';
-      return expandInputs(root, fs.readFileSync(abs, 'utf8'), depth + 1);
+      return expandInputs(root, stripComments(fs.readFileSync(abs, 'utf8')), depth + 1);
     } catch (e) {
       return '';
     }
@@ -37,7 +38,8 @@ const MATH_INLINE_RE = /\$(?:[^$\\]|\\.)+\$|\\\((?:[^\\]|\\.)*?\\\)/g;
 function countWords(root, mainRelPath) {
   const mainAbs = safeResolve(root, mainRelPath);
   let text = fs.readFileSync(mainAbs, 'utf8');
-  text = stripComments(expandInputs(root, text));
+  // Kommentare zuerst: auskommentierte \input-Zeilen dürfen nichts einbinden.
+  text = expandInputs(root, stripComments(text));
 
   const headers = (text.match(HEADER_RE) || []).length;
   const mathDisplay = (text.match(MATH_DISPLAY_RE) || []).length;
@@ -45,6 +47,8 @@ function countWords(root, mainRelPath) {
   const mathInline = (withoutDisplay.match(MATH_INLINE_RE) || []).length;
 
   let prose = withoutDisplay.replace(MATH_INLINE_RE, ' ');
+  // Formatierungsbefehle behalten ihren Text (\emph{x}, \footnote{x}), alle anderen verlieren das Argument.
+  prose = prose.replace(/\\(?:emph|textbf|textit|texttt|textsc|textsl|textrm|textsf|textup|underline|footnote|mbox|text)\*?\{/g, ' {');
   prose = prose.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^{}]*\})?/g, ' ');
   prose = prose.replace(/[{}\\]/g, ' ');
   const words = (prose.match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || []).length;

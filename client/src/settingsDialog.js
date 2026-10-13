@@ -261,7 +261,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
         ],
         serverSettings.compiler,
         async (value) => {
-          serverSettings = (await api.saveSettings({ compiler: value })).settings;
+          await saveServer({ compiler: value });
         }
       )
     );
@@ -274,21 +274,31 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
         ],
         serverSettings.compileMode || 'individual',
         async (value) => {
-          serverSettings = (await api.saveSettings({ compileMode: value })).settings;
+          await saveServer({ compileMode: value });
         }
       )
     );
     wrap.appendChild(
       checkboxField('Stop on first error', serverSettings.stopOnFirstError, async (checked) => {
-        serverSettings = (await api.saveSettings({ stopOnFirstError: checked })).settings;
+        await saveServer({ stopOnFirstError: checked });
       })
     );
     wrap.appendChild(
       checkboxField('Autocompile (nach jedem Autosave neu kompilieren)', serverSettings.autocompile, async (checked) => {
-        serverSettings = (await api.saveSettings({ autocompile: checked })).settings;
+        await saveServer({ autocompile: checked });
       })
     );
     return wrap;
+  }
+
+  // Fehler (z. B. Server weg) nicht verschlucken; Anzeige bleibt dann beim alten Stand
+  async function saveServer(patch) {
+    try {
+      serverSettings = (await api.saveSettings(patch)).settings;
+    } catch (e) {
+      alert('Speichern fehlgeschlagen: ' + e.message);
+      render();
+    }
   }
 
   function renderReferencesTab() {

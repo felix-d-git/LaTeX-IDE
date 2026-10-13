@@ -57,6 +57,17 @@ export function createCommentsManager() {
   // Anchors live in the file's Y.Doc (map "anchors": id -> Yjs relative
   // positions), so they move with every edit - collaborators', external
   // ones, offline ones. The stored offsets are only the fallback.
+  // Offsets (Altbestand, MCP) nur verankern, wenn der Text dort noch zum anchorText passt;
+  // sonst die erste Fundstelle nehmen. Gibt den (ggf. korrigierten) Kommentar oder null zurueck.
+  function verified(s, c) {
+    const a = c.anchorText;
+    if (!a) return c;
+    const t = s.ytext.toString();
+    if (t.slice(c.from, c.to) === a) return c;
+    const i = t.indexOf(a);
+    return i < 0 ? null : { ...c, from: i, to: i + a.length };
+  }
+
   function setAnchor(relPath, c) {
     const s = getSession(relPath);
     if (!s || c.from === c.to || c.to > s.ytext.length) return;
@@ -76,13 +87,34 @@ export function createCommentsManager() {
     return list.map((c) => {
       const a = anchors.get(c.id);
       if (!a) {
-        setAnchor(relPath, c); // comment from before anchors existed
-        return c;
+        const v = verified(s, c); // comment from before anchors existed
+        if (!v) return c;
+        setAnchor(relPath, v);
+        return v;
       }
       const from = abs(a.f);
       const to = abs(a.t);
       return from === null || to === null ? c : { ...c, from, to: Math.max(from, to) };
     });
+  }
+
+  // Auswahl sofort als Yjs-Relativpositionen festhalten (Mitarbeitende tippen weiter) ...
+  function captureRange(relPath, from, to) {
+    const s = getSession(relPath);
+    if (!s || to > s.ytext.length) return null;
+    const rel = (i, assoc) => Y.createRelativePositionFromTypeIndex(s.ytext, i, assoc);
+    return { f: rel(from, 0), t: rel(to, -1) };
+  }
+
+  // ... und beim Absenden zurueckrechnen; null = Text wurde inzwischen geloescht.
+  function resolveRange(relPath, cap, fallback) {
+    const s = getSession(relPath);
+    if (!s || !cap) return fallback;
+    const abs = (r) => Y.createAbsolutePositionFromRelativePosition(r, s.ydoc);
+    const f = abs(cap.f);
+    const t = abs(cap.t);
+    if (!f || !t || t.index <= f.index) return null;
+    return { from: f.index, to: t.index };
   }
 
   async function addComment(relPath, from, to, anchorText, text) {
@@ -110,5 +142,5 @@ export function createCommentsManager() {
   const editReply = (relPath, id, rid, text) => change(relPath, api.editReply(relPath, id, rid, text));
   const removeReply = (relPath, id, rid) => change(relPath, api.deleteReply(relPath, id, rid));
 
-  return { loadAll, getForFile, addComment, removeComment, editComment, addReply, editReply, removeReply };
+  return { loadAll, getForFile, captureRange, resolveRange, addComment, removeComment, editComment, addReply, editReply, removeReply };
 }

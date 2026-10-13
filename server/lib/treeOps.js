@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { safeResolve } = require('./fsTree');
+const { safeResolve, resolveEntry, sameEntry } = require('./fsTree');
 
 const INVALID_NAME_RE = /[\\/:*?"<>|]/;
 
@@ -46,10 +46,11 @@ function createFile(root, relPath) {
 
 function renamePath(root, relPath, newName) {
   const safeName = assertValidName(newName);
-  const abs = safeResolve(root, relPath);
+  const abs = resolveEntry(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const dest = path.join(path.dirname(abs), safeName);
-  if (fs.existsSync(dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
+  // Nur Groß-/Kleinschreibung geändert: auf case-insensitiven Dateisystemen existiert dest (= abs) schon.
+  if (fs.existsSync(dest) && !sameEntry(abs, dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
   fs.renameSync(abs, dest);
   return toRel(root, dest);
 }
@@ -60,7 +61,7 @@ function renamePath(root, relPath, newName) {
 // the destination already has an entry with that name and overwrite isn't
 // set, so the client can ask "cancel or overwrite" before resubmitting.
 function movePath(root, relPath, targetDir, overwrite) {
-  const abs = safeResolve(root, relPath);
+  const abs = resolveEntry(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const destDirAbs = safeResolve(root, targetDir || '');
   if (!fs.existsSync(destDirAbs) || !fs.statSync(destDirAbs).isDirectory()) {
@@ -87,7 +88,7 @@ function movePath(root, relPath, targetDir, overwrite) {
 }
 
 function deletePath(root, relPath) {
-  const abs = safeResolve(root, relPath);
+  const abs = resolveEntry(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   fs.rmSync(abs, { recursive: true, force: true });
 }
