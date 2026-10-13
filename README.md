@@ -109,12 +109,11 @@ Braucht Node 24 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
 - Dateibaum (links), Editor mit Tabs (Mitte, CodeMirror 6 + LaTeX-Highlighting),
   PDF-Vorschau (rechts, PDF.js)
 - Live-Sync beim Tippen (Yjs), Speichern auf Platte nach 0,5 s
-- Kompilieren-Button → ruft `latexmk -pdf` im Projektordner auf, Log-Panel
-  unten zeigt Fehler/Warnungen
+- Kompilieren-Button → ruft `latexmk -pdf` im Projektordner auf, Log-Ansicht
+  in der PDF-Spalte zeigt Fehler/Warnungen
 - Haupt-Datei umschaltbar (Doppelklick auf eine `.tex`-Datei im Baum)
-- **Projektweite Suche & Ersetzen** (Strg+Shift+F oder Button oben): Suche
-  über alle Textdateien, mit Regex/Groß-Klein/Ganzes-Wort-Optionen, "Alle
-  ersetzen" schreibt direkt in die Dateien auf der Festplatte
+- **Projektweite Suche** (Strg+Shift+F oder Button oben): Suche
+  über alle Textdateien, mit Regex/Groß-Klein/Ganzes-Wort-Optionen (Ersetzen nur per Strg+F in der geöffneten Datei)
 - **Strg+F** in der aktiven Datei: eingebaute CodeMirror-Suche/Ersetzung
 - **Live-Sync bei externen Änderungen**: Ein Dateisystem-Watcher erkennt
   Änderungen, die *nicht* über die eigene Speicherfunktion erfolgt sind (z.B.
@@ -125,7 +124,7 @@ Braucht Node 24 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
 ## Accounts / Login
 
 Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
-über einen Einladungslink, den der Admin im Einstellungen-Dialog (⚙️ → Account)
+über einen Einladungslink, den der Admin unter Profil ▸ Server-Verwaltung
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/

@@ -22,7 +22,7 @@
   --ol-danger-text:var(--ol-danger); --ol-primary-text:var(--ol-primary);
   --ol-tooltip-bg:#000000; --ol-input-border:#677283;
   --ol-active-line:rgba(0,0,0,.07);
-  --ol-hover:#f4f5f6; --ol-pressed:#e7e9ee; --ol-selected:#eaf6ef;
+  --ol-hover:#f4f5f6; --ol-pressed:#e7e9ee; --ol-selected:#eaf6ef; --ol-backdrop:#1b222c;
   --flash: rgba(255, 213, 0, 0.55);
 
   /* Typografie */
@@ -347,7 +347,7 @@ body.is-resizing-v{ cursor: ns-resize; user-select: none; }
 #pane-files.tree-collapsed #file-tree,
 #pane-files.tree-collapsed #resizer-tree{ display: none; }
 #pane-files.outline-collapsed .outline-body{ display: none; }
-#pane-files.outline-collapsed #file-outline{ flex: 0 0 auto; }
+#pane-files.outline-collapsed #file-outline{ flex: 0 0 auto !important; } /* !important: gezogener Teiler setzt inline flex-grow */
 
 .tree-node{ padding: 0; }
 .tree-row{
@@ -876,14 +876,15 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 
 #settings-dialog, #share-dialog, #new-file-dialog, #new-folder-dialog, #shortcuts-dialog,
 #copy-project-dialog, #word-count-dialog, #open-project-dialog,
-#hotkey-settings, #comment-compose, #profile-dialog, #help-dialog{
+#hotkey-settings, #comment-compose, #profile-dialog, #help-dialog,
+#admin-dialog, #upload-conflict{
   position: fixed; inset: 0;
   z-index: var(--z-modal);
   overflow-x: hidden; overflow-y: auto;
 }
 .modal-backdrop{
   position: fixed; inset: 0;
-  background: var(--ol-text); opacity: .72;
+  background: var(--ol-backdrop); opacity: .72;
   z-index: var(--z-backdrop);
 }
 .dialog-box{
@@ -1245,7 +1246,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   --ol-surface:#1b232c; --ol-surface-alt:#232b35; --ol-border:#3a4a5c;
   --ol-text:#d7dbe0; --ol-text-muted:#9aa6b3;
   --ol-hover:#2c3542; --ol-pressed:#333f4d;
-  --ol-accent-bg:#1d3a2a; --ol-accent-fg:#7fd6a1;
+  --ol-accent-bg:#1d3a2a; --ol-accent-fg:#7fd6a1; --ol-selected:#1d3a2a; --ol-backdrop:#000;
   --ol-modal-divider:#3a4a5c; --ol-cm-divider:#3a4a5c;
   --ol-gutter-bg:#232b35; --ol-active-gutter:#333f4d;
   --ol-gutter-fg:#9aa6b3; --ol-active-line:rgba(255,255,255,.06);
@@ -1273,6 +1274,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
   --ol-surface:#ffffff; --ol-text:#1b222c; --ol-text-muted:#495365;
   --ol-gutter-bg:#f4f5f6; --ol-gutter-fg:#333333;
   --ol-active-line:rgba(0,0,0,.07); --ol-active-gutter:#e7e9ee;
+  --ol-surface-alt:#f4f5f6; --ol-border:#e7e9ee; --ol-pressed:#e7e9ee; /* Suchleiste */
 }
 :root[data-theme="dark"] .cm-scroller, :root[data-theme="dark"] .cm-panels{ color-scheme: dark; }
 :root[data-theme="dark"] #pdf-toolbar .page-input,
