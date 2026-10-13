@@ -197,13 +197,14 @@ export function setupMenuBar(ctx) {
 }
 
 function downloadPdf(ctx) {
+  if (ctx.onDownloadPdf) return ctx.onDownloadPdf(); // gleiche Logik wie der PDF-Knopf (Blob + Dateiname)
   const p = ctx.getPdfPath && ctx.getPdfPath();
   if (!p) return alert('Noch kein PDF vorhanden - zuerst kompilieren.');
   window.location.assign(withPid(`/api/pdf?path=${encodeURIComponent(p)}`));
 }
 
 function insertLink(view) {
-  if (!view) return;
+  if (!view || view.state.readOnly) return;
   const url = prompt('URL:', 'https://');
   if (!url) return;
   const label = prompt('Anzeigetext:', url) || url;
@@ -222,7 +223,7 @@ function layoutItems(ctx) {
     item('Split view', 'split'),
     item('Editor only', 'editor-only'),
     item('PDF only', 'pdf-only'),
-    item('Focus mode', 'focus', 'Ctrl Shift M'),
+    item('Focus mode', 'focus'),
   ];
 }
 

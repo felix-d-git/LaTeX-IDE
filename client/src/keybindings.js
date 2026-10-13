@@ -21,7 +21,7 @@ export const DEFAULT_BINDINGS = {
   // Die projektweite Suche (Rail-Panel links) liegt dafür auf Strg+Umschalt+F.
   toggleSearch: { label: 'Projektsuche umschalten', scope: 'global', combos: ['ctrl+shift+f'] },
   toggleHistory: { label: 'Verlauf umschalten', scope: 'global', combos: ['ctrl+shift+h'] },
-  closeTab: { label: 'Aktiven Tab schließen', scope: 'global', combos: ['ctrl+shift+w'] },
+  closeTab: { label: 'Aktiven Tab schließen', scope: 'global', combos: ['ctrl+alt+w'] },
   // Nicht Strg+Umschalt+Pfeil: das markiert im Editor wortweise.
   nextTab: { label: 'Nächster Tab', scope: 'global', combos: ['ctrl+alt+pagedown'] },
   prevTab: { label: 'Vorheriger Tab', scope: 'global', combos: ['ctrl+alt+pageup'] },
@@ -83,12 +83,15 @@ const KEY_NAME_MAP = {
   arrowright: 'arrowright',
 };
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || '');
+
 export function comboFromEvent(event) {
   const parts = [];
-  if (event.ctrlKey) parts.push('ctrl');
+  // macOS: Cmd verhält sich wie Strg der Defaults (Cmd+S, Cmd+Enter, ...)
+  if (event.ctrlKey || (IS_MAC && event.metaKey)) parts.push('ctrl');
   if (event.altKey) parts.push('alt');
   if (event.shiftKey) parts.push('shift');
-  if (event.metaKey) parts.push('meta');
+  if (event.metaKey && !IS_MAC) parts.push('meta');
   const rawKey = event.key.toLowerCase();
   if (['control', 'alt', 'shift', 'meta'].includes(rawKey)) return null; // modifier alone isn't a combo
   parts.push(KEY_NAME_MAP[rawKey] || rawKey);

@@ -454,7 +454,7 @@ async function moveTreeNode(sourcePath, targetDir) {
       if (!confirm(`"${name}" existiert bereits im Zielordner. Überschreiben?`)) return;
       result = await api.movePath(sourcePath, targetDir, true);
     }
-    closeTabsUnder(sourcePath); // moved path's tabs would otherwise point at a now-nonexistent location
+    if (result.path !== sourcePath) closeTabsUnder(sourcePath); // moved path's tabs would otherwise point at a now-nonexistent location
     await loadTree();
   } catch (e) {
     alert('Fehler beim Verschieben: ' + e.message);
@@ -621,11 +621,11 @@ async function openProjectByRoot(root) {
 // --- Kompilieren (R6: Zustand steckt im Button und im Badge, keine
 //     eigene Statuszeile) ------------------------------------------------
 
-let autoCompile = localStorage.getItem('latex-ide-autocompile') === '1';
-
-els.compileOptionsBtn.addEventListener('click', (e) => {
+els.compileOptionsBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   if (isDropdownOpenFor(els.compileOptionsBtn)) return closeDropdown();
+  let autoCompile = false;
+  try { autoCompile = !!(await api.getSettings()).settings.autocompile; } catch {}
   openDropdown(
     els.compileOptionsBtn,
     [
@@ -634,10 +634,7 @@ els.compileOptionsBtn.addEventListener('click', (e) => {
       {
         label: 'Automatisch kompilieren (beim Speichern)',
         checked: autoCompile,
-        onClick: () => {
-          autoCompile = !autoCompile;
-          localStorage.setItem('latex-ide-autocompile', autoCompile ? '1' : '0');
-        },
+        onClick: () => api.saveSettings({ autocompile: !autoCompile }).catch((err) => alert('Fehler beim Speichern: ' + err.message)),
       },
       { label: 'Logs anzeigen', icon: 'bug', onClick: () => errorPanel.show() },
     ],
@@ -697,6 +694,7 @@ setupProjectDialog({
   onOpened: async ({ activeRoot, mainFile: mf, startFile, projectId }) => {
     mainFile = mf;
     await loadProject(activeRoot, projectId);
+    projectsView.hide();
     if (startFile) await openFile(startFile);
   },
 });
@@ -809,9 +807,16 @@ const menuCtx = {
   onToggleOutline: () => document.querySelector('.outline-toggle').click(),
   getToolbarVisible: () => editorToolbar.isVisible(),
   onToggleToolbar: () => editorToolbar.setVisible(!editorToolbar.isVisible()),
-  onMakeCopy: () => {
-    const name = activeProjectRoot.split(/[\\/]/).pop();
-    if (name) projectsView.showCopyDialogFor(name);
+  onDownloadPdf: () => els.downloadPdfBtn.click(),
+  // Kopieren geht serverseitig per Namen im eigenen Projektordner: nur für eigene Projekte.
+  onMakeCopy: async () => {
+    try {
+      const own = (await api.listProjects()).localProjects.find((p) => p.root === activeProjectRoot);
+      if (own) projectsView.showCopyDialogFor(own.name);
+      else alert('Nur eigene Projekte können kopiert werden.');
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+    }
   },
 };
 
@@ -857,14 +862,11 @@ document.getElementById('btn-cancel-comment-2').addEventListener('click', () =>
   document.getElementById('btn-cancel-comment').click()
 );
 
+// Escape schließt Dialoge über modals.js (einzeln, oberster zuerst); hier nur der Fokusmodus,
+// und nur wenn nichts anderes die Taste schon verbraucht hat.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  hotkeySettings.hide();
-  shareDialog.hide();
-  settingsDialog.hide();
-  profileDialog.hide();
-  adminDialog.hide();
-  helpDialog.hide();
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if ([...document.querySelectorAll('.modal-backdrop')].some((b) => b.getClientRects().length)) return;
   if (appEl.classList.contains('layout-focus')) applyLayout('split');
 });
 
