@@ -11,6 +11,10 @@ export function setupWordCountDialog() {
     try {
       const stats = await api.getWordCount();
       body.innerHTML = '';
+      const note = document.createElement('p');
+      note.className = 'word-count-note';
+      note.textContent = 'Stand: letztes Kompilieren';
+      body.appendChild(note);
       const rows = [
         ['Total Words', stats.words],
         ['Headers', stats.headers],
@@ -32,7 +36,7 @@ export function setupWordCountDialog() {
       body.innerHTML = '';
       const p = document.createElement('p');
       p.className = 'word-count-error';
-      p.textContent = 'File not found or not readable. Bitte zuerst „Kompilieren" drücken.';
+      p.textContent = e.status === 404 ? 'Noch nicht kompiliert – bitte zuerst „Kompilieren" drücken.' : e.message;
       body.appendChild(p);
     }
   }

@@ -12,17 +12,24 @@ function formatTime(iso) {
 }
 
 // Mehrzeiliges Eingabefeld: Enter / Button = Absenden, Umschalt+Enter = Zeilenumbruch, Escape = Abbrechen.
-function composer(initial, submitLabel, onSubmit, onCancel) {
+// Entwuerfe ueberleben ein Neuzeichnen der Liste (z. B. wenn jemand anderes kommentiert).
+const drafts = new Map();
+
+function composer(initial, submitLabel, onSubmit, onCancel, draftKey) {
   const box = document.createElement('div');
   box.className = 'comment-edit';
   box.addEventListener('click', (e) => e.stopPropagation());
   const ta = document.createElement('textarea');
   ta.rows = 3;
-  ta.value = initial;
+  ta.value = drafts.has(draftKey) ? drafts.get(draftKey) : initial;
+  if (draftKey) {
+    drafts.set(draftKey, ta.value);
+    ta.addEventListener('input', () => drafts.set(draftKey, ta.value));
+  }
   const send = () => ta.value.trim() && onSubmit(ta.value.trim());
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
-    if (e.key === 'Escape') onCancel();
+    if (e.key === 'Escape') cancelIt();
   });
   const row = document.createElement('div');
   row.className = 'comment-edit-actions';
@@ -32,14 +39,18 @@ function composer(initial, submitLabel, onSubmit, onCancel) {
   ok.addEventListener('click', send);
   const cancel = document.createElement('button');
   cancel.textContent = 'Abbrechen';
-  cancel.addEventListener('click', onCancel);
+  const cancelIt = () => {
+    drafts.delete(draftKey);
+    onCancel();
+  };
+  cancel.addEventListener('click', cancelIt);
   row.append(cancel, ok);
   box.append(ta, row);
   setTimeout(() => ta.focus(), 0);
   return box;
 }
 
-export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, getActivePath }) {
+export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, getActivePath, getRole = () => 'owner' }) {
   const panel = document.getElementById('comments-panel');
   const fileLabel = document.getElementById('comments-file-label');
   const list = document.getElementById('comments-list');
@@ -54,6 +65,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
   const btnConfirmComment = document.getElementById('btn-confirm-comment');
 
   let pendingSelection = null;
+  let busy = false;
 
   function isOpen() {
     return !panel.classList.contains('hidden');
@@ -97,6 +109,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
       item.appendChild(quote);
 
       item.appendChild(entryBlock(c, {
+        key: 'edit:' + c.id,
         edit: (text) => commentsManager.editComment(path, c.id, text),
         remove: async () => {
           await commentsManager.removeComment(path, c.id);
@@ -117,14 +130,26 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
         accept.className = 'primary';
         accept.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const doc = editorMgr.view.state.doc;
-          const old = c.suggestion.oldText;
-          const from = doc.sliceString(c.from, c.to) === old ? c.from : doc.toString().indexOf(old);
-          if (from < 0) return alert('Die Textstelle wurde inzwischen geändert - Vorschlag kann nicht mehr angewendet werden.');
-          editorMgr.view.dispatch({ changes: { from, to: from + old.length, insert: c.suggestion.newText } });
-          await commentsManager.removeComment(path, c.id);
-          editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
-          renderList();
+          if (accept.disabled) return;
+          accept.disabled = true;
+          try {
+            // Aktuelle Position ueber den Anker, kein Suchen im ganzen Dokument.
+            const cur = commentsManager.getForFile(path).find((x) => x.id === c.id);
+            const old = c.suggestion.oldText;
+            const doc = editorMgr.view.state.doc;
+            if (!cur || cur.to > doc.length || doc.sliceString(cur.from, cur.to) !== old) {
+              alert('Die Textstelle wurde inzwischen geändert - Vorschlag kann nicht mehr angewendet werden.');
+              return;
+            }
+            // Erst Kommentar entfernen (Server prueft die Berechtigung), dann Text aendern.
+            await commentsManager.removeComment(path, c.id);
+            editorMgr.view.dispatch({ changes: { from: cur.from, to: cur.to, insert: c.suggestion.newText } });
+            editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+          } catch (err) {
+            alert(err.message);
+          } finally {
+            renderList();
+          }
         });
         const reject = document.createElement('button');
         reject.textContent = 'Ablehnen';
@@ -141,6 +166,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
 
       for (const r of c.replies || []) {
         const rb = entryBlock(r, {
+          key: 'edit:' + c.id + ':' + r.id,
           edit: (text) => commentsManager.editReply(path, c.id, r.id, text),
           remove: () => commentsManager.removeReply(path, c.id, r.id),
         });
@@ -153,22 +179,26 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
       replyBtn.textContent = 'Antworten';
       replyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const box = composer('', 'Antworten', (text) => run(commentsManager.addReply(path, c.id, text)), renderList);
-        replyBtn.replaceWith(box);
+        replyBtn.replaceWith(replyBox());
       });
-      item.appendChild(replyBtn);
+      const replyKey = 'reply:' + c.id;
+      const replyBox = () => composer('', 'Antworten', (text) => run(commentsManager.addReply(path, c.id, text), replyKey), renderList, replyKey);
+      item.appendChild(drafts.has(replyKey) ? replyBox() : replyBtn);
 
       item.addEventListener('click', () => {
-        editorMgr.jumpToRange(c.from, c.to);
+        const cur = commentsManager.getForFile(path).find((x) => x.id === c.id) || c;
+        const len = editorMgr.view.state.doc.length;
+        editorMgr.jumpToRange(Math.min(cur.from, len), Math.min(cur.to, len));
       });
       list.appendChild(item);
     }
   }
 
   // Aenderung ausfuehren, dann neu zeichnen (Fehler per alert, wie sonst im Panel).
-  async function run(promise) {
+  async function run(promise, draftKey) {
     try {
       await promise;
+      drafts.delete(draftKey);
     } catch (e) {
       alert(e.message);
     }
@@ -176,12 +206,13 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
   }
 
   // Eigener Beitrag, Owner/Admin oder Altbestand ohne Autor (der Server prueft verbindlich).
-  function mayChange(item) {
-    return currentUser.isAdmin || !item.author || item.author.id === currentUser.id;
+  // Server: Bearbeiten nur Autor/Verwalter, Loeschen zusaetzlich bei Altbestand ohne Autor.
+  function mayChange(item, forDelete) {
+    return currentUser.isAdmin || getRole() === 'owner' || (item.author ? item.author.id === currentUser.id : !!forDelete);
   }
 
   // Autor, Zeit, Text (white-space: pre-wrap, nur textContent) + Bearbeiten/Loeschen.
-  function entryBlock(item, { edit, remove }) {
+  function entryBlock(item, { key, edit, remove }) {
     const wrap = document.createElement('div');
     const meta = document.createElement('div');
     meta.className = 'comment-meta';
@@ -191,14 +222,17 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
     const body = document.createElement('div');
     body.className = 'comment-text';
     body.textContent = item.text;
-    if (mayChange(item)) {
+    if (mayChange(item, true)) {
       const actions = document.createElement('span');
       const ed = document.createElement('button');
       ed.textContent = 'Bearbeiten';
+      const openEdit = () => {
+        body.replaceWith(composer(item.text, 'Speichern', (text) => run(edit(text), key), renderList, key));
+        actions.remove();
+      };
       ed.addEventListener('click', (e) => {
         e.stopPropagation();
-        body.replaceWith(composer(item.text, 'Speichern', (text) => run(edit(text)), renderList));
-        actions.remove();
+        openEdit();
       });
       const del = document.createElement('button');
       del.textContent = 'Löschen';
@@ -207,8 +241,12 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
         e.stopPropagation();
         run(remove());
       });
-      actions.append(ed, ' ', del);
+      if (mayChange(item)) actions.append(ed, ' ');
+      actions.append(del);
       meta.appendChild(actions);
+      wrap.append(meta, body);
+      if (drafts.has(key) && mayChange(item)) openEdit();
+      return wrap;
     }
     wrap.append(meta, body);
     return wrap;
@@ -235,7 +273,7 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
       alert('Bitte zuerst Text im Editor markieren, zu dem ein Kommentar hinzugefügt werden soll.');
       return;
     }
-    pendingSelection = { path, from: sel.from, to: sel.to, text: sel.text };
+    pendingSelection = { path, from: sel.from, to: sel.to, text: sel.text, cap: commentsManager.captureRange(path, sel.from, sel.to) };
     composeSnippet.textContent = '„' + snippetOf(sel.text) + '“';
     composeText.value = '';
     compose.classList.remove('hidden');
@@ -249,12 +287,26 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
 
   async function confirmCompose() {
     const text = composeText.value.trim();
-    if (!text || !pendingSelection) return;
-    const { path, from, to, text: anchorText } = pendingSelection;
-    await commentsManager.addComment(path, from, to, anchorText, text);
-    editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
-    closeCompose();
-    if (isOpen()) renderList();
+    if (!text || !pendingSelection || busy) return;
+    const { path, cap, text: anchorText } = pendingSelection;
+    busy = true;
+    btnConfirmComment.disabled = true;
+    try {
+      const r = commentsManager.resolveRange(path, cap, { from: pendingSelection.from, to: pendingSelection.to });
+      if (!r) {
+        alert('Der markierte Text wurde inzwischen gelöscht.');
+        return;
+      }
+      await commentsManager.addComment(path, r.from, r.to, anchorText, text);
+      editorMgr.refreshCommentsForPath(path, commentsManager.getForFile(path));
+      closeCompose();
+      if (isOpen()) renderList();
+    } catch (e) {
+      alert(e.message); // Dialog und Text bleiben erhalten
+    } finally {
+      busy = false;
+      btnConfirmComment.disabled = false;
+    }
   }
 
   btnToggle.addEventListener('click', toggle);

@@ -3,6 +3,11 @@ import { renderTree } from './fileTree.js';
 
 const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', autocompile: 'Auto-Kompilieren', restore: 'Wiederhergestellt' };
 
+const hasPath = (nodes, path) => (nodes || []).some((n) => n.path === path || (n.children && hasPath(n.children, path)));
+
+// Sicherung vor einer Wiederherstellung (trigger restore ohne Label) nicht als "Wiederhergestellt" ausgeben.
+const triggerLabel = (e) => (e.trigger === 'restore' && !e.label ? 'Vor Wiederherstellung' : TRIGGER_LABEL[e.trigger] || e.trigger);
+
 function formatDateHeader(iso) {
   return new Date(iso).toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
@@ -52,9 +57,20 @@ export function setupHistoryView() {
   }
 
   async function refresh() {
-    const [{ tree }, { entries: historyEntries }] = await Promise.all([api.getTree(), api.getHistory()]);
+    let tree;
+    let historyEntries;
+    try {
+      [{ tree }, { entries: historyEntries }] = await Promise.all([api.getTree(), api.getHistory()]);
+    } catch (e) {
+      listEl.textContent = 'Verlauf konnte nicht geladen werden: ' + e.message;
+      return;
+    }
     entries = historyEntries;
     currentTree = tree;
+    // Auswahl aus einem anderen Projekt (oder gelöschte Datei/Version) verwerfen
+    if (selectedSnapshotId && !entries.some((e) => e.id === selectedSnapshotId)) selectedSnapshotId = null;
+    if (selectedFile && !hasPath(tree, selectedFile)) selectedFile = null;
+    loadDiff();
     renderFileTree();
     renderList();
   }
@@ -110,7 +126,7 @@ export function setupHistoryView() {
       top.appendChild(time);
       const trigger = document.createElement('span');
       trigger.className = 'history-item-trigger';
-      trigger.textContent = TRIGGER_LABEL[entry.trigger] || entry.trigger;
+      trigger.textContent = triggerLabel(entry);
       top.appendChild(trigger);
       item.appendChild(top);
 
@@ -128,8 +144,12 @@ export function setupHistoryView() {
         e.stopPropagation();
         const name = prompt('Name für diese Version:', entry.label || '');
         if (!name || !name.trim()) return;
-        await api.addHistoryLabel(entry.id, name.trim());
-        await refresh();
+        try {
+          await api.addHistoryLabel(entry.id, name.trim());
+          await refresh();
+        } catch (err) {
+          alert('Label konnte nicht gesetzt werden: ' + err.message);
+        }
       });
       item.appendChild(labelBtn);
 

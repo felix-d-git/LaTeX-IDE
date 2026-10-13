@@ -1267,15 +1267,7 @@ input, select, textarea{ font-family: var(--ol-font); color: var(--ol-text); }
 :root[data-theme="dark"] .log-card-chevron:hover, :root[data-theme="dark"] .log-card-goto:hover,
 :root[data-theme="dark"] #offline-banner .offline-banner-close:hover{ background: rgba(255,255,255,.1); }
 :root[data-theme="dark"] body{ background: var(--ol-surface); }
-/* Der Editorinhalt bleibt bewusst hell (Entscheidung aus dem Appearance-
-   Feature): die stex-Syntaxfarben sind für hellen Grund gebaut und wären auf
-   dunklem Grund kaum lesbar. Nur die Umgebung wird dunkel. */
-:root[data-theme="dark"] .cm-editor{
-  --ol-surface:#ffffff; --ol-text:#1b222c; --ol-text-muted:#495365;
-  --ol-gutter-bg:#f4f5f6; --ol-gutter-fg:#333333;
-  --ol-active-line:rgba(0,0,0,.07); --ol-active-gutter:#e7e9ee;
-  --ol-surface-alt:#f4f5f6; --ol-border:#e7e9ee; --ol-pressed:#e7e9ee; /* Suchleiste */
-}
+/* Der Editor wird im Dunkelmodus per oneDark dunkel (editor.js); --ol-* gelten dort unverändert. */
 :root[data-theme="dark"] .cm-scroller, :root[data-theme="dark"] .cm-panels{ color-scheme: dark; }
 :root[data-theme="dark"] #pdf-toolbar .page-input,
 :root[data-theme="dark"] input, :root[data-theme="dark"] select, :root[data-theme="dark"] textarea{

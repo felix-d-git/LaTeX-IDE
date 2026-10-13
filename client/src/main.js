@@ -1,3 +1,4 @@
+import { clearPdfThumbs } from './visualEditor.js';
 import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs, wsSubscribe } from './wsClient.js';
@@ -100,7 +101,7 @@ const editorMgr = createEditorManager(els.editorContainer, {
   onCommentClick: (id) => commentsPanel && commentsPanel.highlightComment(id),
   onTrackChangeClick: (id) => reviewPanel && reviewPanel.highlight(id),
   onDocChanged: () => {
-    if (reviewPanel && reviewPanel.isOpen()) reviewPanel.render();
+    scheduleReviewRender();
     scheduleOutlineRefresh();
   },
   onSelectionChanged: () => scheduleOutlineRefresh(),
@@ -331,6 +332,12 @@ function cycleTab(delta) {
   const idx = current ? openOrder.indexOf(current) : -1;
   const nextIdx = ((idx === -1 ? 0 : idx) + delta + openOrder.length) % openOrder.length;
   openFile(openOrder[nextIdx]);
+}
+
+let reviewTimer = null;
+function scheduleReviewRender() {
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(() => reviewPanel && reviewPanel.isOpen() && reviewPanel.render(), 300);
 }
 
 let outlineTimer = null;
@@ -622,11 +629,13 @@ function showProjectGone() {
 }
 window.addEventListener('lide-project-gone', showProjectGone);
 
+let myRole = 'owner';
 async function applyRole() {
   let role = 'owner';
   try {
     role = (await shareApi.get()).myRole;
   } catch {}
+  myRole = role;
   const reviewer = role === 'reviewer';
   editorMgr.setReadOnly(reviewer);
   document.body.classList.toggle('role-reviewer', reviewer);
@@ -741,6 +750,7 @@ commentsPanel = setupCommentsPanel({
   commentsManager,
   editorMgr,
   currentUser,
+  getRole: () => myRole,
   getActivePath: () => editorMgr.getActivePath(),
 });
 
@@ -749,9 +759,13 @@ reviewPanel = setupReviewPanel({
   getActivePath: () => editorMgr.getActivePath(),
 });
 
-document.getElementById('review-mode-select').addEventListener('change', (e) => {
-  setReviewingMode(e.target.value === 'reviewing');
-});
+{
+  const sel = document.getElementById('review-mode-select');
+  sel.value = 'editing'; // Browser-Wiederherstellung nach Reload ignorieren
+  sel.addEventListener('change', (e) => {
+    setReviewingMode(e.target.value === 'reviewing');
+  });
+}
 
 const newFileDialog = setupNewFileDialog({
   onCreated: async (newPath) => {
@@ -1116,7 +1130,7 @@ connectWs(forThisProject({
     closeTabsUnder(msg.path);
     loadTree();
   },
-  treeChanged: () => loadTree(),
+  treeChanged: () => { clearPdfThumbs(); loadTree(); },
   // Nur das gerade gezeigte PDF neu laden (oder das erste, falls noch keins offen ist).
   pdfChanged: (msg) => {
     const cur = pdfViewer.getCurrentPath();

@@ -383,13 +383,15 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
       for (const e of compileEntries) {
         if (e.file !== path || !e.line) continue;
         const line = doc.line(Math.min(e.line, doc.lines));
-        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message + (fixHint(e.message, line.text) ? `\nVermutlicher Fix: ${fixHint(e.message, line.text)}` : ''), source: 'LaTeX' });
+        // Kontext wie im Fehlerpanel: TeX-Quellzeile bis zur Fehlerstelle, nicht die ganze Zeile
+        const hint = fixHint(e.message, (e.raw || '').match(/^l\.\d+ (.*)$/m)?.[1]);
+        out.push({ from: line.from, to: line.to, severity: e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info', message: e.message + (hint ? `\nVermutlicher Fix: ${hint}` : ''), source: 'LaTeX' });
       }
       // Live beim Tippen, ohne Kompilieren
       if (path && /\.(tex|ltx|sty|cls)$/i.test(path)) out.push(...latexSyntaxDiagnostics(doc.toString()));
     }
     if (prefs.grammar && path && /\.(tex|ltx|bib|md|txt)$/i.test(path)) {
-      out.push(...(await grammarDiagnostics(doc.toString(), prefs, (word) => addDictionaryWord && addDictionaryWord(word))));
+      out.push(...grammarDiagnostics(doc.toString(), prefs, (word) => addDictionaryWord && addDictionaryWord(word), () => forceLinting(v)));
     }
     // Doc may have moved on while LanguageTool answered.
     return v.state.doc === doc ? out : out.filter((d) => d.to <= v.state.doc.length);

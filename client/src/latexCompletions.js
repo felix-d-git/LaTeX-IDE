@@ -29,7 +29,7 @@ function symbol(name, detail) {
 
 const GREEK_LETTERS = [
   'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta',
-  'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'omicron', 'pi', 'rho',
+  'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'rho',
   'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega',
 ].map((name) => symbol(name, `griechischer Buchstabe (${name})`));
 
@@ -161,7 +161,8 @@ async function argumentSource(context) {
   const m = ref || cite;
   if (!m) return null;
   // Bei \cite{a,b nur den letzten Key ersetzen.
-  const from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
+  let from = m.from + Math.max(m.text.lastIndexOf('{'), m.text.lastIndexOf(',')) + 1;
+  while (from < m.to && /\s/.test(context.state.sliceDoc(from, from + 1))) from++; // \cite{a, b}
   const { labels, bibKeys } = await getRefs();
   if (ref) return { from, to: m.to, options: labels.map((l) => ({ label: l, type: 'variable', detail: 'label' })), validFor: /^[^},]*$/ };
   // Einstellungen ▸ Literatur: nur gewählte .bib-Dateien; "erweitert" sucht auch in Titel/Autor.
