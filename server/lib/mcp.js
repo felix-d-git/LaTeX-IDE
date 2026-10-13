@@ -34,16 +34,18 @@ const cap = (s, n = 200) => (s.length > n ? s.slice(0, n) + '…' : s);
 // Any path inside the project (traversal blocked), never the IDE's own bookkeeping.
 function anyPath(root, rel) {
   if (typeof rel !== 'string' || !rel) throw new Error('path fehlt.');
-  safeResolve(root, rel);
-  if (rel.split(/[\\/]/).some((seg) => isIgnored(seg) || seg.startsWith('.latex-ide'))) throw new Error('Pfad nicht erlaubt.');
-  return rel.replace(/\\/g, '/');
+  // Canonical form ('./x.tex', 'a//b.tex' -> same file, same collab doc); the project root itself is no target.
+  const canon = path.relative(path.resolve(root), safeResolve(root, rel)).split(path.sep).join('/');
+  if (!canon) throw new Error('Die Projektwurzel ist kein gültiges Ziel.');
+  if (canon.split('/').some((seg) => isIgnored(seg) || seg.startsWith('.latex-ide'))) throw new Error('Pfad nicht erlaubt.');
+  return canon;
 }
 
 // Only whole text files.
 function textPath(root, rel) {
-  anyPath(root, rel);
-  if (!isTextFile(rel)) throw new Error('Keine Textdatei (.tex, .bib, .sty, .cls, .bst, .txt, .md, .cfg).');
-  return rel.replace(/\\/g, '/');
+  const canon = anyPath(root, rel);
+  if (!isTextFile(canon)) throw new Error('Keine Textdatei (.tex, .bib, .sty, .cls, .bst, .txt, .md, .cfg).');
+  return canon;
 }
 
 function readText(root, rel) {
@@ -84,8 +86,8 @@ function createMcp(ctx) {
 
   // Mean of the last 5 stored durations; without history rough guess from project size.
   function estimate(root) {
-    const times = ctx.state.getCompileTimes(root).slice(-5);
-    if (times.length) return { ms: Math.round(times.reduce((n, t) => n + t.ms, 0) / times.length), basis: `Mittel der letzten ${times.length} Läufe` };
+    const times = ctx.state.getCompileTimes(root).filter((t) => t.ms >= 1000).slice(-5); // failed 0-ms runs would give 'geschätzt 0 s'
+    if (times.length) return { ms: Math.max(1000, Math.round(times.reduce((n, t) => n + t.ms, 0) / times.length)), basis: `Mittel der letzten ${times.length} Läufe` };
     const bytes = flatten(buildTree(root)).reduce((n, f) => n + fs.statSync(path.join(root, f)).size, 0);
     return { ms: Math.min(600000, Math.max(10000, 10000 + bytes / 100)), basis: 'Schätzung aus Projektgröße, noch keine Laufzeiten gespeichert' };
   }
