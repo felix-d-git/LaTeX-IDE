@@ -129,6 +129,7 @@ class TitleWidget extends WidgetType {
 // PDF-Abbildungen einmal per pdf.js rastern und als Data-URL merken, weil
 // CodeMirror Widgets außerhalb des Viewports verwirft und neu erzeugt.
 const pdfThumbs = new Map();
+export const clearPdfThumbs = () => pdfThumbs.clear(); // bei Datei-/Baumänderung: neu hochgeladene PDFs neu rastern
 async function pdfThumb(url) {
   if (!pdfThumbs.has(url)) {
     pdfThumbs.set(url, (async () => {
@@ -142,7 +143,7 @@ async function pdfThumb(url) {
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
       pdf.destroy();
       return canvas.toDataURL('image/png');
-    })());
+    })().catch((e) => { pdfThumbs.delete(url); throw e; }));
   }
   return pdfThumbs.get(url);
 }

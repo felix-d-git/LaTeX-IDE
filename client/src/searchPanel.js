@@ -35,18 +35,21 @@ export function setupSearchPanel({ onOpenResult }) {
   btnClose.addEventListener('click', close);
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isOpen()) close();
+    // Nur wenn der Fokus in der Suche liegt und niemand (Autocomplete, Dialog, Vim) Escape schon behandelt hat.
+    if (e.key === 'Escape' && isOpen() && !e.defaultPrevented && panel.contains(document.activeElement)) close();
   });
 
+  let searchSeq = 0;
   async function doSearch() {
     const q = queryEl.value;
     if (!q) return;
     resultsEl.innerHTML = 'Suche läuft…';
+    const seq = ++searchSeq; // langsamere aeltere Antwort darf die neuere nicht ueberschreiben
     try {
       const { results } = await api.search(q, opts());
-      renderResults(results, q);
+      if (seq === searchSeq) renderResults(results, q);
     } catch (e) {
-      resultsEl.textContent = 'Fehler: ' + e.message;
+      if (seq === searchSeq) resultsEl.textContent = 'Fehler: ' + e.message;
     }
   }
 
