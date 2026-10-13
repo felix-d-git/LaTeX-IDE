@@ -41,6 +41,9 @@ services:
       # Update-Banner fuer Admins: off | notify | button | auto (siehe scripts/server-update.sh)
       UPDATE_MODE: ${UPDATE_MODE:-notify}
       UPDATE_TOKEN: ${UPDATE_TOKEN:-}
+      UPDATE_REPO: ${UPDATE_REPO:-}
+      SOURCE_URL: ${SOURCE_URL:-}
+      LANGUAGETOOL_URL: ${LANGUAGETOOL_URL:-}
       DATA_KEY: ${DATA_KEY:?DATA_KEY fehlt in .env (node server/lib/vault.js keygen)}
       VAULT_DIR: /vault
       NODE_OPTIONS: --max-old-space-size=${LATEX_HEAP_MB:-384}
