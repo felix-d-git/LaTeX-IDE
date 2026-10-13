@@ -52,7 +52,7 @@ RUN dpkg-query -W -f='${Package}\t${Version}\t${source:Package}\t${source:Versio
     && mkdir -p /app/data && chown node:node /app/data
 
 # A mounted TeX Live wins over the Debian one.
-ENV PATH="/data/texlive/2025/bin/aarch64-linux:/data/texlive/2025/bin/x86_64-linux:${PATH}" \
+ENV PATH="/data/texlive/2027/bin/aarch64-linux:/data/texlive/2027/bin/x86_64-linux:/data/texlive/2026/bin/aarch64-linux:/data/texlive/2026/bin/x86_64-linux:/data/texlive/2025/bin/aarch64-linux:/data/texlive/2025/bin/x86_64-linux:${PATH}" \
     DATA_DIR=/app/data \
     NODE_ENV=production
 USER node

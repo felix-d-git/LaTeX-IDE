@@ -18,12 +18,16 @@ function load(root) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (e) {
+    // keep the broken file instead of silently replacing it with an empty one on the next save
+    try { fs.copyFileSync(p, `${p}.corrupt-${Date.now()}`); } catch (_) {}
     return {};
   }
 }
 
 function save(root, data) {
-  fs.writeFileSync(filePath(root), JSON.stringify(data, null, 2), 'utf8');
+  const p = filePath(root);
+  fs.writeFileSync(p + '.tmp', JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(p + '.tmp', p);
 }
 
 // Merge by id: comments already at the target are kept, never overwritten.

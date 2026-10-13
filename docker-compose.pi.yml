@@ -24,6 +24,7 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    env_file: .env
     environment:
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt in .env}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt in .env}

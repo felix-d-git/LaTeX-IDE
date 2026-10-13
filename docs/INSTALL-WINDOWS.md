@@ -70,5 +70,7 @@ das automatische Update-Skript gibt es nur für Docker).
 
 ## Deinstallieren
 
-Windows-Einstellungen → Apps → LatexIDE. Datenordner und TeX Live bleiben
-stehen und können von Hand gelöscht werden.
+Windows-Einstellungen → Apps → LatexIDE. Die vom Installer angelegte TeX-Live-
+Installation, Caches und die `.env` werden entfernt (Admin-Zugangsdaten gelten
+nach einer Neuinstallation also neu). Projekte und Einstellungen löscht der
+Deinstaller nur nach Rückfrage.

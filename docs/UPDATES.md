@@ -60,7 +60,10 @@ Unter Windows mit Docker Desktop läuft es in Git Bash oder WSL (ohne Cron von H
 docker compose down
 tar -xzf <BACKUP_DIR>/data-<datum>-<version>.tar.gz -C <Elternordner des Datenordners>
 # mit Verschlüsselung: -C <LATEX_DATA_DIR> (das Archiv enthält vault/)
-git -C /pfad/zu/latex-web-ide checkout <alte Version>   # oder alten Quellstand entpacken
+# Quellstand: das Update-Skript arbeitet mit Release-Archiven, nicht mit git. Den alten Stand
+# (Release-Archiv der alten Version) über den Programmordner entpacken, .env/data/backups bleiben:
+tar -xzf <alte-version>.tar.gz -C /pfad/zu/latex-web-ide --strip-components=1
+echo <alter-tag> > /pfad/zu/latex-web-ide/.release   # sonst hält das Skript den Stand für aktuell/neuer
 docker compose up -d --build
 ```
 
@@ -92,3 +95,5 @@ Repository öffentlich ist, beide Einträge löschen.
 Ohne Token: Banner zeigt keine Updates (Fehler „GitHub HTTP 404“ nur im
 API-Ergebnis), die Desktop-Downloads im Profil melden „kein Installationspaket
 verfügbar“, und das Skript bricht mit „Repo privat ohne GITHUB_TOKEN“ ab.
+
+Das GitHub-Repo fuer Update-Check und Downloads steht in `UPDATE_REPO` (`.env`, Standard `felix-d-git/latex-web-ide`); Forks setzen es auf ihr eigenes Repo.

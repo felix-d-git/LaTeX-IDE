@@ -49,7 +49,14 @@ function renamePath(root, relPath, newName) {
   const abs = safeResolve(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const dest = path.join(path.dirname(abs), safeName);
-  if (fs.existsSync(dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
+  if (fs.existsSync(dest)) {
+    // Case-only rename on a case-insensitive FS: dest is the same entry as abs -> go via a temp name.
+    if (dest === abs || dest.toLowerCase() !== abs.toLowerCase()) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
+    const tmp = abs + '.tmp-rename';
+    fs.renameSync(abs, tmp);
+    fs.renameSync(tmp, dest);
+    return toRel(root, dest);
+  }
   fs.renameSync(abs, dest);
   return toRel(root, dest);
 }

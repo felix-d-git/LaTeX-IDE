@@ -12,7 +12,7 @@ export function setupProjectDialog({ onOpened }) {
     dialog.classList.remove('hidden');
     const { recentRoots, localProjects } = await api.listProjects();
     recentEl.innerHTML = '';
-    const all = [...new Set([...recentRoots, ...localProjects])];
+    const all = [...new Set([...recentRoots, ...localProjects.map((p) => p.root || p.name)])];
     for (const root of all) {
       const el = document.createElement('div');
       el.className = 'recent-item';

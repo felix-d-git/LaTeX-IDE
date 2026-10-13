@@ -129,9 +129,9 @@ Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD` setzen (ohne `.env` wird ein Fallback-Admin
-  `admin@local.host` / `bitte-sofort-aendern` angelegt - Passwort direkt danach über
-  "Passwort vergessen" ändern). Der Sitzungs-Schlüssel wird beim ersten Start
+  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen. Ohne `.env` wird ein Fallback-Admin
+  `admin@local.host` / `bitte-sofort-aendern` angelegt - Passwort direkt danach im Profil ändern;
+  `ADMIN_*` wirken nur beim allerersten Start (leerer Datenordner). Der Sitzungs-Schlüssel wird beim ersten Start
   erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
   unverändert. Jeder eingeladene Nutzer bekommt

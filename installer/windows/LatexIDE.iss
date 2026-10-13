@@ -190,7 +190,7 @@ begin
   if CurPageID = AdminPage.ID then
   begin
     Pw := AdminPage.Values[1];
-    if (Pos('@', AdminPage.Values[0]) = 0) or (Length(Pw) < 8) or (Pos('''', Pw) > 0) then
+    if (Pos('@', AdminPage.Values[0]) = 0) or (Pos('.', Copy(AdminPage.Values[0], Pos('@', AdminPage.Values[0]) + 1, MaxInt)) = 0) or (Length(Pw) < 8) or (Pos('''', Pw) > 0) then
     begin
       MsgBox('Bitte eine E-Mail-Adresse und ein Passwort mit mindestens 8 Zeichen (ohne Apostroph) angeben.', mbError, MB_OK);
       Result := False;

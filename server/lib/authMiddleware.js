@@ -36,6 +36,7 @@ const sessionStore = new FileStore({
   path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),
   ttl: REMEMBER_ME_MAX_AGE / 1000, // default 1 h would expire idle sessions despite the cookie lifetime
   logFn: () => {},
+  ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
 function createSessionMiddleware() {

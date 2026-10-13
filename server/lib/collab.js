@@ -216,7 +216,10 @@ function persist(entry) {
     if (entry.lastOrigin !== 'disk' || !fs.existsSync(abs) || onDisk() !== text) {
       hooks.markSelfWrite(entry.root, entry.rel, text);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, text, 'utf8');
+      const tmp = statePath(entry.root, entry.rel) + '.tex.tmp'; // same FS, outside the tree
+      fs.mkdirSync(path.dirname(tmp), { recursive: true });
+      fs.writeFileSync(tmp, text, 'utf8');
+      fs.renameSync(tmp, abs);
     }
     writeState(entry.root, entry.rel, entry.ydoc);
     entry.failures = 0;
@@ -390,7 +393,8 @@ function onPathMoved(root, oldRel, newRel) {
   const prefix = oldRel + '/';
   for (const entry of [...docs.values()]) {
     if (entry.root !== root || (entry.rel !== oldRel && !entry.rel.startsWith(prefix))) continue;
-    if (entry.timer) persist(entry);
+    // Deleted (newRel null): a flush would write the file back; rename/move: flush before the file operation.
+    if (newRel) { if (entry.timer) persist(entry); } else { clearTimeout(entry.timer); entry.timer = null; entry.dirty = false; }
     for (const ws of [...entry.conns.keys()]) {
       try {
         ws.close(4404, 'moved');

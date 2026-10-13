@@ -9,6 +9,7 @@ export function wsSubscribe(projectId) {
 
 export function connectWs(handlers) {
   let retryDelay = 1000;
+  let wasClosed = false;
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -21,8 +22,11 @@ export function connectWs(handlers) {
     ws.onopen = () => {
       retryDelay = 1000;
       if (subscribed) wsSubscribe(subscribed);
+      // Events missed while the channel was down: let the app reload tree/comments.
+      if (wasClosed && handlers.reconnected) handlers.reconnected({ type: 'reconnected' });
     };
     ws.onclose = () => {
+      wasClosed = true;
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 1.5, 10000);
     };
