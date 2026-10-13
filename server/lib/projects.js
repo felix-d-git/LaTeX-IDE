@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { isIgnored } = require('./fsTree');
-const { isSameEntry } = require('./treeOps');
+const { isIgnored, sameEntry } = require('./fsTree');
 const { extractZip } = require('./unzip');
 
 const TRASH_DIRNAME = '.trash';
@@ -48,8 +47,9 @@ function listEntries(dir, exclude = []) {
     .sort((a, b) => b.lastModified - a.lastModified);
 }
 
-function listProjects(projectsDir) {
-  return listEntries(projectsDir, [TRASH_DIRNAME, ARCHIVE_DIRNAME]);
+// exclude: zusätzliche Ordner, die schon VOR der (teuren) lastModified-Berechnung wegfallen (z. B. 'users' beim Admin).
+function listProjects(projectsDir, exclude = []) {
+  return listEntries(projectsDir, [TRASH_DIRNAME, ARCHIVE_DIRNAME, ...exclude]);
 }
 
 // key: label key, distinct from an active project of the same name.
@@ -65,6 +65,9 @@ function assertValidName(name) {
   const trimmed = (name || '').trim();
   if (!trimmed) throw new Error('Projektname darf nicht leer sein.');
   if (INVALID_NAME_RE.test(trimmed)) throw new Error('Projektname enthält ungültige Zeichen (\\ / : * ? " < > |).');
+  // Punkt-Ordner sind intern (.trash/.archive), 'users' ist der Konten-Ordner des Admins.
+  if (trimmed.startsWith('.') || trimmed.toLowerCase() === 'users') throw new Error('Dieser Projektname ist reserviert (kein führender Punkt, nicht "users").');
+  if (trimmed.endsWith('.')) throw new Error('Projektname darf nicht mit einem Punkt enden.');
   return trimmed;
 }
 
@@ -161,7 +164,8 @@ function renameProject(projectsDir, oldName, newName) {
   const src = path.join(projectsDir, oldName);
   const dest = path.join(projectsDir, safeName);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
-  if (fs.existsSync(dest) && !isSameEntry(src, dest)) throw new Error('Ein Projekt mit diesem Namen existiert bereits.');
+  // Nur Groß-/Kleinschreibung geändert: dest = src auf case-insensitiven Dateisystemen.
+  if (fs.existsSync(dest) && !sameEntry(src, dest)) throw new Error('Ein Projekt mit diesem Namen existiert bereits.');
   fs.renameSync(src, dest);
   return dest;
 }
@@ -187,7 +191,9 @@ function copyProject(projectsDir, name, newName) {
       dest = path.join(projectsDir, destName);
     }
   }
-  fs.cpSync(src, dest, { recursive: true });
+  // Build-Ausgaben (aller Nutzer), Verlauf, Collab-Zustand und Papierkorb gehören nicht in die Kopie.
+  const skip = new Set(['.latex-ide-out', '.latex-ide-history', '.latex-ide-yjs', '.trash']);
+  fs.cpSync(src, dest, { recursive: true, filter: (from) => !(path.dirname(from) === src && skip.has(path.basename(from))) });
   return dest;
 }
 

@@ -104,8 +104,19 @@ function setMainFile(root, relPath) {
   saveWorkspace(workspace);
 }
 
+// Gespeicherte Hauptdatei, die nicht (mehr) existiert (extern gelöscht/umbenannt), gilt als nicht gesetzt.
 function getMainFile(root) {
-  return workspace.mainFileByRoot[rk(root)] || null;
+  const main = workspace.mainFileByRoot[rk(root)] || null;
+  if (main && !fs.existsSync(path.join(root, main))) return null;
+  return main;
+}
+
+// Datei/Ordner umbenannt oder verschoben: Hauptdatei folgt (auch wenn sie in einem verschobenen Ordner liegt).
+function movePathInMainFile(root, oldRel, newRel) {
+  const main = workspace.mainFileByRoot[rk(root)];
+  if (!main || !newRel) return;
+  if (main === oldRel) setMainFile(root, newRel);
+  else if (main.startsWith(oldRel + '/')) setMainFile(root, newRel + main.slice(oldRel.length));
 }
 
 // Dauer jedes Compile-Laufs (Web + MCP): Basis der Schätzung und des Vergleichs Schätzung/Ist.
@@ -222,6 +233,16 @@ function moveRoot(oldRoot, newRoot, activeTo = newRoot) {
     if (workspace[k][oldRoot] === undefined) continue;
     workspace[k][newRoot] = workspace[k][oldRoot];
     delete workspace[k][oldRoot];
+  }
+  saveWorkspace(workspace);
+}
+
+// Kopiertes Projekt: nur Hauptdatei und Einstellungen (Compiler ...) übernehmen, nicht Freigaben/Rollen/Zeiten.
+function copyRoot(oldRoot, newRoot) {
+  oldRoot = rk(oldRoot);
+  newRoot = rk(newRoot);
+  for (const k of ['mainFileByRoot', 'settingsByRoot']) {
+    if (workspace[k][oldRoot] !== undefined) workspace[k][newRoot] = structuredClone(workspace[k][oldRoot]);
   }
   saveWorkspace(workspace);
 }
@@ -352,6 +373,8 @@ module.exports = {
   getRecentRoots,
   setMainFile,
   getMainFile,
+  movePathInMainFile,
+  copyRoot,
   getProjectSettings,
   setProjectSettings,
   addCompileTime,

@@ -26,8 +26,9 @@ function load(root) {
 
 function save(root, data) {
   const p = filePath(root);
-  fs.writeFileSync(p + '.tmp', JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(p + '.tmp', p);
+  const tmp = `${p}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tmp, p);
 }
 
 // Merge by id: comments already at the target are kept, never overwritten.

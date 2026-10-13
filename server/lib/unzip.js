@@ -1,6 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { isUtf8 } = require('buffer');
+
+// CP437-Zeichen der Bytes 0x80-0xFF. Für ä ö ü Ä Ö Ü ß é identisch mit CP850 (Windows-Explorer, deutsche Locale).
+const CP437 = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ';
+
+// Ohne EFS-Flag (0x800) sind Namen UTF-8 (macOS, Info-ZIP) oder CP437 (Windows) - nie Latin-1.
+function decodeName(bytes, utf8Flag) {
+  if (utf8Flag || isUtf8(bytes)) return bytes.toString('utf8');
+  return Array.from(bytes, (b) => (b < 0x80 ? String.fromCharCode(b) : CP437[b - 0x80])).join('');
+}
 
 const MAX_TOTAL = 200 * 1024 * 1024; // entpackte Gesamtgröße
 const MAX_FILES = 5000;
@@ -31,7 +41,7 @@ function extractZip(buf, destDir) {
     const elen = buf.readUInt16LE(p + 30);
     const clen = buf.readUInt16LE(p + 32);
     const lho = buf.readUInt32LE(p + 42);
-    const name = buf.toString(flags & 0x800 ? 'utf8' : 'latin1', p + 46, p + 46 + nlen).replace(/\\/g, '/');
+    const name = decodeName(buf.subarray(p + 46, p + 46 + nlen), flags & 0x800).replace(/\\/g, '/');
     p += 46 + nlen + elen + clen;
 
     if (name.includes('\0') || name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.split('/').includes('..')) {
@@ -70,4 +80,4 @@ function extractZip(buf, destDir) {
   }
 }
 
-module.exports = { extractZip };
+module.exports = { extractZip, decodeName };
