@@ -1,6 +1,7 @@
 #!/bin/bash
 # LatexIDE Desktop - macOS Installer.
-# Doppelklickbar (Finder). Bei Gatekeeper-Warnung: Rechtsklick -> Oeffnen.
+# Doppelklickbar (Finder). Bei Gatekeeper-Warnung: Systemeinstellungen ->
+# Datenschutz & Sicherheit -> "Dennoch oeffnen" (oder: bash install.command).
 #
 # Erwartet, im selben Ordner wie die App-Dateien (client/, server/,
 # package.json, build.js, ...) zu liegen - also entpackt aus
@@ -70,14 +71,25 @@ fi
 
 # --- App-Dateien kopieren ---------------------------------------------------
 
+# Alles aus dem Paket ausser install.command (wie das Auto-Update in
+# desktop.js), damit z. B. node_modules nicht fehlt.
+if [ ! -f "$SCRIPT_DIR/server/desktop.js" ] || [ ! -d "$SCRIPT_DIR/node_modules" ]; then
+    echo "Unvollstaendiges Paket in $SCRIPT_DIR (server/ oder node_modules/ fehlt)." >&2
+    echo "Bitte LatexIDE-macOS.zip neu herunterladen und entpacken." >&2
+    exit 1
+fi
 echo "Kopiere App-Dateien nach $APP_DIR..."
 mkdir -p "$APP_DIR"
-for item in client server server.json package.json package-lock.json build.js LICENSE THIRD_PARTY_NOTICES.md LICENSES-INSTALLER.txt; do
-    if [ -e "$SCRIPT_DIR/$item" ]; then
-        rm -rf "$APP_DIR/$item"
-        cp -R "$SCRIPT_DIR/$item" "$APP_DIR/$item"
-    fi
+for src in "$SCRIPT_DIR"/*; do
+    name="$(basename "$src")"
+    [ "$name" = install.command ] && continue
+    rm -rf "$APP_DIR/$name"
+    cp -R "$src" "$APP_DIR/$name"
 done
+if ! (cd "$APP_DIR" && "$NODE_DIR/bin/node" -e "for (const m of ['express', 'ws', 'http-proxy']) require.resolve(m)"); then
+    echo "App-Abhaengigkeiten fehlen in $APP_DIR/node_modules - Installation abgebrochen." >&2
+    exit 1
+fi
 
 # --- TeX Live / MacTeX installieren (falls noetig) --------------------------
 
@@ -130,5 +142,5 @@ echo ""
 echo "=== Installation abgeschlossen ==="
 echo "Starter angelegt: $STARTER"
 echo "Hinweis: Beim ersten Start von LatexIDE.command meldet macOS Gatekeeper"
-echo "moeglicherweise eine Sicherheitswarnung. Falls noetig: Rechtsklick auf"
-echo "die Datei -> 'Oeffnen' waehlen und bestaetigen."
+echo "moeglicherweise eine Sicherheitswarnung. Falls noetig: Systemeinstellungen ->"
+echo "Datenschutz & Sicherheit -> 'Dennoch oeffnen' (aeltere macOS: Rechtsklick -> 'Oeffnen')."
