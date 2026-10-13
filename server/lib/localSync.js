@@ -40,9 +40,9 @@ function walkLocal(dir) {
   return out;
 }
 
-function conflictName(rel) {
+function conflictName(rel, n = 1) {
   const ext = path.posix.extname(rel);
-  return `${rel.slice(0, rel.length - ext.length)}.offline-konflikt${ext}`;
+  return `${rel.slice(0, rel.length - ext.length)}.offline-konflikt${n > 1 ? `-${n}` : ''}${ext}`;
 }
 
 // Windows/macOS folders usually ignore case: "Kapitel1.tex" and "kapitel1.tex" are one file there.
@@ -133,7 +133,10 @@ async function syncFolder(dir, indexPath, io) {
     else if (act === 'upload') await io.upload(rel, fs.readFileSync(abs(rel)));
     else if (act === 'deleteRemote') await io.remove(rel);
     else if (act === 'conflict') {
-      const copy = conflictName(rel);
+      // A second conflict must not overwrite the first copy.
+      let n = 1;
+      while (server.has(conflictName(rel, n)) || local.has(conflictName(rel, n)) || fs.existsSync(abs(conflictName(rel, n)))) n++;
+      const copy = conflictName(rel, n);
       const mine = fs.readFileSync(abs(rel));
       write(copy, mine);
       await io.upload(copy, mine);
