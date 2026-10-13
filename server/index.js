@@ -137,6 +137,14 @@ function broadcast(root, msg, onlyUserId) {
   });
 }
 
+// A file/folder in the project was renamed/moved (newRel) or deleted (newRel = null) by the app:
+// open editors and the comments follow it. Not for watcher events (external edits, desktop
+// delete+put renames) - their comments stay and get re-attached by comments.listAll.
+function pathMoved(root, oldRel, newRel) {
+  collab.onPathMoved(root, oldRel, newRel);
+  if (comments.movePath(root, oldRel, newRel)) broadcast(root, { type: 'commentsChanged', path: newRel || oldRel });
+}
+
 function requireRoot(req, res) {
   const root = state.getActiveRoot(req.user.id);
   if (!root || !fs.existsSync(root)) {
@@ -454,7 +462,7 @@ function mcpProjects(user) {
   const shared = state.sharedRootsFor(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp',ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast })));
+app.post('/mcp',ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -1353,7 +1361,7 @@ app.post('/api/tree/rename', (req, res) => {
   try {
     collab.flushRoot(root);
     const relPath = treeOps.renamePath(root, req.body.path, req.body.newName);
-    collab.onPathMoved(root, req.body.path, relPath);
+    pathMoved(root, req.body.path, relPath);
     res.json({ ok: true, path: relPath });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -1370,8 +1378,11 @@ app.post('/api/tree/move', (req, res) => {
   try {
     collab.flushRoot(root);
     const relPath = treeOps.movePath(root, req.body.path, req.body.targetDir, !!req.body.overwrite);
-    if (req.body.overwrite) collab.onPathMoved(root, relPath, null);
-    collab.onPathMoved(root, req.body.path, relPath);
+    if (relPath !== req.body.path) {
+      // Overwritten target: its editors/comments go first, then the moved entry's take its place.
+      if (req.body.overwrite) pathMoved(root, relPath, null);
+      pathMoved(root, req.body.path, relPath);
+    }
     res.json({ ok: true, path: relPath });
   } catch (e) {
     if (e.conflict) return res.status(409).json({ conflict: true, error: e.message });
@@ -1384,7 +1395,7 @@ app.delete('/api/tree', (req, res) => {
   if (!root) return;
   try {
     treeOps.deletePath(root, req.query.path);
-    collab.onPathMoved(root, req.query.path, null);
+    pathMoved(root, req.query.path, null);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });

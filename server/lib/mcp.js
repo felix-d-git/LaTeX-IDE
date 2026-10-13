@@ -326,7 +326,7 @@ function createMcp(ctx) {
       const rel = anyPath(root, args.path);
       collab.flushRoot(root);
       treeOps.deletePath(root, rel);
-      collab.onPathMoved(root, rel, null);
+      ctx.pathMoved(root, rel, null);
       return `${rel} gelöscht.`;
     }),
 
@@ -348,7 +348,7 @@ function createMcp(ctx) {
         collab.flushRoot(root);
         fs.mkdirSync(path.dirname(absTo), { recursive: true });
         fs.renameSync(absFrom, absTo);
-        collab.onPathMoved(root, from, to);
+        ctx.pathMoved(root, from, to);
         return `${from} -> ${to} verschoben.`;
       }
     ),
