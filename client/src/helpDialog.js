@@ -21,7 +21,7 @@ const SECTIONS = [
     'Mehrere Personen können gleichzeitig in derselben Datei schreiben; Cursor der anderen sind farbig markiert.',
   ]],
   ['PDF & Kompilieren', [
-    'Recompile startet den Lauf, das Log zeigt Fehler und Warnungen als Karten – ein Klick springt zur Zeile.',
+    'Kompilieren startet den Lauf, das Log zeigt Fehler und Warnungen als Karten – ein Klick springt zur Zeile.',
     'Doppelklick im PDF springt zur Stelle im Quelltext (SyncTeX), und umgekehrt.',
     'In geteilten Projekten kompiliert standardmäßig jeder für sich und sieht nur sein eigenes PDF. Unter Einstellungen → Compiler lässt sich auf Gruppen-Kompilieren umstellen.',
   ]],
@@ -44,7 +44,7 @@ const SECTIONS = [
   ]],
   ['Grammatik (LanguageTool)', [
     'Einstellungen → Rechtschreibung → „Grammatik & Rechtschreibung“ einschalten. Der Server kann einen LanguageTool bereitstellen (LANGUAGETOOL_URL).',
-    "Eigener lokaler Server: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' starten und http://localhost:8081 unter „Eigener LanguageTool-Server“ eintragen.",
+    "Eigener lokaler Server: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' starten und http://localhost:8081 unter „LanguageTool-URL (eigener Rechner)“ eintragen.",
     'Desktop-App: funktioniert direkt (Proxy). Im Web fragt der Browser den lokalen Server selbst, darum ist --allow-origin nötig; Safari blockiert das, Chrome fragt ggf. nach Zugriff auf lokale Geräte.',
     'Ist der Server nicht erreichbar, erscheint ein einmaliger Hinweis; nach 30 Sekunden wird erneut versucht.',
   ]],

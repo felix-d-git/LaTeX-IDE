@@ -3,6 +3,36 @@
 // \iffalse-Blöcke, catcode-Tricks oder Makros mit unbalancierten Argumenten melden ggf. falsch.
 const VERBATIM = /^(verbatim\*?|Verbatim\*?|lstlisting|minted|comment|filecontents\*?)$/;
 
+// Index der zu text[open] === '{' passenden '}' (verschachtelt, \{ \} ausgenommen) oder -1.
+function matchingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// Verbatim-artige Argumente (%, { } duerfen darin vorkommen): \url{..}, 1. Argument von \href, \lstinline/\mintinline.
+// Gibt den Index des letzten uebersprungenen Zeichens zurueck oder -1 (nicht zutreffend).
+function skipVerbatimArg(text, i) {
+  const m = /^\\(url|href|lstinline|mintinline)\*?\s*(\[[^\]\n]*\])?\s*/.exec(text.slice(i, i + 200));
+  if (!m) return -1;
+  let p = i + m[0].length;
+  if (m[1] === 'mintinline') {
+    const lang = /^\{[^}\n]*\}\s*/.exec(text.slice(p, p + 80));
+    if (!lang) return -1;
+    p += lang[0].length;
+  }
+  const d = text[p];
+  if (d === undefined || /[a-zA-Z\s]/.test(d)) return -1;
+  if (d === '{') return matchingBrace(text, p);
+  if (m[1] === 'url' || m[1] === 'href') return -1;
+  const close = text.indexOf(d, p + 1);
+  return close === -1 ? p : close;
+}
+
 export function latexSyntaxDiagnostics(text) {
   const out = [];
   const braces = []; // Positionen offener {
@@ -35,6 +65,8 @@ export function latexSyntaxDiagnostics(text) {
           } else envs.pop();
         }
         i = to - 1;
+      } else if (/^\\(url|href|lstinline|mintinline)\b/.test(text.slice(i, i + 12)) && skipVerbatimArg(text, i) >= 0) {
+        i = skipVerbatimArg(text, i);
       } else if (text.startsWith('\\verb', i) && /[^a-zA-Z]/.test(text[i + 5] || '')) {
         const d = text[i + 5] === '*' ? i + 6 : i + 5; // \verb*|…|
         const close = text.indexOf(text[d], d + 1);
