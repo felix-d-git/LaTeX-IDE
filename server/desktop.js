@@ -15,9 +15,10 @@ const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compi
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
-const { syncFolder, moveDir } = require('./lib/localSync');
+const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
 const os = require('os');
+const { Readable, pipeline } = require('stream');
 const { spawn, execFileSync } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 3178;
@@ -88,21 +89,28 @@ function cookieValue(req, name) {
 }
 
 class Offline extends Error {}
+Offline.prototype.fatal = true; // syncFolder: abort instead of collecting it as a per-file error
 
 // Circuit breaker: once offline, requests fail at once (no timeout per request);
 // pingRemote() below flips the state back as soon as the server answers again.
-async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {}) {
+// stream: the time limit only covers the arrival of the headers (big downloads may take longer).
+async function remote(pathAndQuery, { method = 'GET', headers = {}, body, stream = false } = {}) {
   if (!online) throw new Offline('offline');
   let res;
+  const ac = new AbortController();
+  const limit = method === 'GET' ? 15000 : 120000;
+  const timer = stream ? setTimeout(() => ac.abort(), limit) : null;
   try {
     res = await fetch(REMOTE + pathAndQuery, {
       method,
       headers: { ...headers, Authorization: `Bearer ${config.token}` },
       body,
-      signal: AbortSignal.timeout(method === 'GET' ? 15000 : 120000),
+      signal: stream ? ac.signal : AbortSignal.timeout(limit),
       redirect: 'manual',
     });
+    clearTimeout(timer);
   } catch (e) {
+    clearTimeout(timer);
     setOnline(false);
     throw new Offline(e.message);
   }
@@ -117,6 +125,7 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body } = {})
 }
 const tunnelDown = (res) => [502, 503, 504].includes(res.status) && !res.headers.get('x-latex-ide');
 let online = true;
+let reopening = null;
 const wsSockets = new Set(); // proxied browser sockets - dropped when we go offline so the client notices at once
 
 function setOnline(v) {
@@ -124,7 +133,7 @@ function setOnline(v) {
   online = v;
   if (v) {
     setImmediate(syncAll); // back online: merge the offline copy
-    setImmediate(reopenOnServer);
+    reopening = reopenOnServer().catch(() => {}).finally(() => (reopening = null)); // the proxy waits for it
   }
   else for (const s of wsSockets) s.destroy();
 }
@@ -145,6 +154,7 @@ async function pingRemote() {
   }
 }
 setInterval(pingRemote, 2000).unref();
+setImmediate(pingRemote); // don't assume online until the server answered once
 
 async function remoteJson(pathAndQuery) {
   const res = await remote(pathAndQuery);
@@ -209,7 +219,7 @@ app.post('/api/desktop/local-dir', express.json(), ah(async (req, res) => {
   if (target === LOCAL_DIR) return res.json({ ok: true, localDir: LOCAL_DIR, moved: 0 });
   const rel = (a, b) => b === a || b.startsWith(a + path.sep);
   if (rel(LOCAL_DIR, target) || rel(target, LOCAL_DIR)) return res.status(400).json({ error: 'Alter und neuer Ordner dürfen sich nicht überschneiden.' });
-  if (fs.existsSync(target) && (!fs.statSync(target).isDirectory() || fs.readdirSync(target).length)) {
+  if (fs.existsSync(target) && (!fs.statSync(target).isDirectory() || fs.readdirSync(target).some((n) => !['.DS_Store', 'Thumbs.db', 'desktop.ini'].includes(n)))) {
     return res.status(400).json({ error: 'Der Zielordner muss leer oder neu sein.' });
   }
   if (moving) return res.status(409).json({ error: 'Verschieben läuft bereits.' });
@@ -256,6 +266,7 @@ function newer(a, b) {
 const UPDATE_OS = { win32: 'windows', darwin: 'macos' }[process.platform];
 
 let latest = null; // version offered by the server
+let installing = false;
 app.get('/api/desktop/update', ah(async (req, res) => {
   try {
     if (!config.token) throw new Error('nicht angemeldet');
@@ -273,6 +284,8 @@ app.get('/api/desktop/update', ah(async (req, res) => {
 // restarts via the LatexIDE.command starter that install.command created one level up.
 app.post('/api/desktop/update/install', ah(async (req, res) => {
   if (!latest) return res.status(400).json({ error: 'Kein Update bekannt.' });
+  if (installing) return res.status(409).json({ error: 'Update wird bereits installiert.' });
+  installing = true;
   try {
     const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
       headers: { Authorization: `Bearer ${config.token}` },
@@ -303,6 +316,7 @@ app.post('/api/desktop/update/install', ah(async (req, res) => {
     res.json({ ok: true });
     setTimeout(() => process.exit(0), 500);
   } catch (e) {
+    installing = false;
     res.status(502).json({ error: e.message });
   }
 }));
@@ -388,8 +402,9 @@ async function syncOwnedNow(p) {
       need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: buf }), rel),
     remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
   });
+  writeJson(path.join(SYNC_DIR, syncKey(p.projectId) + '.meta.json'), { mainFile: r.mainFile, settings: r.settings });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
-  const warn = [r.warning, r.skipped.length && `Dateien unterscheiden sich nur in Groß-/Kleinschreibung, nicht offline synchronisiert: ${r.skipped.join(', ')}`].filter(Boolean).join(' ');
+  const warn = [r.warning, r.errors.length && `Nicht synchronisiert: ${r.errors.join('; ')}`, r.conflicts.length && `Offline-Konflikt, lokale Fassung gesichert als *.offline-konflikt.*: ${r.conflicts.join(', ')}`, r.skipped.length && `Dateien unterscheiden sich nur in Groß-/Kleinschreibung, nicht offline synchronisiert: ${r.skipped.join(', ')}`].filter(Boolean).join(' ');
   if (warn) {
     console.warn(`Sync ${p.name}: ${warn}`);
     syncWarnings.set(p.projectId, `${p.name}: ${warn}`);
@@ -519,6 +534,13 @@ app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
     for (const [rel, text] of Object.entries((req.body && req.body.overrides) || {})) {
       const abs = inside(proj.dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
+      // Edited outside the IDE and not synced yet: keep that version next to it (synced as a normal file).
+      if (proj.owned && index[rel] && index[rel] !== 'ide' && fs.existsSync(abs)) {
+        const cur = fs.readFileSync(abs);
+        if (sha1(cur) !== index[rel] && !cur.equals(Buffer.from(String(text)))) {
+          fs.writeFileSync(inside(proj.dir, conflictName(rel, (n) => fs.existsSync(inside(proj.dir, n)))), cur);
+        }
+      }
       fs.writeFileSync(abs, String(text));
       index[rel] = proj.owned ? 'ide' : 'local'; // forces a re-download on the next online sync
     }
@@ -649,8 +671,8 @@ function serveOfflineProjects(req, res) {
     return true;
   }
   const dir = localDirOf(p);
-  const mainFile = findMainCandidate(dir);
-  current = { projectId: p.projectId, dir, mainFile, settings: {}, owned: true };
+  const { mainFile, settings } = savedMeta(p, dir);
+  current = { projectId: p.projectId, dir, mainFile, settings, owned: true };
   writeJson(path.join(MIRROR_DIR, 'current.json'), current);
   activeProjectId = p.projectId;
   offlineOpened = p.name;
@@ -659,11 +681,17 @@ function serveOfflineProjects(req, res) {
 }
 
 // Offline: the local copy (own project) or the last mirror of project `want` - never another project's.
+// mainFile + settings of an owned project as of the last sync (fallback: guess).
+function savedMeta(p, dir) {
+  const m = readJson(path.join(SYNC_DIR, syncKey(p.projectId) + '.meta.json'), {});
+  return { mainFile: m.mainFile && fs.existsSync(path.join(dir, m.mainFile)) ? m.mainFile : findMainCandidate(dir), settings: m.settings || {} };
+}
+
 function offlineProject(want) {
   if (current && current.projectId === want && fs.existsSync(current.dir)) return current;
   const own = ownedEntry(want);
   const dir = own && localDirOf(own);
-  return dir && fs.existsSync(dir) ? { projectId: want, dir, mainFile: findMainCandidate(dir), settings: {}, owned: true } : null;
+  return dir && fs.existsSync(dir) ? { projectId: want, dir, ...savedMeta(own, dir), owned: true } : null;
 }
 
 function offlineCopy(req) {
@@ -717,10 +745,17 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
   for (const h of FORWARD_REQ) if (req.headers[h]) headers[h] = req.headers[h];
   const hasBody = !['GET', 'HEAD'].includes(req.method) && Buffer.isBuffer(req.body) && req.body.length;
   try {
-    const r = await remote(url, { method: req.method, headers, body: hasBody ? req.body : undefined });
-    const buf = Buffer.from(await r.arrayBuffer());
+    if (reopening) await reopening; // reconnected: let the server switch to the offline-opened project first
+    const r = await remote(url, { method: req.method, headers, body: hasBody ? req.body : undefined, stream: true });
     if (r.status === 401) return res.status(401).json({ error: 'Desktop-Anmeldung abgelaufen.', desktopLogin: true });
     for (const h of FORWARD_RES) if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
+    // Everything except JSON (PDF, zip, raw files) streams through: no buffering, no total time limit.
+    if (!(r.headers.get('content-type') || '').includes('application/json') || !r.body) {
+      res.status(r.status);
+      if (!r.body) return res.end();
+      return pipeline(Readable.fromWeb(r.body), res, () => {});
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
     if (req.method === 'POST' && r.ok && req.path === '/projects/open') {
       try {
         activeProjectId = JSON.parse(buf.toString('utf8')).projectId || activeProjectId;

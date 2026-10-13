@@ -81,7 +81,7 @@ test('deletePath: Projektwurzel wird abgelehnt', () => {
 
 test('Konflikt-Kopie: zweiter Konflikt bekommt neuen Namen', () => {
   assert.strictEqual(conflictName('a.tex'), 'a.offline-konflikt.tex');
-  assert.strictEqual(conflictName('a.tex', 2), 'a.offline-konflikt-2.tex');
+  assert.strictEqual(conflictName('a.tex', (n) => n === 'a.offline-konflikt.tex'), 'a.offline-konflikt-2.tex');
 });
 
 test('Vault: letzter Schreibvorgang vor flush, leere Ordner und mtime ueberleben Neustart', () => {
