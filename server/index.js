@@ -384,9 +384,13 @@ const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
   const s = auth.getSettings().smtp;
   if (s) mailer.setSmtp(s);
 }
-// Verification mode: mail (default = behaviour before the setting existed) | admin | auto.
+// Verification mode: mail (default) | admin | auto. Without working SMTP "mail" falls back to
+// auto, otherwise invitees of a host without mail server could never log in.
 const VERIFY_MODES = ['mail', 'admin', 'auto'];
-const verifyMode = () => auth.getSettings().verifyMode || 'mail';
+const verifyMode = () => {
+  const m = auth.getSettings().verifyMode || 'mail';
+  return m === 'mail' && !mailer.isConfigured() ? 'auto' : m;
+};
 
 // Never throws (see mailer.sendMailSafe); result.error is set when delivery failed.
 function sendVerifyMail(req, user) {

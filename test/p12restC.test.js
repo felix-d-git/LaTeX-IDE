@@ -53,14 +53,14 @@ test('Rechte: Nicht-Admin bekommt 403, Anonym 401', async () => {
   } finally { await srv.stop(); }
 });
 
-test('Standard: Modus mail, kein SMTP; "mail" ohne SMTP abgelehnt, Passwort nie im Response', async () => {
+test('Standard ohne SMTP: Modus auto; "mail" ohne SMTP abgelehnt, Passwort nie im Response', async () => {
   const srv = await startServer();
   const smtp = await dummySmtp();
   try {
     const admin = client(srv.base);
     await admin.login('admin', 'bitte-sofort-aendern');
     let r = await admin.call('GET', '/api/admin/mail');
-    assert.equal(r.body.verifyMode, 'mail');
+    assert.equal(r.body.verifyMode, 'auto');
     assert.equal(r.body.smtpConfigured, false);
     assert.equal((await admin.call('POST', '/api/admin/mail/test')).status, 400);
     assert.equal((await admin.call('PUT', '/api/admin/mail', { verifyMode: 'mail' })).status, 400);
@@ -112,15 +112,11 @@ test('Modus admin: Konto unbestätigt, Login 403, Knopf-Endpunkt bestätigt, dan
   } finally { await srv.stop(); }
 });
 
-test('Modus auto: Login direkt nach Registrierung; Modus mail (Standard): Login gesperrt', async () => {
+test('Standard ohne SMTP = auto: Login direkt nach Registrierung', async () => {
   const srv = await startServer();
   try {
     const admin = client(srv.base);
     await admin.login('admin', 'bitte-sofort-aendern');
-    const dflt = await register(srv, admin, 'dave');
-    assert.equal(dflt.reg.body.needsVerification, true);
-    assert.equal((await login(dflt.c, 'dave')).status, 403);
-    assert.equal((await admin.call('PUT', '/api/admin/mail', { verifyMode: 'auto' })).status, 200);
     const { c, reg } = await register(srv, admin, 'erin');
     assert.equal(reg.body.needsVerification, false);
     assert.equal((await login(c, 'erin')).status, 200);

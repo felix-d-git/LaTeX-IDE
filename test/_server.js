@@ -87,7 +87,7 @@ function client(base) {
   };
 }
 
-// Admin + a second verified user (invite -> register -> verify link from the mail outbox).
+// Admin + a second verified user (invite -> register [-> verify link from the mail outbox]).
 async function adminAndUser(srv, username = 'bob') {
   const admin = client(srv.base);
   await admin.login('admin', 'bitte-sofort-aendern');
@@ -96,9 +96,12 @@ async function adminAndUser(srv, username = 'bob') {
   await user.call('GET', '/api/auth/me');
   const reg = await user.call('POST', '/api/auth/register', { token, username, email: `${username}@example.test`, password: 'geheim-passwort-123' });
   if (reg.status !== 200) throw new Error('Registrierung: ' + reg.text);
-  const outbox = fs.readFileSync(path.join(srv.dataDir, 'mail-outbox.log'), 'utf8');
-  const verify = [...outbox.matchAll(/verify=([\w-]+)/g)].pop()[1];
-  await user.call('POST', '/api/auth/verify', { token: verify });
+  // Without SMTP the server verifies invitees automatically (no mail); otherwise use the outbox link.
+  if (reg.body.needsVerification) {
+    const outbox = fs.readFileSync(path.join(srv.dataDir, 'mail-outbox.log'), 'utf8');
+    const verify = [...outbox.matchAll(/verify=([\w-]+)/g)].pop()[1];
+    await user.call('POST', '/api/auth/verify', { token: verify });
+  }
   const u = await user.login(username, 'geheim-passwort-123');
   return { admin, user, userId: u.id };
 }
