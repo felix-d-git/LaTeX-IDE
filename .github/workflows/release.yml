@@ -1,26 +1,40 @@
-# Baut bei jedem veroeffentlichten GitHub-Release die Desktop-Pakete und haengt sie
-# als Assets an (LatexIDE-Setup.exe, LatexIDE-macOS.zip). Desktop-Apps und das
-# Server-Update-Skript holen sich daraus die neue Version.
+# Baut zu jedem Tag vX.Y.Z die Desktop-Pakete und haengt sie als Assets an
+# (LatexIDE-Setup.exe, LatexIDE-macOS.zip). Desktop-Apps und das Server-Update-Skript
+# holen sich daraus die neue Version.
 #
-# Ablauf: Version in package.json hochzaehlen + committen -> Release mit Tag vX.Y.Z
-# veroeffentlichen. Die Pakete enthalten keine Zugangsdaten: Desktop-Apps laden
-# Updates von ihrem Server, der Server holt sie aus diesem Release.
+# Ablauf: Version in package.json hochzaehlen + committen -> Tag vX.Y.Z pushen (oder
+# Workflow manuell mit dem Tag starten). Der Workflow legt das Release als ENTWURF an,
+# prueft Tag == package.json, baut, haengt alle Assets an und veroeffentlicht erst danach.
+# Scheitert etwas, bleibt nur ein Entwurf liegen (Nutzer und Server-Updates sehen ihn nicht)
+# und ein erneuter Lauf nimmt ihn wieder auf. Die Pakete enthalten keine Zugangsdaten.
+#
+# Mit GITHUB_TOKEN veroeffentlichte Releases loesen keine anderen Workflows aus (kein
+# `release: published` fuer container-image.yml) -> der Job "container" ruft es per
+# workflow_call auf, nachdem das Release veroeffentlicht ist.
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag vX.Y.Z (muss existieren und zu package.json passen)'
+        required: true
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   desktop:
     runs-on: windows-latest
     env:
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
 
       - uses: actions/setup-node@v4
         with:
@@ -32,7 +46,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne $env:TAG) { gh release edit $env:TAG --draft; throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Release." }
+          if ("v$v" -ne $env:TAG) { throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Tag setzen." }
+
+      # Entwurf anlegen (oder den eines frueheren, abgebrochenen Laufs wiederverwenden).
+      - name: Release-Entwurf anlegen
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = gh release view $env:TAG --json isDraft 2>$null | ConvertFrom-Json
+          if ($rel) {
+            if (-not $rel.isDraft) { throw "Release $env:TAG ist schon veroeffentlicht." }
+          } else {
+            gh release create $env:TAG --draft --verify-tag --title $env:TAG --generate-notes
+            if ($LASTEXITCODE) { throw "Entwurf konnte nicht angelegt werden." }
+          }
 
       - name: Inno Setup
         shell: pwsh
@@ -76,7 +104,7 @@ jobs:
     needs: desktop
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -94,3 +122,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" LatexIDE-macOS.zip --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Erst jetzt, mit allen Assets, wird der Entwurf oeffentlich.
+  publish:
+    needs: [desktop, macos]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Release veroeffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
+          for a in LatexIDE-Setup.exe LatexIDE-macOS.zip; do echo "$assets" | grep -qx "$a" || { echo "Asset $a fehlt"; exit 1; }; done
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  # Container-Image: container-image.yml haengt sonst nur am release-Event, das GITHUB_TOKEN nicht ausloest.
+  container:
+    needs: publish
+    uses: ./.github/workflows/container-image.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+    permissions:
+      contents: write
+      packages: write

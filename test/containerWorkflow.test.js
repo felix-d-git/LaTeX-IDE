@@ -48,7 +48,7 @@ function simulate(event) {
   ].join('\n');
   const env = {
     ...process.env, STUBS: fwd(stubs), LOGF: fwd(path.join(tmp, 'log')), ENVF: fwd(path.join(tmp, 'env')),
-    GITHUB_EVENT_NAME: event, TAG: event === 'release' ? `v${VER}` : '', GITHUB_SHA: 'abcdef0123456789',
+    GITHUB_EVENT_NAME: event, RELEASE_RUN: event === 'release' ? 'true' : '', TAG: event === 'release' ? `v${VER}` : '', GITHUB_SHA: 'abcdef0123456789',
     GITHUB_REPOSITORY: 'Owner/latex-web-ide', GITHUB_ACTOR: 'x', GH_TOKEN: 't',
     GITHUB_STEP_SUMMARY: fwd(path.join(tmp, 'summary')),
   };
