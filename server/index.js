@@ -530,6 +530,8 @@ const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/latex-we
 // (vault.js ignoriert dort Dateien, die kein Eintrag sind).
 const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
 const APP_VERSION = require('../package.json').version;
+// INSTALL_KIND=windows (set by the Windows installer): no cron/server-update.sh, update = run the new Setup.
+const INSTALL_KIND = process.env.INSTALL_KIND || '';
 let releaseCache = { at: 0, version: null, url: null };
 
 async function latestRelease() {
@@ -557,11 +559,13 @@ function updateStatus() {
 }
 
 app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
-  const base = { current: APP_VERSION, mode: UPDATE_MODE, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
+  const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
   if (UPDATE_MODE === 'off') return res.json({ ...base, available: false });
   try {
     const rel = await latestRelease();
-    res.json({ ...base, available: !!rel.version && isNewer(rel.version, APP_VERSION), version: rel.version, url: rel.url });
+    const out = { ...base, available: !!rel.version && isNewer(rel.version, APP_VERSION), version: rel.version, url: rel.url };
+    if (INSTALL_KIND === 'windows' && rel.version) out.setupUrl = `https://github.com/${UPDATE_REPO}/releases/download/v${rel.version}/LatexIDE-Setup.exe`;
+    res.json(out);
   } catch (e) {
     res.json({ ...base, available: false, error: e.message });
   }

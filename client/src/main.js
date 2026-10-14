@@ -1034,6 +1034,8 @@ async function checkServerUpdate() {
   log.hidden = true;
   log.append(Object.assign(document.createElement('summary'), { textContent: 'Protokoll' }), document.createElement('pre'));
   bar.appendChild(log);
+  const win = u.installKind === 'windows';
+  if (win && u.setupUrl && u.available) bar.appendChild(Object.assign(document.createElement('a'), { href: u.setupUrl, rel: 'noopener', textContent: 'LatexIDE-Setup.exe herunterladen' }));
   if (u.url) bar.appendChild(Object.assign(document.createElement('a'), { href: u.url, target: '_blank', rel: 'noopener', textContent: 'Release-Notizen' }));
   const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
   let timer = null;
@@ -1085,9 +1087,9 @@ async function checkServerUpdate() {
     follow();
   } else {
     text.textContent = `Server-Update verfügbar: Version ${target} (installiert: ${from}). ` +
-      (u.mode === 'auto' ? 'Wird nachts automatisch installiert (mit Backup).' : u.mode === 'button' ? '' : 'Installation auf dem Server per scripts/server-update.sh.');
+      (u.installKind === 'windows' ? 'Neues Setup herunterladen und ausführen (Daten und Einstellungen bleiben erhalten).' : u.mode === 'auto' ? 'Wird nachts automatisch installiert (mit Backup).' : u.mode === 'button' ? '' : 'Installation auf dem Server per scripts/server-update.sh.');
     if (st && st.state === 'failed' && (!st.from || ver(st.from) === from)) failed(st);
-    if (u.mode === 'button') {
+    if (u.mode === 'button' && !win) {
       const btn = Object.assign(document.createElement('button'), { textContent: st && st.state === 'failed' ? 'Erneut versuchen' : 'Jetzt aktualisieren' });
       btn.addEventListener('click', async () => {
         btn.disabled = true;
