@@ -101,4 +101,9 @@ async function exportProject(root, mainRel, format) {
   return { data: await pandoc(args, json, root), fmt };
 }
 
-module.exports = { exportProject, FORMATS, cleanAst };
+// Checked once at startup (async, never throws); the client greys out the export menu entries without Pandoc.
+let pandocOk = false;
+execFile(PANDOC, ['--version'], { timeout: 10000 }, (err) => { pandocOk = !err; });
+const pandocAvailable = () => pandocOk;
+
+module.exports = { pandocAvailable, exportProject, FORMATS, cleanAst };

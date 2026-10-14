@@ -323,13 +323,13 @@ function createMcp(ctx) {
       }
     ),
 
-    tool('delete_file', 'delete', 'Datei oder Ordner (samt Inhalt) endgültig löschen.', { path: S('string', 'Pfad relativ zum Projekt') }, ['path'], async (a, args) => {
+    tool('delete_file', 'delete', 'Datei oder Ordner (samt Inhalt) in den Papierkorb (.trash) verschieben.', { path: S('string', 'Pfad relativ zum Projekt') }, ['path'], async (a, args) => {
       const root = resolveRoot(a, args);
       const rel = anyPath(root, args.path);
       collab.flushRoot(root);
-      treeOps.deletePath(root, rel);
+      treeOps.trashPath(root, rel);
       ctx.pathMoved(root, rel, null);
-      return `${rel} gelöscht.`;
+      return `${rel} in den Papierkorb verschoben.`;
     }),
 
     tool(

@@ -78,6 +78,7 @@ function buildItem(item, close) {
     if (item.onClick) item.onClick();
   });
   if (item.disabled) row.disabled = true;
+  if (item.title) row.title = item.title;
   return row;
 }
 

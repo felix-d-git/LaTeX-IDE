@@ -172,7 +172,7 @@ Werkzeuge je Recht: `read`: `list_projects`, `project_tree`, `outline`, `read_fi
 
 ```
 server/   Express + WebSocket-Server, Datei-API, Compile-API (latexmk),
-          Suche/Ersetzen, chokidar-Watcher mit Echo-Unterdrückung
+          Suche, chokidar-Watcher mit Echo-Unterdrückung
 client/   Vanilla-JS-Frontend (CodeMirror 6, PDF.js), gebündelt mit esbuild
 projects/ lokale Testprojekte (nicht Teil des eigentlichen Tools)
 ```

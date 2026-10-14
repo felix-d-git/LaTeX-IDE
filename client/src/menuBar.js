@@ -20,6 +20,9 @@ async function exportAs(format) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// Server meldet beim Login, ob Pandoc installiert ist (features.pandoc).
+const noPandoc = () => (window.__features && window.__features.pandoc === false ? { disabled: true, title: 'Pandoc ist auf dem Server nicht installiert.' } : {});
+
 // R2: eine Toolbar-Zeile — Home-Button (32x32, rund) plus sechs Menü-Toggles
 // mit 12px Abstand. Menüs sind 240px breit, Zeilen 36px hoch (dropdown.js).
 export function setupMenuBar(ctx) {
@@ -65,9 +68,9 @@ export function setupMenuBar(ctx) {
           submenu: [
             { label: 'Download as source (.zip)', onClick: () => window.location.assign(withPid('/api/download/zip')) },
             { label: 'Download as PDF', onClick: () => downloadPdf(ctx) },
-            { label: 'Export as Word (.docx)', onClick: () => exportAs('docx') },
-            { label: 'Export as Markdown (.md)', onClick: () => exportAs('md') },
-            { label: 'Export as HTML (.html)', onClick: () => exportAs('html') },
+            { label: 'Export as Word (.docx)', onClick: () => exportAs('docx'), ...noPandoc() },
+            { label: 'Export as Markdown (.md)', onClick: () => exportAs('md'), ...noPandoc() },
+            { label: 'Export as HTML (.html)', onClick: () => exportAs('html'), ...noPandoc() },
           ],
         },
         { type: 'divider' },

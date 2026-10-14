@@ -50,7 +50,7 @@ function startWatcher(root, broadcast) {
 
     const newHash = hashOf(buf);
     if (takeSelfWrite(absPath, newHash)) {
-      // This is the echo of our own save via PUT /api/file - not an external edit.
+      // This is the echo of our own save (collab persist) - not an external edit.
       lastContent.set(relPath, content);
       return;
     }
