@@ -27,11 +27,14 @@ RUN node build.js \
 
 FROM node:24-bookworm-slim
 
+# Repo-Zuordnung kommt vom Build (container-image.yml: github.repository), kein fester Name im Image.
+ARG IMAGE_SOURCE=""
+ARG IMAGE_AUTHORS=""
 LABEL org.opencontainers.image.title="latex-web-ide" \
       org.opencontainers.image.description="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Drittsoftware, Paketliste und Quellcode-Angebot: /app/docs/INSTALL-DOCKER.md" \
-      org.opencontainers.image.authors="felix-d-git" \
+      org.opencontainers.image.authors="${IMAGE_AUTHORS}" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="https://github.com/felix-d-git/latex-web-ide"
+      org.opencontainers.image.source="${IMAGE_SOURCE}"
 
 ARG TEXLIVE=apt
 ARG PANDOC=1
