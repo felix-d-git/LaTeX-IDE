@@ -5,6 +5,13 @@ if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirna
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
+{
+  const dataErr = require('./lib/fsTree').dataDirError(process.env.DATA_DIR || require('path').join(__dirname, '..'));
+  if (dataErr) {
+    console.error(`[start] ${dataErr}`);
+    process.exit(1);
+  }
+}
 
 const express = require('express');
 const path = require('path');
@@ -15,7 +22,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
+const { canonRel, buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -2091,6 +2098,8 @@ collab.setHooks({
     safeSnapshot(root, { trigger: 'autosave' });
     maybeAutocompile(root, null);
   },
+  // Disk write failed (retried with backoff) / works again: tell the windows on this project.
+  onSaveState: (root, rel, failed) => broadcast(root, { type: 'saveFailed', path: rel, failed }),
 });
 
 function rejectUpgrade(socket, code, text) {
@@ -2136,7 +2145,7 @@ async function handleUpgrade(req, socket, head) {
   let rel;
   try {
     root = path.resolve(PROJECTS_DIR, decodeURIComponent(parts[0]));
-    rel = decodeURIComponent(parts[1]);
+    rel = canonRel(decodeURIComponent(parts[1]));
     safeResolve(root, rel);
   } catch {
     return rejectUpgrade(socket, 400, 'Bad Request');

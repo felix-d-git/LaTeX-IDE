@@ -37,10 +37,30 @@ function loadIndex(root) {
   const p = indexPath(root);
   if (!fs.existsSync(p)) return [];
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    const idx = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!Array.isArray(idx)) throw new Error('kein Array');
+    return idx;
   } catch (e) {
-    return [];
+    // Keep the broken file (like comments.js) and rebuild from what is still on disk, never silently "empty".
+    try { fs.copyFileSync(p, `${p}.corrupt-${Date.now()}`); } catch (_) {}
+    const entries = rebuildIndex(root);
+    try { saveIndex(root, entries); } catch (_) {}
+    console.warn(`[history] Verlaufsindex defekt, aus snapshots/ neu aufgebaut (${entries.length} Versionen): ${root}`);
+    return entries;
   }
+}
+
+// Only legacy snapshots/<id>/ folders survive without the index (blobs carry no file names).
+function rebuildIndex(root) {
+  const dir = path.join(historyRoot(root), SNAPSHOTS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    const abs = path.join(dir, d.name);
+    out.push({ id: d.name, createdAt: fs.statSync(abs).mtime.toISOString(), label: null, trigger: 'recovered', files: walkTextFiles(abs) });
+  }
+  return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 // tmp + rename: a full disk must not leave a truncated index (= empty history).

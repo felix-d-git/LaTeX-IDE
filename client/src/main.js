@@ -1146,6 +1146,16 @@ connectWs(forThisProject({
     els.compileBtn.textContent = 'Kompilieren';
     if (typeof msg.log === 'string') els.pdfLogView.textContent = msg.log;
   },
+  saveFailed: (msg) => {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:10px 16px;border-radius:6px;color:#fff;font:14px sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.35);background:' + (msg.failed ? '#b3261e' : '#1e7a3c');
+    el.textContent = msg.failed
+      ? `Speichern von ${msg.path} auf dem Server fehlgeschlagen – der Server versucht es erneut. Tab nicht schließen.`
+      : `${msg.path} wurde wieder gespeichert.`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), msg.failed ? 15000 : 4000);
+  },
   commentsChanged: async (msg) => {
     await commentsManager.loadAll();
     editorMgr.refreshCommentsForPath(msg.path, commentsManager.getForFile(msg.path));

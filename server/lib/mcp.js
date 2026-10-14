@@ -9,7 +9,7 @@ const auth = require('./auth');
 const collab = require('./collab');
 const comments = require('./comments');
 const treeOps = require('./treeOps');
-const { buildTree, isTextFile, safeResolve, isIgnored } = require('./fsTree');
+const { buildTree, isTextFile, safeResolve, isIgnored, canonRel } = require('./fsTree');
 const { searchProject } = require('./search');
 const { findMainCandidate } = require('./compile');
 const legal = require('./legal');
@@ -35,7 +35,7 @@ const cap = (s, n = 200) => (s.length > n ? s.slice(0, n) + '…' : s);
 function anyPath(root, rel) {
   if (typeof rel !== 'string' || !rel) throw new Error('path fehlt.');
   // Canonical form ('./x.tex', 'a//b.tex' -> same file, same collab doc); the project root itself is no target.
-  const canon = path.relative(path.resolve(root), safeResolve(root, rel)).split(path.sep).join('/');
+  const canon = path.relative(path.resolve(root), safeResolve(root, canonRel(rel))).split(path.sep).join('/');
   if (!canon) throw new Error('Die Projektwurzel ist kein gültiges Ziel.');
   if (canon.split('/').some((seg) => isIgnored(seg) || seg.startsWith('.latex-ide'))) throw new Error('Pfad nicht erlaubt.');
   return canon;

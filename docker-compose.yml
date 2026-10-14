@@ -3,6 +3,7 @@
 #   cp .env.example .env   # ausfuellen
 #   mkdir -p data && sudo chown 1000:1000 data   # der Container laeuft als uid 1000 (node);
 #                          # gehoert der Ordner root, startet er in einer Absturz-Neustart-Schleife
+#                          # (der Server meldet dann "nicht beschreibbar fuer uid <uid>" und beendet sich)
 #   docker compose up -d --build
 # Eigene Anpassungen (Ports, Limits, Reverse-Proxy-Netz) in docker-compose.override.yml,
 # dann bleiben sie bei Updates erhalten.
