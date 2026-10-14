@@ -70,7 +70,9 @@ if (joinToken) {
 (async function boot() {
   let currentUser;
   try {
-    currentUser = (await authApi.me()).user;
+    const me = await authApi.me();
+    currentUser = me.user;
+    window.__features = me.features || {};
   } catch (e) {
     // Desktop app without a (valid) token: log in via the server's web UI.
     if (e.data && e.data.desktopLogin) return location.replace('/desktop/login');
@@ -1145,6 +1147,11 @@ connectWs(forThisProject({
     els.compileBtn.disabled = false;
     els.compileBtn.textContent = 'Kompilieren';
     if (typeof msg.log === 'string') els.pdfLogView.textContent = msg.log;
+    // Auto-compiles and runs of other users: show their error list too.
+    if (msg.errors || msg.warnings) {
+      errorPanel.setLog(msg);
+      editorMgr.setCompileDiagnostics(msg);
+    }
   },
   commentsChanged: async (msg) => {
     await commentsManager.loadAll();

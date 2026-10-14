@@ -19,7 +19,7 @@ const { buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText
 const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
-const { searchProject, replaceInProject, collectRefs } = require('./lib/search');
+const { searchProject, collectRefs } = require('./lib/search');
 const { startWatcher } = require('./lib/watcher');
 const projects = require('./lib/projects');
 const treeOps = require('./lib/treeOps');
@@ -445,7 +445,7 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = authMw.currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
-  res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE } });
+  res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE }, features: { pandoc: exporter.pandocAvailable() } });
 });
 
 app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
@@ -1512,24 +1512,6 @@ app.get('/api/file', (req, res) => {
   }
 });
 
-app.put('/api/file', (req, res) => {
-  const root = requireRoot(req, res);
-  if (!root) return;
-  try {
-    const { path: relPath, content } = req.body;
-    const abs = safeResolve(root, relPath);
-    state.markSelfWrite(abs, content);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, content, 'utf8');
-    collab.applyExternalText(root, relPath, content);
-    safeSnapshot(root, { trigger: 'autosave' });
-    maybeAutocompile(root, req.user.id);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
 app.post('/api/tree/folder', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
@@ -1685,7 +1667,7 @@ async function doCompile(root, main, outRel, to, meta, auto) {
     console.error('[compile] Laufzeit nicht gespeichert:', e.message);
   }
   const status = result.success ? 'success' : result.pdfPath ? 'warning' : 'error';
-  broadcast(root, { type: 'compileStatus', status, log: result.log }, to);
+  broadcast(root, { type: 'compileStatus', status, log: result.log, errors: result.errors || [], warnings: result.warnings || [] }, to);
   if (result.pdfPath) broadcast(root, { type: 'pdfChanged', path: result.pdfPath }, to);
   safeSnapshot(root, { trigger: auto ? 'autocompile' : 'compile' });
   if (result.pdfPath) {
@@ -2050,25 +2032,6 @@ app.post('/api/file/convert-utf8', (req, res) => {
     fs.writeFileSync(abs, content, 'utf8');
     collab.applyExternalText(root, file, content);
     res.json({ ok: true, converted: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-app.post('/api/replace', (req, res) => {
-  const root = requireRoot(req, res);
-  if (!root) return;
-  const { query, replacement, regex, caseSensitive, wholeWord } = req.body;
-  try {
-    collab.flushRoot(root);
-    const result = replaceInProject(root, query, replacement, { regex, caseSensitive, wholeWord });
-    for (const f of result.changedFiles) {
-      const content = fs.readFileSync(path.join(root, f.file), 'utf8');
-      state.markSelfWrite(path.join(root, f.file), content);
-      collab.applyExternalText(root, f.file, content);
-      broadcast(root, { type: 'fileChanged', path: f.file, content, changedRanges: [], source: 'replace' });
-    }
-    res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

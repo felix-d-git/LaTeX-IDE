@@ -186,8 +186,6 @@ export const api = {
     });
     return req('GET', `/api/search?${params.toString()}`);
   },
-  replaceAll: (query, replacement, opts) =>
-    req('POST', '/api/replace', { query, replacement, ...opts }),
 };
 
 // Öffentliche Basis-URL für Links, die andere nutzen sollen (Freigabe, MCP): in der
