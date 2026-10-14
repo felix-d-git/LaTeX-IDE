@@ -372,6 +372,15 @@ const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 
+// Admin-chosen SMTP (auth-data.json) overrides .env; apply at startup.
+{
+  const s = auth.getSettings().smtp;
+  if (s) mailer.setSmtp(s);
+}
+// Verification mode: mail (default = behaviour before the setting existed) | admin | auto.
+const VERIFY_MODES = ['mail', 'admin', 'auto'];
+const verifyMode = () => auth.getSettings().verifyMode || 'mail';
+
 // Never throws (see mailer.sendMailSafe); result.error is set when delivery failed.
 function sendVerifyMail(req, user) {
   const token = auth.createVerifyToken(user.id);
@@ -389,11 +398,13 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   let user;
   try {
-    user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: false });
+    user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: verifyMode() === 'auto' });
     auth.consumeInvite(token, user.id);
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
+  if (verifyMode() === 'auto') return res.json({ ok: true, needsVerification: false, message: 'Konto angelegt. Du kannst dich jetzt anmelden.' });
+  if (verifyMode() === 'admin') return res.json({ ok: true, needsVerification: true, message: 'Konto angelegt. Ein Admin muss deine E-Mail-Adresse noch bestätigen, bevor du dich anmelden kannst.' });
   // Account and invite are already used up: a mail failure must not look like a failed registration.
   const sent = await sendVerifyMail(req, user);
   res.json({
@@ -414,7 +425,7 @@ app.post('/api/auth/verify', limitToken, (req, res) => {
 app.post('/api/auth/resend-verification', limitMail, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Not awaited: same answer and timing whether or not the account exists, and a hanging SMTP server doesn't block.
-  if (user && !auth.isVerified(user)) sendVerifyMail(req, user);
+  if (user && !auth.isVerified(user) && verifyMode() === 'mail') sendVerifyMail(req, user);
   res.json({ ok: true, message: 'Falls ein unbestätigtes Konto existiert, wurde eine neue Bestätigungsmail verschickt.' });
 }));
 
@@ -424,7 +435,7 @@ app.post('/api/auth/login', limitLogin, ah(async (req, res) => {
   const ok = user && (await auth.verifyPassword(user, password));
   if (!ok) return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
   if (!auth.isVerified(user)) {
-    return res.status(403).json({ error: 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).', unverified: true });
+    return res.status(403).json({ error: verifyMode() === 'mail' ? 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).' : 'Dein Konto wartet noch auf die Bestätigung durch einen Admin.', unverified: true });
   }
   req.session.regenerate((err) => {
     if (err) return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
@@ -510,6 +521,57 @@ app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin,
 app.get('/api/admin/users', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   res.json({ users: auth.listUsers().map((u) => ({ ...auth.toPublicUser(u), verified: auth.isVerified(u) })) });
 });
+
+app.post('/api/admin/users/:id/verify', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  if (!auth.markVerified(req.params.id)) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+  res.json({ ok: true });
+});
+
+// --- Admin: e-mail (SMTP from the UI overrides .env; the password never leaves the server) ---
+
+function mailState() {
+  const c = mailer.getConfig() || {};
+  return {
+    smtp: { host: c.host || '', port: c.port || '', secure: !!c.secure, user: c.user || '', from: c.from || '', passwordSet: !!c.pass, source: mailer.configSource() },
+    smtpConfigured: mailer.isConfigured(),
+    verifyMode: verifyMode(),
+  };
+}
+
+app.get('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) => res.json(mailState()));
+
+app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  const { smtp, verifyMode: mode } = req.body || {};
+  if (mode !== undefined && !VERIFY_MODES.includes(mode)) return res.status(400).json({ error: 'Ungültiger Bestätigungsmodus.' });
+  const prev = auth.getSettings().smtp;
+  if (smtp !== undefined) {
+    const host = String((smtp && smtp.host) || '').trim();
+    // Empty host = back to .env. Password: undefined keeps the stored one, '' removes it.
+    const next = host ? {
+      host,
+      port: Number(smtp.port) || 587,
+      secure: !!smtp.secure,
+      user: String(smtp.user || '').trim(),
+      pass: smtp.pass === undefined ? (prev && prev.pass) || '' : String(smtp.pass),
+      from: String(smtp.from || '').trim(),
+    } : null;
+    mailer.setSmtp(next);
+    auth.setSettings({ smtp: next });
+  }
+  if (mode === 'mail' && !mailer.isConfigured()) return res.status(400).json({ error: 'Bestätigung per Mail braucht einen funktionierenden SMTP-Zugang.' });
+  if (mode !== undefined) auth.setSettings({ verifyMode: mode });
+  res.json(mailState());
+});
+
+app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
+  if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
+  try {
+    await mailer.sendMail({ to: req.user.email, subject: 'LatexIDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
+  } catch (e) {
+    return res.status(502).json({ error: `Versand fehlgeschlagen: ${e.message}` });
+  }
+  res.json({ ok: true, to: req.user.email });
+}));
 
 // Same as the user's own "Konto löschen", without the password (admin can't delete admins).
 app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req, res) => {

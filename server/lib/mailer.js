@@ -3,21 +3,39 @@ const path = require('path');
 
 const OUTBOX_PATH = path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), 'mail-outbox.log');
 
-// No real SMTP configured yet (local test setup) -> log the link instead of
-// sending mail, so the admin can copy it manually. Setting SMTP_HOST etc.
-// switches this to real delivery without touching call sites.
-const smtpConfigured = !!process.env.SMTP_HOST;
-
+// UI settings (set from index.js via setSmtp) win over .env; neither -> log to outbox
+// instead of sending, so the admin can copy the link manually.
+let override = null;
 let transporter = null;
+function getConfig() {
+  if (override && override.host) return override;
+  if (!process.env.SMTP_HOST) return null;
+  return {
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: getConfig().from || getConfig().user,
+  };
+}
+const isConfigured = () => !!getConfig();
+const configSource = () => (override && override.host ? 'ui' : process.env.SMTP_HOST ? 'env' : 'none');
+function setSmtp(cfg) {
+  override = cfg && cfg.host ? cfg : null;
+  transporter = null;
+}
+
 function getTransporter() {
-  if (!smtpConfigured) return null;
+  const c = getConfig();
+  if (!c) return null;
   if (!transporter) {
     const nodemailer = require('nodemailer');
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      host: c.host,
+      port: Number(c.port) || 587,
+      secure: !!c.secure,
+      auth: c.user ? { user: c.user, pass: c.pass } : undefined,
       // An unreachable SMTP server must not keep requests hanging for minutes.
       connectionTimeout: 10000,
       greetingTimeout: 10000,
@@ -44,7 +62,7 @@ async function sendMail({ to, subject, text }) {
     return { delivered: false };
   }
   await t.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: getConfig().from || getConfig().user,
     to,
     subject,
     text,
@@ -64,4 +82,4 @@ async function sendMailSafe(opts) {
   }
 }
 
-module.exports = { sendMail, sendMailSafe, smtpConfigured };
+module.exports = { sendMail, sendMailSafe, isConfigured, configSource, getConfig, setSmtp };

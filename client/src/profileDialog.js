@@ -220,6 +220,14 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       for (const u of users) {
         const row = el('div', 'invite-row');
         row.appendChild(el('span', 'invite-status', `${u.username} (${u.email})${u.isAdmin ? ' – Admin' : ''}${u.verified ? '' : ' – E-Mail unbestätigt'}, seit ${formatDate(u.createdAt)}`));
+        if (!u.verified) {
+          const ver = el('button', null, 'E-Mail bestätigen');
+          ver.addEventListener('click', async () => {
+            try { await adminApi.verifyUser(u.id); } catch (e) { return alert(e.message); }
+            refresh();
+          });
+          row.appendChild(ver);
+        }
         if (!u.isAdmin) {
           const del = el('button', 'danger', 'Löschen');
           del.addEventListener('click', async () => {
@@ -233,6 +241,63 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       }
     }
     refresh().catch((e) => list.appendChild(note(e.message)));
+    return box;
+  }
+
+  function renderMailSection() {
+    const box = el('div');
+    box.appendChild(el('h4', null, 'E-Mail'));
+    const form = el('div');
+    box.appendChild(form);
+    const field = (label, type = 'text') => {
+      const i = el('input');
+      i.type = type;
+      const l = el('label', null, label + ' ');
+      l.appendChild(i);
+      form.appendChild(l);
+      form.appendChild(el('br'));
+      return i;
+    };
+    const host = field('Server (Host)');
+    const port = field('Port', 'number');
+    const secure = field('SSL/TLS von Anfang an (Port 465)', 'checkbox');
+    const user = field('Benutzer');
+    const pass = field('Passwort', 'password');
+    const from = field('Absender');
+    const mode = el('select');
+    for (const [v, t] of [['mail', 'per Mail (Bestätigungslink)'], ['admin', 'Admin bestätigt manuell'], ['auto', 'automatisch bei Einladung']]) {
+      const o = el('option', null, t);
+      o.value = v;
+      mode.appendChild(o);
+    }
+    const ml = el('label', null, 'Bestätigung neuer Konten ');
+    ml.appendChild(mode);
+    const status = note('');
+    const saveBtn = el('button', 'primary', 'Speichern');
+    const testBtn = el('button', null, 'Testmail an mich senden');
+    form.append(ml, el('br'), status, saveBtn, testBtn);
+    let loaded = null;
+    const apply = (st) => {
+      loaded = st;
+      host.value = st.smtp.host; port.value = st.smtp.port; secure.checked = st.smtp.secure;
+      user.value = st.smtp.user; from.value = st.smtp.from; pass.value = '';
+      pass.placeholder = st.smtp.passwordSet ? '(gesetzt – leer lassen zum Beibehalten)' : '';
+      mode.value = st.verifyMode;
+      mode.querySelector('option[value="mail"]').disabled = !st.smtpConfigured;
+      status.textContent = { ui: 'SMTP aus diesen Einstellungen.', env: 'SMTP aus der Server-.env (Host leeren/ausfüllen überschreibt).', none: 'Kein SMTP – Mails landen nur im mail-outbox.log; „per Mail“ nicht wählbar.' }[st.smtp.source];
+    };
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const smtp = { host: host.value, port: port.value, secure: secure.checked, user: user.value, from: from.value };
+        if (pass.value) smtp.pass = pass.value;
+        apply(await adminApi.saveMail({ smtp, verifyMode: mode.value }));
+        alert('Gespeichert.');
+      } catch (e) { alert(e.message); }
+    });
+    testBtn.addEventListener('click', async () => {
+      try { alert(`Testmail gesendet an ${(await adminApi.testMail()).to}.`); } catch (e) { alert(e.message); }
+    });
+    adminApi.getMail().then(apply).catch((e) => { status.textContent = e.message; });
     return box;
   }
 
@@ -287,7 +352,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
 
   function render() {
     body.innerHTML = '';
-    body.append(renderUpdateSection(), renderUserSection(), renderInviteSection());
+    body.append(renderUpdateSection(), renderMailSection(), renderUserSection(), renderInviteSection());
   }
 
   const show = () => {
