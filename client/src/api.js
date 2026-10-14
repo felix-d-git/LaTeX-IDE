@@ -78,6 +78,10 @@ export const adminApi = {
   requestUpdate: () => req('POST', '/api/admin/update'),
   listUsers: () => req('GET', '/api/admin/users'),
   deleteUser: (id) => req('DELETE', `/api/admin/users/${encodeURIComponent(id)}`),
+  verifyUser: (id) => req('POST', `/api/admin/users/${encodeURIComponent(id)}/verify`),
+  getMail: () => req('GET', '/api/admin/mail'),
+  saveMail: (body) => req('PUT', '/api/admin/mail', body),
+  testMail: () => req('POST', '/api/admin/mail/test'),
 };
 
 export const api = {

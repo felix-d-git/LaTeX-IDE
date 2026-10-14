@@ -23,10 +23,11 @@ function load() {
       throw new Error(`auth-data.json ist beschädigt/nicht lesbar (${e.message}). Kopie als .corrupt-* gesichert; Datei prüfen oder aus dem Backup wiederherstellen: ${DATA_PATH}`);
     }
     for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!Array.isArray(data[k])) data[k] = [];
+    if (!data.settings || typeof data.settings !== 'object') data.settings = {};
     data.mcpTokens.forEach(migrateMcpToken);
     return data;
   }
-  return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [] };
+  return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [], settings: {} };
 }
 
 // tmp + rename: a crash mid-write must never leave a truncated auth file behind.
@@ -341,6 +342,25 @@ function setZotero(userId, zotero) {
   save(data);
 }
 
+// Admin settings (SMTP, verification mode) live in auth-data.json -> covered by the vault like the accounts.
+function getSettings() {
+  return data.settings;
+}
+
+function setSettings(patch) {
+  Object.assign(data.settings, patch);
+  save(data);
+}
+
+function markVerified(id) {
+  const user = findUserById(id);
+  if (!user) return false;
+  user.emailVerified = true;
+  data.verifyTokens = data.verifyTokens.filter((t) => t.userId !== id);
+  save(data);
+  return true;
+}
+
 function listUsers() {
   return data.users.slice();
 }
@@ -352,6 +372,9 @@ function deleteUser(id) {
 }
 
 module.exports = {
+  getSettings,
+  setSettings,
+  markVerified,
   moveMcpProject,
   validatePassword,
   deleteUser,
