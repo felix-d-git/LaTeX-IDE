@@ -14,6 +14,9 @@ const sha1 = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 
 // Only "vanished while walking" (ENOENT) is tolerated. Any other read error throws and aborts the
 // sync: a file we could not see would otherwise count as deleted locally and be deleted on the server.
+// Hashes by (path, size, mtime): unchanged files are not read again on every run.
+const hashCache = new Map(); // abs -> { size, mtimeMs, sha1 }
+
 function walkLocal(dir) {
   const out = new Map(); // rel -> sha1
   const gone = (fn) => {
@@ -31,8 +34,19 @@ function walkLocal(dir) {
       const r = rel ? `${rel}/${d.name}` : d.name;
       if (d.isDirectory()) walk(r);
       else if (d.isFile()) {
-        const buf = gone(() => fs.readFileSync(path.join(dir, r)));
-        if (buf) out.set(r, sha1(buf));
+        const abs = path.join(dir, r);
+        const st = gone(() => fs.statSync(abs));
+        if (!st) continue;
+        const c = hashCache.get(abs);
+        if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) {
+          out.set(r, c.sha1);
+          continue;
+        }
+        const buf = gone(() => fs.readFileSync(abs));
+        if (!buf) continue;
+        const h = sha1(buf);
+        hashCache.set(abs, { size: buf.length, mtimeMs: st.mtimeMs, sha1: h });
+        out.set(r, h);
       }
     }
   };
@@ -71,7 +85,9 @@ function decide(s, l, b) {
 const MAX_REMOTE_DELETES = 10;
 const MAX_REMOTE_DELETE_SHARE = 0.25;
 
-// io: { manifest(), download(rel) -> Buffer, upload(rel, buf), remove(rel), caseInsensitive? (tests) }
+// io: { manifest(), download(rel) -> Buffer, upload(rel, buf, base), remove(rel, base), caseInsensitive? (tests) }
+// base = hash the server had in the manifest ('none' = no such file): the server answers 409
+// (err.status) if the file changed since - treated like a conflict, nothing is overwritten.
 async function syncFolder(dir, indexPath, io) {
   const man = await io.manifest();
   // Folder gone (deleted, other drive, new install with old data dir): start over like the first
@@ -128,6 +144,7 @@ async function syncFolder(dir, indexPath, io) {
   const errors = [];
   for (const { rel, s, l, act } of plan) {
     try {
+    let act2 = act;
     let got = s; // hash of what we now have locally = the next sync's base
     // Base = hash of the bytes actually written: the file may change between manifest and download.
     const pull = async () => {
@@ -137,19 +154,25 @@ async function syncFolder(dir, indexPath, io) {
     };
     if (act === 'download') await pull();
     else if (act === 'deleteLocal') fs.rmSync(abs(rel), { force: true });
-    else if (act === 'upload') await io.upload(rel, fs.readFileSync(abs(rel)));
-    else if (act === 'deleteRemote') await io.remove(rel);
-    else if (act === 'conflict') {
+    else if (act === 'upload') {
+      try {
+        await io.upload(rel, fs.readFileSync(abs(rel)), s || 'none');
+      } catch (e) {
+        if (e.status !== 409) throw e;
+        act2 = 'conflict'; // server changed since the manifest: keep both
+      }
+    } else if (act === 'deleteRemote') await io.remove(rel, s);
+    if (act2 === 'conflict') {
       const copy = conflictName(rel, (n) => server.has(n) || local.has(n) || index[n] !== undefined || fs.existsSync(abs(n)));
       const mine = fs.readFileSync(abs(rel));
       write(copy, mine);
-      await io.upload(copy, mine);
+      await io.upload(copy, mine, 'none');
       await pull();
       index[copy] = sha1(mine);
       conflicts.push(rel);
     }
     if (act === 'deleteLocal' || act === 'deleteRemote' || (act === 'same' && !s)) delete index[rel];
-    else index[rel] = act === 'upload' ? l : got;
+    else index[rel] = act2 === 'upload' ? l : got;
     } catch (e) {
       if (e.fatal) throw e; // server unreachable: abort like before
       errors.push(`${rel}: ${e.message}`); // index entry of this file stays as it was
@@ -221,7 +244,7 @@ function moveDir(src, dst, names, commit) {
   return { moved: todo.length, failed };
 }
 
-module.exports = { syncFolder, decide, conflictName, moveDir, sha1 };
+module.exports = { syncFolder, walkLocal, decide, conflictName, moveDir, sha1 };
 
 if (require.main === module) {
   const assert = require('assert');

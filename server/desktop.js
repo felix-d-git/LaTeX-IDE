@@ -88,6 +88,7 @@ function cookieValue(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+let netAbort = new AbortController(); // all running remote() calls: aborted when we go offline
 class Offline extends Error {}
 Offline.prototype.fatal = true; // syncFolder: abort instead of collecting it as a per-file error
 
@@ -95,6 +96,7 @@ Offline.prototype.fatal = true; // syncFolder: abort instead of collecting it as
 // pingRemote() below flips the state back as soon as the server answers again.
 // stream: the time limit only covers the arrival of the headers (big downloads may take longer).
 async function remote(pathAndQuery, { method = 'GET', headers = {}, body, stream = false } = {}) {
+  await firstPing; // at most 2 s after start: online state is known before the first request
   if (!online) throw new Offline('offline');
   let res;
   const ac = new AbortController();
@@ -105,7 +107,7 @@ async function remote(pathAndQuery, { method = 'GET', headers = {}, body, stream
       method,
       headers: { ...headers, Authorization: `Bearer ${config.token}` },
       body,
-      signal: stream ? ac.signal : AbortSignal.timeout(limit),
+      signal: AbortSignal.any([netAbort.signal, stream ? ac.signal : AbortSignal.timeout(limit)]),
       redirect: 'manual',
     });
     clearTimeout(timer);
@@ -134,8 +136,11 @@ function setOnline(v) {
   if (v) {
     setImmediate(syncAll); // back online: merge the offline copy
     reopening = reopenOnServer().catch(() => {}).finally(() => (reopening = null)); // the proxy waits for it
+  } else {
+    for (const s of wsSockets) s.destroy();
+    netAbort.abort();
+    netAbort = new AbortController();
   }
-  else for (const s of wsSockets) s.destroy();
 }
 
 // Active health check: any HTTP answer except the tunnel's 502-504 (no app header) = server reachable.
@@ -154,7 +159,7 @@ async function pingRemote() {
   }
 }
 setInterval(pingRemote, 2000).unref();
-setImmediate(pingRemote); // don't assume online until the server answered once
+const firstPing = pingRemote(); // don't assume online until the server answered once (max. 2 s)
 
 async function remoteJson(pathAndQuery) {
   const res = await remote(pathAndQuery);
@@ -372,11 +377,55 @@ const ownedEntry = (projectId) => owned.find((p) => p.projectId === projectId);
 const folderName = (name) => name.replace(/[<>:"/\\|?*]/g, '_');
 // "Thesis" and "thesis" would share one folder on Windows/macOS: only then add the id, so
 // existing folders keep their path (a now-missing folder just means a fresh download).
-const localDirOf = (p) => {
+const defaultFolder = (p) => {
   const f = folderName(p.name).normalize('NFC').toLowerCase();
   const twin = owned.some((o) => o.projectId !== p.projectId && folderName(o.name).normalize('NFC').toLowerCase() === f);
-  return path.join(LOCAL_DIR, twin ? `${folderName(p.name)} (${syncKey(p.projectId)})` : folderName(p.name));
+  return twin ? `${folderName(p.name)} (${syncKey(p.projectId)})` : folderName(p.name);
 };
+// Folder = remembered mapping (config.folders, projectId -> folder name) or the name-based default.
+const localDirOf = (p) => path.join(LOCAL_DIR, (config.folders && config.folders[p.projectId]) || defaultFolder(p));
+
+// Every project folder carries a marker (never uploaded, see fsTree IGNORED_FILES). It, not just the
+// name, says which project a folder belongs to: renamed project / case change / other account on
+// the same server name -> the folder is found (and renamed) instead of created twice.
+const MARKER = '.latex-ide-project.json';
+const readMarker = (dir) => readJson(path.join(dir, MARKER), null);
+const markerIsOurs = (m, p) => !!m && m.projectId === p.projectId && m.server === REMOTE;
+function findFolder(p) {
+  const known = config.folders && config.folders[p.projectId];
+  if (known && fs.existsSync(path.join(LOCAL_DIR, known))) return known;
+  try {
+    for (const d of fs.readdirSync(LOCAL_DIR, { withFileTypes: true })) if (d.isDirectory() && markerIsOurs(readMarker(path.join(LOCAL_DIR, d.name)), p)) return d.name;
+  } catch {}
+  return null;
+}
+// Before a sync: decide the folder name (rename an existing one to the project's current name) and remember it.
+function placeFolder(p) {
+  const want = defaultFolder(p);
+  let have = findFolder(p);
+  if (have && have !== want) {
+    const to = path.join(LOCAL_DIR, want);
+    if (have.toLowerCase() === want.toLowerCase() || !fs.existsSync(to)) {
+      try {
+        fs.renameSync(path.join(LOCAL_DIR, have), to);
+        have = want;
+      } catch {} // in use (EBUSY/EPERM): keep the old name for now
+    }
+  }
+  if (!have) {
+    const m = readMarker(path.join(LOCAL_DIR, want));
+    have = m && !markerIsOurs(m, p) ? `${folderName(p.name)} (${syncKey(p.projectId)})` : want; // foreign marker: not ours to take
+  }
+  if (!config.folders || config.folders[p.projectId] !== have) {
+    config = { ...config, folders: { ...config.folders, [p.projectId]: have } };
+    writeJson(CONFIG_PATH, config);
+  }
+}
+function writeMarker(p, dir) {
+  const m = { projectId: p.projectId, name: p.name, server: REMOTE };
+  const cur = readMarker(dir);
+  if (fs.existsSync(dir) && JSON.stringify(cur) !== JSON.stringify(m)) fs.writeFileSync(path.join(dir, MARKER), JSON.stringify(m, null, 2));
+}
 
 // One sync at a time: the periodic run and a compile must not touch a folder together.
 let syncLock = Promise.resolve();
@@ -391,17 +440,19 @@ const syncWarnings = new Map(); // projectId -> text for the UI (/api/desktop/in
 async function syncOwnedNow(p) {
   const q = `project=${encodeURIComponent(p.projectId)}`;
   const need = async (res, what) => {
-    if (!res.ok) throw new Error(`${what} fehlgeschlagen (HTTP ${res.status})`);
+    if (!res.ok) throw Object.assign(new Error(`${what} fehlgeschlagen (HTTP ${res.status})`), { status: res.status });
     return res;
   };
+  placeFolder(p);
   const dir = localDirOf(p); // syncFolder creates it (missing folder = fresh download)
   const r = await syncFolder(dir, path.join(SYNC_DIR, syncKey(p.projectId) + '.json'), {
     manifest: () => remoteJson(`/api/collab/manifest?${q}`),
     download: async (rel) => Buffer.from(await (await need(await remote(`/api/raw?${q}&path=${encodeURIComponent(rel)}`), rel)).arrayBuffer()),
-    upload: async (rel, buf) =>
-      need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: buf }), rel),
-    remove: async (rel) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE' }), rel),
+    upload: async (rel, buf, base) =>
+      need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream', 'if-match': base }, body: buf }), rel),
+    remove: async (rel, base) => need(await remote(`/api/collab/raw?${q}&path=${encodeURIComponent(rel)}`, { method: 'DELETE', headers: base ? { 'if-match': base } : {} }), rel),
   });
+  writeMarker(p, dir);
   writeJson(path.join(SYNC_DIR, syncKey(p.projectId) + '.meta.json'), { mainFile: r.mainFile, settings: r.settings });
   if (r.conflicts.length) console.log(`Offline-Konflikte in ${p.name}: ${r.conflicts.join(', ')} (lokale Fassung als *.offline-konflikt.* abgelegt)`);
   const warn = [r.warning, r.errors.length && `Nicht synchronisiert: ${r.errors.join('; ')}`, r.conflicts.length && `Offline-Konflikt, lokale Fassung gesichert als *.offline-konflikt.*: ${r.conflicts.join(', ')}`, r.skipped.length && `Dateien unterscheiden sich nur in Groß-/Kleinschreibung, nicht offline synchronisiert: ${r.skipped.join(', ')}`].filter(Boolean).join(' ');
@@ -455,7 +506,8 @@ function scheduleSync() {
   }, 2000);
 }
 fs.mkdirSync(SYNC_DIR, { recursive: true });
-setInterval(syncAll, 60 * 1000);
+// Safety net only (web edits while no Yjs traffic reaches the app): scheduleSync() does the real work.
+setInterval(syncAll, 5 * 60 * 1000);
 setTimeout(syncAll, 2000);
 
 // Bring the mirror of the active project up to date: fetch changed files,

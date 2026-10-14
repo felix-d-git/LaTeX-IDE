@@ -1015,7 +1015,7 @@ app.get('/api/collab/owned', (req, res) => {
 // Optional ?base=<sha1 from the manifest | 'none'>: the sync run only overwrites/deletes what it last saw
 // (live edits of collaborators during the run are not lost). Without base: old behaviour.
 function checkSyncBase(req, root, abs) {
-  const base = req.query.base;
+  const base = req.query.base ?? req.get('if-match')?.replace(/^"|"$/g, ''); // If-Match = same value as ?base
   if (base === undefined) return true;
   collab.flushRoot(root); // live edits are on disk before comparing
   let cur = 'none';

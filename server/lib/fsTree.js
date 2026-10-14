@@ -9,7 +9,7 @@ const IGNORED_EXT = new Set([
 ]);
 // Mehrteilige Endungen: path.extname liefert nur die letzte.
 const IGNORED_SUFFIX = ['.synctex.gz', '.run.xml'];
-const IGNORED_FILES = new Set(['.latex-ide-comments.json']);
+const IGNORED_FILES = new Set(['.latex-ide-comments.json', '.latex-ide-project.json']);
 
 function isIgnored(name) {
   if (IGNORED_DIRS.has(name)) return true;
