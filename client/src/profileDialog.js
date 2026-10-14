@@ -177,7 +177,13 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       const ver = (x) => String(x || '').replace(/^v/, '');
       const latest = u.error ? `nicht abrufbar (${u.error})` : u.version ? `${u.version}${u.available ? ' – Update verfügbar' : ' – aktuell'}` : '–';
       const dl = el('dl', 'admin-facts');
-      for (const [k, v] of [['Installiert', u.current], ['Neueste', latest], ['Update-Modus', `${u.mode}: ${MODES[u.mode] || ''}`]]) dl.append(el('dt', null, k), el('dd', null, v));
+      const win = u.installKind === 'windows';
+      for (const [k, v] of [['Installiert', u.current], ['Neueste', latest], ['Update-Modus', win ? 'Windows-Installation – Update per neuem Setup' : `${u.mode}: ${MODES[u.mode] || ''}`]]) dl.append(el('dt', null, k), el('dd', null, v));
+      if (win && u.setupUrl && u.available) {
+        const dd = el('dd');
+        dd.appendChild(Object.assign(el('a', null, 'LatexIDE-Setup.exe herunterladen'), { href: u.setupUrl, rel: 'noopener' }));
+        dl.append(el('dt', null, 'Update'), dd);
+      }
       if (u.url) {
         const a = Object.assign(el('a', null, 'Release-Notizen'), { href: u.url, target: '_blank', rel: 'noopener' });
         const dd = el('dd');
@@ -193,9 +199,9 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
         box.appendChild(log);
       }
       // Changing the mode means changing the host cron line, so it stays in the server .env.
-      box.appendChild(note('Modus ändern: UPDATE_MODE in der .env des Servers setzen und die passende Cron-Zeile aus scripts/server-update.sh eintragen, dann Container neu starten.'));
+      if (!win) box.appendChild(note('Modus ändern: UPDATE_MODE in der .env des Servers setzen und die passende Cron-Zeile aus scripts/server-update.sh eintragen, dann Container neu starten.'));
       const busy = u.requested || (st && st.state === 'running');
-      if (u.mode === 'button' && u.available && !busy) {
+      if (u.mode === 'button' && !win && u.available && !busy) {
         const btn = el('button', 'primary', `Jetzt auf ${u.version} aktualisieren`);
         btn.addEventListener('click', async () => {
           btn.disabled = true;

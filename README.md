@@ -145,12 +145,9 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
   Sitzung vs. 30 Tage).
 - **CSRF-Schutz:** Double-Submit-Cookie-Pattern für alle verändernden
   Requests, zusätzlich `SameSite=Lax`-Cookies.
-- **Bekannte Windows-Eigenheit:** Der dateibasierte Session-Store
-  (`session-file-store`) kann bei sehr schnell aufeinanderfolgenden
-  Requests vereinzelt einen `EPERM`-Rename-Fehler in die Konsole schreiben
-  (Windows-Dateisystem-Race beim atomaren Schreiben). Das ist unschädlich -
-  die Session bleibt gültig, nur die Ablauf-Verlängerung dieses einen
-  Requests greift nicht. Kein Absturz, kein Datenverlust.
+- **Session-Store:** eigener Datei-Store (`server/lib/sessionStore.js`),
+  schreibt atomar (Temp-Datei + Rename). Scheitert unter Windows das
+  Verlängern einer Session (`EPERM` beim Rename), bleibt die Session gültig.
 - **Noch nicht umgesetzt (bewusst zurückgestellt):** Google-/OAuth-Login -
   siehe "Bekannte Grenzen" unten.
 

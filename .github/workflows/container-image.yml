@@ -13,6 +13,12 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  # Aufruf aus release.yml nach dem Veroeffentlichen (GITHUB_TOKEN-Releases loesen kein release-Event aus).
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
 
 permissions:
   contents: write   # Paketliste als Release-Asset
@@ -22,21 +28,25 @@ jobs:
   image:
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.release.tag_name }}
-      PUBLISH: ${{ github.event.repository.private == false && ((github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')) }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      # nicht-leer = Lauf gehoert zu einem Release (Event "release" oder Aufruf aus release.yml)
+      RELEASE_RUN: ${{ (github.event_name == 'release' || inputs.tag != '') && 'true' || '' }}
+      PUBLISH: ${{ github.event.repository.private == false && ((github.event_name == 'release' && !github.event.release.prerelease) || inputs.tag != '' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')) }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Image bauen
         run: |
           VER=$(node -p "require('./package.json').version")
-          if [ "$GITHUB_EVENT_NAME" = release ] && [ "v$VER" != "$TAG" ]; then
+          if [ -n "$RELEASE_RUN" ] && [ "v$VER" != "$TAG" ]; then
             echo "Tag $TAG passt nicht zu package.json ($VER)"; exit 1
           fi
           # Link auf den Tag bzw. Commit, nicht auf master; hoechstens 512 Zeichen.
           DESC="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Enthaelt Debian-Pakete unter eigenen Lizenzen (u. a. GPL, LGPL, AGPL), Liste unter /app/DEBIAN-PACKAGES.txt. Lizenzhinweise und Quellcode-Angebot: https://github.com/$GITHUB_REPOSITORY/blob/${TAG:-$GITHUB_SHA}/docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image"
           [ ${#DESC} -le 512 ] || { echo "Beschreibung zu lang (${#DESC} Zeichen)"; exit 1; }
           docker build --build-arg PANDOC=1 \
+            --build-arg IMAGE_SOURCE="https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg IMAGE_AUTHORS="${GITHUB_REPOSITORY%%/*}" \
             --label "org.opencontainers.image.version=$VER" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.description=$DESC" \
@@ -105,7 +115,7 @@ jobs:
           TAG=${TAG:-v$(node -p "require('./package.json').version")}
           # Manueller Start: eigener Name, sonst ueberschriebe er Image-Tag und Dateien des Releases.
           ASSET=$TAG
-          [ "$GITHUB_EVENT_NAME" = release ] || ASSET="$TAG-${GITHUB_SHA::7}"
+          [ -n "$RELEASE_RUN" ] || ASSET="$TAG-${GITHUB_SHA::7}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
           docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$ASSET.txt"
@@ -147,7 +157,7 @@ jobs:
           # Release: :<version>, manueller Start: :<version>-<commit> (ASSET aus "pandoc-Quellen sammeln")
           docker tag latex-web-ide:test "$IMG:${ASSET#v}"
           docker push "$IMG:${ASSET#v}"
-          if [ "$GITHUB_EVENT_NAME" = release ]; then
+          if [ -n "$RELEASE_RUN" ]; then
             docker tag latex-web-ide:test "$IMG:latest"
             docker push "$IMG:latest"
           fi

@@ -221,7 +221,8 @@ begin
         'ADMIN_EMAIL=' + Trim(AdminPage.Values[0]),
         'ADMIN_PASSWORD=''' + AdminPage.Values[1] + '''',
         'DATA_DIR=' + ExpandConstant('{localappdata}\LatexIDE\server-data'),
-        'UPDATE_MODE=notify'], False);
+        'UPDATE_MODE=notify',
+        'INSTALL_KIND=windows'], False);
     Exit;
   end;
   if IsLocalMode then Exit; // Einstellungen setzt LatexIDE-Lokal.vbs
