@@ -34,6 +34,10 @@ mkdir -p data && sudo chown 1000:1000 data         # vorher anlegen; der Contain
 docker compose up -d --build                       # erster Build dauert (TeX Live)
 ```
 
+Ist der Datenordner für uid 1000 nicht beschreibbar, bricht der Server beim Start mit
+„Datenordner … nicht beschreibbar für uid …“ ab; Abhilfe: `sudo chown 1000:1000 data`
+(bzw. den Ordner aus `LATEX_DATA_DIR`).
+
 **Repository noch privat?** Dann klappt `git clone` nur mit Zugang: entweder
 per SSH-Schlüssel (`git clone git@github.com:felix-d-git/latex-web-ide.git`)
 oder mit einem Lese-Token (siehe [UPDATES.md](UPDATES.md#privates-repository)):

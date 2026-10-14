@@ -19,7 +19,7 @@ const awarenessProtocol = require('y-protocols/awareness');
 const encoding = require('lib0/encoding');
 const decoding = require('lib0/decoding');
 const { diffLines, diffChars } = require('diff');
-const { safeResolve, decodeText, NOT_UTF8_MSG } = require('./fsTree');
+const { safeResolve, decodeText, canonRel, NOT_UTF8_MSG } = require('./fsTree');
 
 const STATE_DIR = '.latex-ide-yjs';
 const MSG_SYNC = 0;
@@ -29,9 +29,9 @@ const WS_MAX_PAYLOAD = 64 * 1024 * 1024;
 const PERSIST_DELAY_MS = 500;
 
 const docs = new Map(); // key -> entry
-let hooks = { onPersist: () => {}, markSelfWrite: () => {} };
+let hooks = { onPersist: () => {}, onSaveState: () => {}, markSelfWrite: () => {} };
 
-const keyOf = (root, rel) => `${root}\0${rel}`;
+const keyOf = (root, rel) => `${root}\0${canonRel(rel)}`;
 const statePath = (root, rel) => path.join(root, STATE_DIR, rel + '.ystate');
 
 function setHooks(h) {
@@ -157,6 +157,7 @@ function writeState(root, rel, ydoc) {
 }
 
 function getDoc(root, rel) {
+  rel = canonRel(rel);
   const key = keyOf(root, rel);
   let entry = docs.get(key);
   if (entry) return entry;
@@ -222,6 +223,7 @@ function persist(entry) {
       fs.renameSync(tmp, abs);
     }
     writeState(entry.root, entry.rel, entry.ydoc);
+    if (entry.failures) hooks.onSaveState(entry.root, entry.rel, false);
     entry.failures = 0;
     hooks.onPersist(entry.root, entry.rel);
   } catch (e) {
@@ -230,6 +232,7 @@ function persist(entry) {
     entry.dirty = true;
     entry.timer = setTimeout(() => persist(entry), Math.min(30000, PERSIST_DELAY_MS * 2 ** entry.failures));
     console.error(`[collab] Speichern fehlgeschlagen (Versuch ${entry.failures}): ${entry.rel}`, e.message);
+    if (entry.failures === 1) hooks.onSaveState(entry.root, entry.rel, true);
   }
   maybeUnload(entry);
 }
@@ -390,6 +393,8 @@ function closeRoot(dir) {
 }
 
 function onPathMoved(root, oldRel, newRel) {
+  oldRel = canonRel(oldRel);
+  if (newRel) newRel = canonRel(newRel);
   const prefix = oldRel + '/';
   for (const entry of [...docs.values()]) {
     if (entry.root !== root || (entry.rel !== oldRel && !entry.rel.startsWith(prefix))) continue;

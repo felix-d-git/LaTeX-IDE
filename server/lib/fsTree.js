@@ -119,4 +119,22 @@ function sameEntry(a, b) {
   }
 }
 
-module.exports = { sameEntry, resolveEntry, buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
+// One spelling per file ('./x.tex', 'a//b.tex', 'a/../b.tex' -> 'x.tex' ...): MCP, /yjs and collab share it,
+// otherwise the same file gets a second live doc and the two overwrite each other.
+const canonRel = (rel) => path.posix.normalize(String(rel)).replace(/^(\.\/)+/, '');
+
+// Start check: DATA_DIR must be writable (Docker volume owned by root = crash loop with an unclear message).
+function dataDirError(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.schreibtest-${process.pid}.tmp`);
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+    return null;
+  } catch (e) {
+    const uid = process.getuid ? process.getuid() : '?';
+    return `Datenordner ${dir} ist nicht beschreibbar für uid ${uid} (${e.code || e.message}). Abhilfe: sudo chown 1000:1000 ${dir}`;
+  }
+}
+
+module.exports = { canonRel, dataDirError, sameEntry, resolveEntry, buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
