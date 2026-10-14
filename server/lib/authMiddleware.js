@@ -4,10 +4,8 @@ const crypto = require('crypto');
 const cookie = require('cookie');
 const signature = require('cookie-signature');
 const session = require('express-session');
-const FileStoreFactory = require('session-file-store');
+const FileStore = require('./sessionStore');
 const auth = require('./auth');
-
-const FileStore = FileStoreFactory(session);
 
 const SESSION_COOKIE_NAME = 'latex_ide_sid';
 const CSRF_COOKIE_NAME = 'csrfToken';
@@ -34,8 +32,6 @@ const SESSION_SECRET = loadSessionSecret();
 
 const sessionStore = new FileStore({
   path: path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), '.sessions'),
-  ttl: REMEMBER_ME_MAX_AGE / 1000, // default 1 h would expire idle sessions despite the cookie lifetime
-  logFn: () => {},
   ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
