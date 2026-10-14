@@ -381,8 +381,8 @@ function createMcp(ctx) {
           protocolVersion: (params && params.protocolVersion) || '2025-03-26',
           capabilities: { tools: {} },
           serverInfo: {
-            name: 'latex-web-ide',
-            title: 'LatexIDE',
+            name: 'latex-ide',
+            title: 'LaTeX-IDE',
             version: ctx.version,
             description: `AGPL-3.0-only. Quellcode: ${legal.SOURCE_LINK}`,
             websiteUrl: legal.SOURCE_URL,

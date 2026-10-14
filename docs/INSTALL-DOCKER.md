@@ -25,8 +25,8 @@ sudo usermod -aG docker "$USER"   # danach ab- und wieder anmelden
 ## Installation
 
 ```bash
-git clone https://github.com/felix-d-git/latex-web-ide.git
-cd latex-web-ide
+git clone https://github.com/felix-d-git/LaTeX-IDE.git
+cd LaTeX-IDE
 git checkout "$(git describe --tags --abbrev=0)"   # neuestes Release statt Entwicklungsstand
 cp .env.example .env
 nano .env                                          # PUBLIC_URL, ADMIN_EMAIL, ADMIN_PASSWORD
@@ -39,9 +39,9 @@ Ist der Datenordner für uid 1000 nicht beschreibbar, bricht der Server beim Sta
 (bzw. den Ordner aus `LATEX_DATA_DIR`).
 
 **Repository noch privat?** Dann klappt `git clone` nur mit Zugang: entweder
-per SSH-Schlüssel (`git clone git@github.com:felix-d-git/latex-web-ide.git`)
+per SSH-Schlüssel (`git clone git@github.com:felix-d-git/LaTeX-IDE.git`)
 oder mit einem Lese-Token (siehe [UPDATES.md](UPDATES.md#privates-repository)):
-`git clone https://<token>@github.com/felix-d-git/latex-web-ide.git`. Alternativ
+`git clone https://<token>@github.com/felix-d-git/LaTeX-IDE.git`. Alternativ
 auf GitHub unter Releases „Source code (tar.gz)“ herunterladen und entpacken.
 
 Danach unter `http://<server>:3077` mit `ADMIN_EMAIL` / `ADMIN_PASSWORD`
@@ -165,7 +165,7 @@ Windows in Git Bash oder WSL.
 ## Fertiges Image (nur bei öffentlichem Repository)
 
 Jedes Release wird per CI gebaut und getestet. Ist das Repository öffentlich,
-liegt das Image zusätzlich unter `ghcr.io/felix-d-git/latex-web-ide:<version>`
+liegt das Image zusätzlich unter `ghcr.io/felix-d-git/latex-ide:<version>`
 (x86_64, TeX Live aus Debian). Solange es privat ist, gibt es kein fertiges
 Image – selbst bauen wie oben.
 
@@ -204,7 +204,7 @@ Built-Using und Static-Built-Using (die letzten beiden nennen weitere
 Quellpakete, die beim Bauen in das Paket eingeflossen sind, meist leer):
 
 ```bash
-docker run --rm ghcr.io/felix-d-git/latex-web-ide:<version> cat /app/DEBIAN-PACKAGES.txt
+docker run --rm ghcr.io/felix-d-git/latex-ide:<version> cat /app/DEBIAN-PACKAGES.txt
 ```
 
 Zu jedem Release mit veröffentlichtem Image liegt dieselbe Liste als
@@ -239,7 +239,7 @@ Debian-Quellpakete (`.dsc`, `.orig.tar.*`, `.debian.tar.*`) per Download oder au
 einem Datenträger zu Selbstkosten. Die Anfrage nennt Tag und Digest des Images
 (`docker inspect --format '{{index .RepoDigests 0}}' <image>`). Das Angebot gilt
 drei Jahre ab der letzten Verteilung der jeweiligen Version. Anfrage als
-GitHub-Issue unter <https://github.com/felix-d-git/latex-web-ide/issues>; das
+GitHub-Issue unter <https://github.com/felix-d-git/LaTeX-IDE/issues>; das
 Repository bleibt dafür mindestens bis zum Ende dieser Frist öffentlich und nimmt
 Issues an.
 

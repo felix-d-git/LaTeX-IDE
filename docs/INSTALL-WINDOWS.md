@@ -31,7 +31,7 @@ Zurück zur [Übersicht](../README.md#installation)
    - **100 % lokal**: keine weiteren Angaben.
 4. Danach öffnet sich ein Fenster für die TeX-Live-Installation – offen lassen,
    bis es fertig ist.
-5. Start über das Startmenü („LatexIDE“) → der Browser öffnet `http://localhost:3077`.
+5. Start über das Startmenü („LaTeX-IDE“) → der Browser öffnet `http://localhost:3077`.
 
 ## Eigener Server: Betrieb
 
@@ -56,7 +56,7 @@ Zurück zur [Übersicht](../README.md#installation)
 - Schließt man das letzte Browserfenster, sichert der Server alles und beendet
   sich nach etwa 30 s. Ein zweiter Start bei laufendem Server öffnet nur den Browser.
 - Hat der Browser einen lange inaktiven Tab verworfen, ist der Server evtl.
-  schon beendet → LatexIDE erneut aus dem Startmenü starten.
+  schon beendet → LaTeX-IDE erneut aus dem Startmenü starten.
 - Daten: `%LOCALAPPDATA%\LatexIDE\local-data` – diesen Ordner sichern.
 - Teilen und Einladen gibt es hier nicht; dafür einen Server betreiben.
 

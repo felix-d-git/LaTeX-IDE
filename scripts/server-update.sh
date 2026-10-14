@@ -3,8 +3,8 @@
 # installed, back up the data dir (keeps the newest 3 backups), unpack the
 # release over APP_DIR and rebuild the container. Meant for cron; which line
 # depends on UPDATE_MODE in .env (the web UI shows admins a banner either way):
-#   auto:   17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
-#   button: * * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
+#   auto:   17 4 * * * /pfad/zu/LaTeX-IDE/scripts/server-update.sh >> $HOME/latex-update.log 2>&1
+#   button: * * * * * /pfad/zu/LaTeX-IDE/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1
 #   notify: no cron, run the script by hand
 # Env (or APP_DIR/.update.env):
 #   APP_DIR      default: the folder this script lives in, one up
@@ -12,7 +12,7 @@
 #   COMPOSE      compose file; default docker-compose.yml (Pi: docker-compose.pi.yml)
 #   BACKUP_DIR   default: $DATA_DIR/../backups
 #   GITHUB_TOKEN only while the repo is private (read-only "Contents" token)
-#   UPDATE_REPO  default: felix-d-git/latex-web-ide
+#   UPDATE_REPO  default: felix-d-git/LaTeX-IDE
 # .env, .update.env and anything not in the release stay untouched. Progress goes to
 # .update-status next to .update-request, where the web UI shows it to admins.
 set -euo pipefail
@@ -74,7 +74,7 @@ trap 'status failed' ERR
 [ "${1:-}" = "--if-requested" ] && status running
 
 BACKUP_DIR="${BACKUP_DIR:-$(dirname "$DATA_DIR")/backups}"
-REPO="${UPDATE_REPO:-felix-d-git/latex-web-ide}"
+REPO="${UPDATE_REPO:-felix-d-git/LaTeX-IDE}"
 AUTH=()
 [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
 

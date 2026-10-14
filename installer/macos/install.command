@@ -1,5 +1,5 @@
 #!/bin/bash
-# LatexIDE Desktop - macOS Installer.
+# LaTeX-IDE Desktop - macOS Installer.
 # Doppelklickbar (Finder). Bei Gatekeeper-Warnung: Systemeinstellungen ->
 # Datenschutz & Sicherheit -> "Dennoch oeffnen" (oder: bash install.command).
 #
@@ -15,7 +15,7 @@ APP_DIR="$APP_ROOT/app"
 NODE_DIR="$APP_ROOT/node"
 NODE_VERSION="24.21.0"
 
-echo "=== LatexIDE Desktop Installer ==="
+echo "=== LaTeX-IDE Desktop Installer ==="
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -119,7 +119,7 @@ else
         fi
     fi
     # installer -pkg zeigt die Lizenzseite des MacTeX-Pakets nicht an.
-    echo "Hinweis: MacTeX ist nicht Teil von LatexIDE; jede Komponente hat ihre eigene Lizenz."
+    echo "Hinweis: MacTeX ist nicht Teil von LaTeX-IDE; jede Komponente hat ihre eigene Lizenz."
     echo "  TeX Live: https://www.tug.org/texlive/LICENSE.TL"
     echo "  MacTeX:   https://www.tug.org/mactex/"
     echo "Lade $MACTEX_PKG (mehrere GB, kann lange dauern)..."

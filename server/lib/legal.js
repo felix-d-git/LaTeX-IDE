@@ -5,7 +5,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
 const { version: VERSION } = require('../../package.json');
 const COPYRIGHT = 'Copyright (C) 2026 felix-d-git';
-const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/latex-web-ide';
+const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/LaTeX-IDE';
 // Wer veränderten Code betreibt oder weitergibt, muss SOURCE_URL auf den eigenen,
 // vollständigen Quellcode dieses Stands setzen (AGPL §13 bzw. §6).
 const SOURCE_URL = process.env.SOURCE_URL || `https://github.com/${UPDATE_REPO}`;
@@ -16,7 +16,7 @@ const SOURCE_LINK = (process.env.SOURCE_URL || `${SOURCE_URL}/tree/v${VERSION}`)
 // GET /licenses: eigener Hinweis, dann LICENSE und THIRD_PARTY_NOTICES.md (Klartext).
 function licensesText() {
   const header = [
-    `LatexIDE ${VERSION}`,
+    `LaTeX-IDE ${VERSION}`,
     COPYRIGHT,
     '',
     'This program is free software: you can redistribute it and/or modify',

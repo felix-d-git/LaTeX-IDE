@@ -1,4 +1,4 @@
-; Inno Setup 6 Skript fuer LatexIDE Desktop.
+; Inno Setup 6 Skript fuer LaTeX-IDE Desktop.
 ; Per-User-Installation ohne Admin-Rechte unter {localappdata}\Programs\LatexIDE.
 ; Baut auf dem Staging-Ordner installer\out\staging auf (siehe build-release.ps1).
 ; Zwei Betriebsarten: Desktop-App (verbindet sich mit einem Server) oder eigener
@@ -6,7 +6,7 @@
 ; Adresse als 1024-Byte-Trailer "LATEXIDE-SERVER-URL=..." am Dateiende
 ; (server/lib/desktopAssets.js) - dann ist die Betriebsart Desktop und es wird nichts gefragt.
 
-#define MyAppName "LatexIDE"
+#define MyAppName "LaTeX-IDE"
 ; Version kommt aus package.json (build-release.ps1 uebergibt /DMyAppVersion=...).
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
@@ -19,11 +19,12 @@ AppId={{8C9C6F8E-6A5B-4B2E-9E2A-6E7C6D3B7A11}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=felix-d-git
-AppPublisherURL=https://github.com/felix-d-git/latex-web-ide
-AppSupportURL=https://github.com/felix-d-git/latex-web-ide
-AppUpdatesURL=https://github.com/felix-d-git/latex-web-ide
+AppPublisherURL=https://github.com/felix-d-git/LaTeX-IDE
+AppSupportURL=https://github.com/felix-d-git/LaTeX-IDE
+AppUpdatesURL=https://github.com/felix-d-git/LaTeX-IDE
 AppCopyright=Copyright (C) 2026 felix-d-git - AGPL-3.0-only
-DefaultDirName={localappdata}\Programs\{#MyAppName}
+; Ordner bleibt LatexIDE (Updates bestehender Installationen, Pfade in Starter/Uninstall)
+DefaultDirName={localappdata}\Programs\LatexIDE
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -51,6 +52,10 @@ Type: filesandordirs; Name: "{app}\node_modules"
 ; .env und server.json liegen direkt in {app} und bleiben unberuehrt. node/ bleibt (laufender Server sperrt node.exe).
 Type: filesandordirs; Name: "{app}\server"
 Type: filesandordirs; Name: "{app}\client"
+; Verknuepfungen vom alten Namen (bis 0.5.2 "LatexIDE")
+Type: files; Name: "{group}\LatexIDE.lnk"
+Type: files; Name: "{group}\Uninstall LatexIDE.lnk"
+Type: files; Name: "{userdesktop}\LatexIDE.lnk"
 
 [Files]
 Source: "{#StagingDir}\*"; DestDir: "{app}"; Excludes: "\node_modules\.cache\*"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -68,7 +73,7 @@ Filename: "{app}\{code:StarterExe}"; Flags: nowait postinstall skipifnotsilent r
 ; falls der Nutzer latexmk bereits im PATH hat (Skript prueft selbst).
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-texlive.ps1"""; \
     WorkingDir: "{app}"; StatusMsg: "TeX Live wird installiert (kann mehrere Stunden dauern)..."; Flags: waituntilterminated
-Filename: "{app}\{code:StarterExe}"; Description: "LatexIDE jetzt starten"; Flags: nowait postinstall skipifsilent runhidden shellexec
+Filename: "{app}\{code:StarterExe}"; Description: "LaTeX-IDE jetzt starten"; Flags: nowait postinstall skipifsilent runhidden shellexec
 
 [Code]
 var
@@ -133,8 +138,8 @@ begin
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDYES) = IDNO then Abort;
 
   ModePage := CreateInputOptionPage(wpSelectDir,
-    'Betriebsart', 'Wie soll LatexIDE auf diesem Rechner laufen?',
-    'Die Desktop-App verbindet sich mit einem bestehenden LatexIDE-Server. Als eigener Server laeuft das ganze System auf diesem Rechner (im Browser unter http://localhost:3077). 100 % lokal: nur fuer dich, ohne Konto und Netzwerk, beendet sich mit dem Browserfenster.',
+    'Betriebsart', 'Wie soll LaTeX-IDE auf diesem Rechner laufen?',
+    'Die Desktop-App verbindet sich mit einem bestehenden LaTeX-IDE-Server. Als eigener Server laeuft das ganze System auf diesem Rechner (im Browser unter http://localhost:3077). 100 % lokal: nur fuer dich, ohne Konto und Netzwerk, beendet sich mit dem Browserfenster.',
     True, False);
   ModePage.Add('Desktop-App (mit einem Server verbinden)');
   ModePage.Add('Eigener Server auf diesem Rechner');
@@ -144,7 +149,7 @@ begin
   else ModePage.SelectedValueIndex := 0;
 
   UrlPage := CreateInputQueryPage(ModePage.ID,
-    'Server', 'Mit welchem LatexIDE-Server soll sich die App verbinden?',
+    'Server', 'Mit welchem LaTeX-IDE-Server soll sich die App verbinden?',
     'Tipp: Wird die App nach der Anmeldung in der Weboberflaeche des Servers heruntergeladen, ist die Adresse schon eingetragen.');
   UrlPage.Add('Server-Adresse (z. B. https://latex.example.org):', False);
   UrlPage.Values[0] := GetPreviousData('ServerUrl', '');
@@ -158,7 +163,7 @@ begin
   // Ordner fuer die lokale Kopie der eigenen Projekte (nur Desktop-App, offline nutzbar).
   LocalDirPage := CreateInputDirPage(AdminPage.ID,
     'Lokale Kopie', 'Wo sollen deine Projekte lokal gespeichert werden?',
-    'LatexIDE haelt eine Kopie deiner eigenen Projekte auf diesem Rechner, damit du auch offline arbeiten kannst. Sie wird automatisch mit dem Server abgeglichen.',
+    'LaTeX-IDE haelt eine Kopie deiner eigenen Projekte auf diesem Rechner, damit du auch offline arbeiten kannst. Sie wird automatisch mit dem Server abgeglichen.',
     False, '');
   LocalDirPage.Add('');
   LocalDirPage.Values[0] := GetPreviousData('LocalDir', ExpandConstant('{userdocs}\LatexIDE'));
@@ -301,7 +306,7 @@ begin
         Base + #13#10;
     if LocalCopy <> '' then Msg := Msg + LocalCopy + ' (lokale Kopie)' + #13#10;
     Msg := Msg + #13#10 + 'Projekte auf einem Server bleiben dort erhalten. Lokale Projekte und noch nicht ' +
-      'abgeglichene Offline-Aenderungen gehen verloren - vorher ggf. in LatexIDE unter ' +
+      'abgeglichene Offline-Aenderungen gehen verloren - vorher ggf. in LaTeX-IDE unter ' +
       '"Alle Projekte" als ZIP herunterladen.' + #13#10#13#10 +
       'Ja = alles loeschen, Nein = Projekte behalten.';
     if MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then

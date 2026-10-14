@@ -1,12 +1,12 @@
-LatexIDE Desktop - License notes for the Windows setup
+LaTeX-IDE Desktop - License notes for the Windows setup
 ========================================================
 
-LatexIDE
+LaTeX-IDE
 --------
 Copyright (C) 2026 felix-d-git
 GNU Affero General Public License, version 3 only (AGPL-3.0-only), see
 LICENSE. WITHOUT ANY WARRANTY. You do not have to accept the license to
-install or run LatexIDE (AGPL-3.0 section 9).
+install or run LaTeX-IDE (AGPL-3.0 section 9).
 Source code of this version: https://github.com/{{REPO}}/tree/{{TAG}}
 
 Node.js
@@ -18,7 +18,7 @@ libuv and npm (Artistic License 2.0).
 
 TeX Live / Tectonic
 -------------------
-NOT included. LatexIDE only runs the TeX system as an external program
+NOT included. LaTeX-IDE only runs the TeX system as an external program
 found via PATH (default: latexmk); TEX_BACKEND=tectonic selects Tectonic
 instead (desktop app only, install it separately). If no TeX system is
 found, the setup downloads TeX Live 2025 from a TUG mirror

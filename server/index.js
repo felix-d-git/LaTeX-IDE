@@ -397,7 +397,7 @@ function sendVerifyMail(req, user) {
   const token = auth.createVerifyToken(user.id);
   return mailer.sendMailSafe({
     to: user.email,
-    subject: 'LatexIDE - E-Mail-Adresse bestätigen',
+    subject: 'LaTeX-IDE - E-Mail-Adresse bestätigen',
     text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${baseUrl(req)}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
   });
 }
@@ -480,7 +480,7 @@ app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
     // Not awaited (see resend-verification); sendMailSafe never rejects.
     mailer.sendMailSafe({
       to: user.email,
-      subject: 'LatexIDE - Passwort zurücksetzen',
+      subject: 'LaTeX-IDE - Passwort zurücksetzen',
       text: `Zum Zurücksetzen deines Passworts auf diesen Link klicken (gültig 1 Stunde):\n${link}\n\nFalls du das nicht angefordert hast, ignoriere diese Mail.`,
     });
   }
@@ -577,7 +577,7 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
 app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
   if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
   try {
-    await mailer.sendMail({ to: req.user.email, subject: 'LatexIDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
+    await mailer.sendMail({ to: req.user.email, subject: 'LaTeX-IDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
   } catch (e) {
     return res.status(502).json({ error: `Versand fehlgeschlagen: ${e.message}` });
   }
@@ -598,7 +598,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
 // the update) | auto (host cron installs nightly). Installing is always done by
 // scripts/server-update.sh on the host; "button" only drops a request file it picks up.
 const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
-const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/latex-web-ide
+const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/LaTeX-IDE
 // Mit Vault ist DATA_DIR tmpfs im Container → Marker in VAULT_DIR, das der Host sieht
 // (vault.js ignoriert dort Dateien, die kein Eintrag sind).
 const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
@@ -2309,7 +2309,7 @@ bootstrapAdmin()
       }, 2000).unref();
     }
     server.listen(PORT, authMw.LOCAL_MODE ? '127.0.0.1' : undefined, () => {
-      console.log(`LatexIDE laeuft auf http://localhost:${PORT}`);
+      console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
       if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});

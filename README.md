@@ -1,13 +1,13 @@
-# LatexIDE
+# LaTeX-IDE
 
-Selbst gehostete LaTeX-Web-IDE mit Live-Zusammenarbeit: Mehrbenutzer-Server mit
+Selbst gehostete LaTeX-IDE mit Live-Zusammenarbeit: Mehrbenutzer-Server mit
 Weboberfläche und Desktop-App (Windows/macOS) mit lokaler Kopie und
 Offline-Kompilieren. Kompiliert mit einer echten TeX-Live-Installation
 (`latexmk`) statt eines Cloud-Compilers.
 
 ## Installation
 
-Jeder kann einen eigenen LatexIDE-Server betreiben. Der Server liefert die
+Jeder kann einen eigenen LaTeX-IDE-Server betreiben. Der Server liefert die
 Weboberfläche aus und bietet nach der Anmeldung die Desktop-App zum Download an
 (Profil → „Desktop-App herunterladen") – mit der Adresse dieses Servers schon
 eingebaut. Desktop-Apps holen ihre Updates von ihrem Server, der Server holt sie
@@ -15,7 +15,7 @@ aus den GitHub-Releases.
 
 ### Welche Datei brauche ich?
 
-Alles liegt unter [Releases](https://github.com/felix-d-git/latex-web-ide/releases/latest).
+Alles liegt unter [Releases](https://github.com/felix-d-git/LaTeX-IDE/releases/latest).
 
 | Ich will … | Datei | Voraussetzungen | Updates | Anleitung |
 |---|---|---|---|---|

@@ -1,7 +1,7 @@
 # Beiträge
 
 Danke fürs Mitmachen! Fehler und Vorschläge bitte als
-[Issue](https://github.com/felix-d-git/latex-web-ide/issues), Änderungen als Pull Request.
+[Issue](https://github.com/felix-d-git/LaTeX-IDE/issues), Änderungen als Pull Request.
 
 ## Lizenz von Beiträgen
 

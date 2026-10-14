@@ -1,4 +1,4 @@
-# LatexIDE Desktop Installer
+# LaTeX-IDE Desktop Installer
 
 ## Build
 

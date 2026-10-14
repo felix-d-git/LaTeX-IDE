@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-  Baut die Desktop-Release fuer LatexIDE:
+  Baut die Desktop-Release fuer LaTeX-IDE:
    1. Staging-Ordner installer\out\staging zusammenstellen (Client ohne dist,
       Server, package.json/-lock, build.js, LICENSE, THIRD_PARTY_NOTICES.md,
       Windows-Starter, install-texlive.ps1; LICENSES-INSTALLER*.txt aus der

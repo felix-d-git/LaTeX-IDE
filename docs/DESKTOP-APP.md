@@ -1,6 +1,6 @@
 # Desktop-App (Windows, macOS)
 
-Für alle, die ein Konto auf einem LatexIDE-Server haben und auch offline
+Für alle, die ein Konto auf einem LaTeX-IDE-Server haben und auch offline
 schreiben und lokal kompilieren wollen. Die App hält eine lokale Kopie der
 eigenen Projekte und gleicht sie mit dem Server ab; geteilte Projekte und die
 Zusammenarbeit laufen weiter über den Server.
@@ -9,7 +9,7 @@ Zurück zur [Übersicht](../README.md#installation)
 
 ## Voraussetzungen
 
-- Ein Konto auf einem LatexIDE-Server (Einladung vom Admin).
+- Ein Konto auf einem LaTeX-IDE-Server (Einladung vom Admin).
 - Windows 10/11 (64 Bit) oder macOS (Apple Silicon oder Intel).
 - ~6 GB frei für TeX Live 2025 bzw. MacTeX (wird bei der Installation geladen,
   falls noch keines vorhanden ist).

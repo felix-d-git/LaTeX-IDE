@@ -27,7 +27,7 @@ const options = {
   // License notice in every copy of the bundle (pdf.js' @licstart header is not an esbuild legal comment).
   banner: {
     js: [
-      `/*! LatexIDE ${legal.VERSION} - ${legal.COPYRIGHT}`,
+      `/*! LaTeX-IDE ${legal.VERSION} - ${legal.COPYRIGHT}`,
       ` * AGPL-3.0-only, WITHOUT ANY WARRANTY. Source: ${legal.SOURCE_LINK}`,
       ' * Includes third-party code, among others:',
       ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0',

@@ -1,7 +1,7 @@
 import { publicOrigin, authApi } from './api.js';
 
 // Settings tab "MCP": tokens for external AI tools (Claude, Codex, Cursor) with single rights per project.
-const DOCS_URL = 'https://github.com/felix-d-git/latex-web-ide/blob/master/docs/MCP.md';
+const DOCS_URL = 'https://github.com/felix-d-git/LaTeX-IDE/blob/master/docs/MCP.md';
 const PERMS = [
   ['read', 'Lesen'],
   ['comment', 'Kommentieren/Vorschlagen'],
@@ -45,7 +45,7 @@ function copyField(value, label = 'Kopieren', multiline = false) {
 // Prompt the user pastes into Claude Code / Codex so the agent sets up the connector itself.
 function setupPrompt(token) {
   const url = `${publicOrigin()}/mcp`;
-  return `Richte den MCP-Server meines LatexIDE-Servers als Connector ein (Streamable HTTP, Authentifizierung per Bearer-Token).
+  return `Richte den MCP-Server meines LaTeX-IDE-Servers als Connector ein (Streamable HTTP, Authentifizierung per Bearer-Token).
 
 URL: ${url}
 Header: Authorization: Bearer ${token}

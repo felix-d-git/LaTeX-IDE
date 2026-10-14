@@ -1,7 +1,7 @@
-LatexIDE Desktop - Lizenzhinweise zum Installer
+LaTeX-IDE Desktop - Lizenzhinweise zum Installer
 =================================================
 
-LatexIDE selbst
+LaTeX-IDE selbst
 ---------------
 Copyright (C) 2026 felix-d-git
 GNU Affero General Public License, nur Version 3 (AGPL-3.0-only), siehe
@@ -21,7 +21,7 @@ liegt danach unter ~/Applications/LatexIDE/node/LICENSE.
 
 TeX Live / MacTeX / Tectonic
 ----------------------------
-Wird NICHT mitgeliefert. LatexIDE ruft das TeX-System nur als externes
+Wird NICHT mitgeliefert. LaTeX-IDE ruft das TeX-System nur als externes
 Programm ueber den PATH auf (Standard: latexmk); TEX_BACKEND=tectonic
 waehlt stattdessen Tectonic (nur Desktop-App, separat zu installieren).
 Fehlt ein TeX-System, laedt der Installer TeX Live (Windows) bzw. MacTeX

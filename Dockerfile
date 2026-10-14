@@ -30,7 +30,7 @@ FROM node:24-bookworm-slim
 # Repo-Zuordnung kommt vom Build (container-image.yml: github.repository), kein fester Name im Image.
 ARG IMAGE_SOURCE=""
 ARG IMAGE_AUTHORS=""
-LABEL org.opencontainers.image.title="latex-web-ide" \
+LABEL org.opencontainers.image.title="latex-ide" \
       org.opencontainers.image.description="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Drittsoftware, Paketliste und Quellcode-Angebot: /app/docs/INSTALL-DOCKER.md" \
       org.opencontainers.image.authors="${IMAGE_AUTHORS}" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \

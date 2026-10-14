@@ -516,7 +516,7 @@ function render(packages) {
   const block = (text) => lines.push('```', text.trimEnd(), '```', '');
   lines.push('# Third-Party Notices');
   lines.push('');
-  lines.push('latex-web-ide is licensed under AGPL-3.0-only (see LICENSE). That license covers only');
+  lines.push('LaTeX-IDE is licensed under AGPL-3.0-only (see LICENSE). That license covers only');
   lines.push("the project's own code. The third-party packages listed here keep their own licenses,");
   lines.push('reproduced below.');
   lines.push('');

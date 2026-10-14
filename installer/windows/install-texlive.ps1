@@ -47,7 +47,7 @@ $ZipPath = Join-Path $WorkDir 'install-tl.zip'
 $ExtractDir = Join-Path $WorkDir 'extracted'
 $ProfilePath = Join-Path $WorkDir 'texlive.profile'
 
-Write-Host "=== LatexIDE: TeX Live 2025 (scheme-full) wird installiert ==="
+Write-Host "=== LaTeX-IDE: TeX Live 2025 (scheme-full) wird installiert ==="
 Write-Host "Zielverzeichnis: $TexDir"
 Write-Host "Quelle: $Repo"
 Write-Host "Achtung: Download ca. 4-5 GB, kann mehrere Stunden dauern."

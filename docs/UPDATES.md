@@ -16,8 +16,8 @@ gibt (Prüfung alle 6 Stunden). Was dann passiert, legt `UPDATE_MODE` in `.env` 
 | `UPDATE_MODE` | Verhalten | Cron-Zeile (`crontab -e`) |
 |---|---|---|
 | `notify` (Standard) | nur Banner; Update von Hand: `scripts/server-update.sh` | – |
-| `button` | Banner mit „Jetzt aktualisieren“; das Update startet innerhalb einer Minute, das Banner zeigt Fortschritt und Ergebnis | `* * * * * /pfad/zu/latex-web-ide/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1` |
-| `auto` | nachts automatisch | `17 4 * * * /pfad/zu/latex-web-ide/scripts/server-update.sh >> $HOME/latex-update.log 2>&1` |
+| `button` | Banner mit „Jetzt aktualisieren“; das Update startet innerhalb einer Minute, das Banner zeigt Fortschritt und Ergebnis | `* * * * * /pfad/zu/LaTeX-IDE/scripts/server-update.sh --if-requested >> $HOME/latex-update.log 2>&1` |
+| `auto` | nachts automatisch | `17 4 * * * /pfad/zu/LaTeX-IDE/scripts/server-update.sh >> $HOME/latex-update.log 2>&1` |
 | `off` | kein Banner, keine Prüfung | – |
 
 Nach einer Änderung an `UPDATE_MODE`: `docker compose up -d` (bzw. mit `-f docker-compose.pi.yml`).
@@ -62,8 +62,8 @@ tar -xzf <BACKUP_DIR>/data-<datum>-<version>.tar.gz -C <Elternordner des Datenor
 # mit Verschlüsselung: -C <LATEX_DATA_DIR> (das Archiv enthält vault/)
 # Quellstand: das Update-Skript arbeitet mit Release-Archiven, nicht mit git. Den alten Stand
 # (Release-Archiv der alten Version) über den Programmordner entpacken, .env/data/backups bleiben:
-tar -xzf <alte-version>.tar.gz -C /pfad/zu/latex-web-ide --strip-components=1
-echo <alter-tag> > /pfad/zu/latex-web-ide/.release   # sonst hält das Skript den Stand für aktuell/neuer
+tar -xzf <alte-version>.tar.gz -C /pfad/zu/LaTeX-IDE --strip-components=1
+echo <alter-tag> > /pfad/zu/LaTeX-IDE/.release   # sonst hält das Skript den Stand für aktuell/neuer
 docker compose up -d --build
 ```
 
@@ -82,7 +82,7 @@ greifen ohne Anmeldung auf die GitHub-Releases zu.
 einen Lese-Token:
 
 1. GitHub → Settings → Developer settings → Fine-grained tokens → „Generate new token“.
-2. Repository access: „Only select repositories“ → `latex-web-ide`.
+2. Repository access: „Only select repositories“ → `LaTeX-IDE`.
 3. Permissions → Repository permissions → **Contents: Read-only** (sonst nichts).
 4. Token eintragen:
    - `.env`: `UPDATE_TOKEN=github_pat_…` → Banner und Desktop-Downloads (danach `docker compose up -d`)
@@ -96,4 +96,4 @@ Ohne Token: Banner zeigt keine Updates (Fehler „GitHub HTTP 404“ nur im
 API-Ergebnis), die Desktop-Downloads im Profil melden „kein Installationspaket
 verfügbar“, und das Skript bricht mit „Repo privat ohne GITHUB_TOKEN“ ab.
 
-Das GitHub-Repo fuer Update-Check und Downloads steht in `UPDATE_REPO` (`.env`, Standard `felix-d-git/latex-web-ide`); Forks setzen es auf ihr eigenes Repo.
+Das GitHub-Repo fuer Update-Check und Downloads steht in `UPDATE_REPO` (`.env`, Standard `felix-d-git/LaTeX-IDE`); Forks setzen es auf ihr eigenes Repo.

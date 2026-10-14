@@ -88,7 +88,7 @@ function get(url, hops, headers) {
       res.on('end', () => resolve({ data: Buffer.concat(chunks), finalUrl: u.href, headers: res.headers }));
       res.on('error', reject);
     };
-    const req = lib.get(u, { lookup: safeLookup, timeout: TIMEOUT_MS, headers: { 'User-Agent': 'LatexWebIDE', ...headers } }, (res) => {
+    const req = lib.get(u, { lookup: safeLookup, timeout: TIMEOUT_MS, headers: { 'User-Agent': 'LaTeX-IDE', ...headers } }, (res) => {
       try {
         onResponse(res);
       } catch (e) {

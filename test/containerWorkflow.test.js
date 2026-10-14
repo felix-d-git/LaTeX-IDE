@@ -49,7 +49,7 @@ function simulate(event) {
   const env = {
     ...process.env, STUBS: fwd(stubs), LOGF: fwd(path.join(tmp, 'log')), ENVF: fwd(path.join(tmp, 'env')),
     GITHUB_EVENT_NAME: event, RELEASE_RUN: event === 'release' ? 'true' : '', TAG: event === 'release' ? `v${VER}` : '', GITHUB_SHA: 'abcdef0123456789',
-    GITHUB_REPOSITORY: 'Owner/latex-web-ide', GITHUB_ACTOR: 'x', GH_TOKEN: 't',
+    GITHUB_REPOSITORY: 'Owner/LaTeX-IDE', GITHUB_ACTOR: 'x', GH_TOKEN: 't',
     GITHUB_STEP_SUMMARY: fwd(path.join(tmp, 'summary')),
   };
   fs.writeFileSync(path.join(tmp, 'env'), '');
@@ -60,7 +60,7 @@ function simulate(event) {
 
 test('Container-Workflow: manueller Start pusht nicht :<version> und überschreibt keine Release-Dateien', { skip: !fs.existsSync(BASH) && 'bash fehlt' }, () => {
   const log = simulate('workflow_dispatch');
-  const img = 'ghcr.io/owner/latex-web-ide';
+  const img = 'ghcr.io/owner/latex-ide';
   assert.doesNotMatch(log, new RegExp(`docker push ${img}:${V}\\s*$`, 'm'), log);
   assert.doesNotMatch(log, /:latest/, log);
   assert.match(log, new RegExp(`docker push ${img}:${V}-abcdef0`), log);
@@ -69,7 +69,7 @@ test('Container-Workflow: manueller Start pusht nicht :<version> und überschrei
 
 test('Container-Workflow: Release pusht :<version> und :latest', { skip: !fs.existsSync(BASH) && 'bash fehlt' }, () => {
   const log = simulate('release');
-  const img = 'ghcr.io/owner/latex-web-ide';
+  const img = 'ghcr.io/owner/latex-ide';
   assert.match(log, new RegExp(`docker push ${img}:${V}\\s*$`, 'm'), log);
   assert.match(log, new RegExp(`docker push ${img}:latest`), log);
   assert.match(log, new RegExp(`gh release upload v${V} DEBIAN-PACKAGES-v${V}\\.txt pandoc-sources-v${V}\\.tar`), log);

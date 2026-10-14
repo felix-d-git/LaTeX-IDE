@@ -171,7 +171,7 @@ export function setupMenuBar(ctx) {
         // AGPL-3.0 §13: users of the hosted version must be able to get the source (/source -> SOURCE_URL).
         { label: 'Source code (AGPL-3.0-only)', onClick: () => window.open('/source', '_blank', 'noopener') },
         { label: 'Licenses (AGPL & third-party)', onClick: () => window.open('/licenses', '_blank', 'noopener') },
-        { label: 'About LatexIDE', onClick: () => ctx.onShowAbout() },
+        { label: 'About LaTeX-IDE', onClick: () => ctx.onShowAbout() },
       ],
     },
   ];

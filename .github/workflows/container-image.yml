@@ -1,6 +1,6 @@
 # Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, mit pandoc) und
 # prueft, dass der Container startet, latexmk findet und die Lizenzdateien mitbringt.
-# Veroeffentlicht wird es unter ghcr.io/<owner>/latex-web-ide nur, wenn das Repo oeffentlich
+# Veroeffentlicht wird es unter ghcr.io/<owner>/latex-ide nur, wenn das Repo oeffentlich
 # ist (privat braeuchte jeder Nutzer einen Registry-Login, und das Paketkontingent reicht nicht
 # fuer ~5 GB), und nur bei einem regulaeren Release oder einem manuellen Start auf master.
 # :latest und :<version> bekommt nur ein regulaeres Release; ein manueller Start pusht
@@ -50,11 +50,11 @@ jobs:
             --label "org.opencontainers.image.version=$VER" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.description=$DESC" \
-            -t latex-web-ide:test .
+            -t latex-ide:test .
 
       - name: Container starten und pruefen
         run: |
-          docker run -d --name ide -p 3077:3077 latex-web-ide:test
+          docker run -d --name ide -p 3077:3077 latex-ide:test
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3077/api/auth/me || true)
             [ "$code" = "401" ] && break
@@ -67,7 +67,7 @@ jobs:
       - name: Lizenzdateien und Inhalt pruefen
         shell: bash   # mit pipefail: ein Fehler von docker save bricht ab
         run: |
-          docker run --rm --user root latex-web-ide:test sh -c '
+          docker run --rm --user root latex-ide:test sh -c '
             fail() { echo "Selbstpruefung: $*"; exit 1; }
             test -s /app/DEBIAN-PACKAGES.txt || fail "DEBIAN-PACKAGES.txt fehlt oder ist leer"
             test -s /app/LICENSE || fail "LICENSE fehlt"
@@ -80,7 +80,7 @@ jobs:
           '
           # Geloeschte Dateien stecken weiter in tieferen Layern: jeden Layer einzeln durchsuchen.
           # Jeder Layer aus manifest.json muss gelesen worden sein (sonst z. B. unbekanntes Format).
-          docker save latex-web-ide:test | python3 -c '
+          docker save latex-ide:test | python3 -c '
           import json, os, re, sys, tarfile
           bad = re.compile(r"(^|/)(node_modules/(@napi-rs|@esbuild|esbuild)|root/\.npm)(/|$)")
           hits, done, links, layers = set(), set(), {}, []
@@ -118,7 +118,7 @@ jobs:
           [ -n "$RELEASE_RUN" ] || ASSET="$TAG-${GITHUB_SHA::7}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
-          docker run --rm latex-web-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$ASSET.txt"
+          docker run --rm latex-ide:test cat /app/DEBIAN-PACKAGES.txt > "DEBIAN-PACKAGES-$ASSET.txt"
           # pandoc + statisch gelinkte Haskell-Bibliotheken laut offizieller buildinfo
           python3 scripts/pandoc-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > pandoc-sources.txt
           wc -l pandoc-sources.txt
@@ -155,10 +155,10 @@ jobs:
           IMG=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           # Release: :<version>, manueller Start: :<version>-<commit> (ASSET aus "pandoc-Quellen sammeln")
-          docker tag latex-web-ide:test "$IMG:${ASSET#v}"
+          docker tag latex-ide:test "$IMG:${ASSET#v}"
           docker push "$IMG:${ASSET#v}"
           if [ -n "$RELEASE_RUN" ]; then
-            docker tag latex-web-ide:test "$IMG:latest"
+            docker tag latex-ide:test "$IMG:latest"
             docker push "$IMG:latest"
           fi
-          docker inspect --format '{{join .RepoDigests "\n"}}' latex-web-ide:test | tee -a "$GITHUB_STEP_SUMMARY"
+          docker inspect --format '{{join .RepoDigests "\n"}}' latex-ide:test | tee -a "$GITHUB_STEP_SUMMARY"

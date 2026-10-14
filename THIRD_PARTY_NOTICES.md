@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-latex-web-ide is licensed under AGPL-3.0-only (see LICENSE). That license covers only
+LaTeX-IDE is licensed under AGPL-3.0-only (see LICENSE). That license covers only
 the project's own code. The third-party packages listed here keep their own licenses,
 reproduced below.
 
