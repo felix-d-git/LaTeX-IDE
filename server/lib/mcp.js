@@ -84,10 +84,11 @@ function createMcp(ctx) {
 
   const secs = (ms) => `${Math.round(ms / 1000)} s`;
 
-  // Mean of the last 5 stored durations; without history rough guess from project size.
+  // Slowest of the last 5 stored durations (the mean underestimated by 50-150 %: quick incremental
+  // runs pull it down, MCP compiles after edits tend to be full ones); without history guess from size.
   function estimate(root) {
     const times = ctx.state.getCompileTimes(root).filter((t) => t.ms >= 1000).slice(-5); // failed 0-ms runs would give 'geschätzt 0 s'
-    if (times.length) return { ms: Math.max(1000, Math.round(times.reduce((n, t) => n + t.ms, 0) / times.length)), basis: `Mittel der letzten ${times.length} Läufe` };
+    if (times.length) return { ms: Math.max(...times.map((t) => t.ms)), basis: `längster der letzten ${times.length} Läufe` };
     const bytes = flatten(buildTree(root)).reduce((n, f) => n + fs.statSync(path.join(root, f)).size, 0);
     return { ms: Math.min(600000, Math.max(10000, 10000 + bytes / 100)), basis: 'Schätzung aus Projektgröße, noch keine Laufzeiten gespeichert' };
   }
