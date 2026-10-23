@@ -9,6 +9,7 @@ const el = (tag, cls, text) => {
 };
 const note = (text) => el('p', 'settings-inert-note', text);
 const formatDate = (iso) => new Date(iso).toLocaleString('de-DE');
+const badge = (text, kind) => el('span', 'admin-badge' + (kind ? ' ' + kind : ''), text);
 
 // Account things (logout, password, desktop apps, delete account) -
 // separate from the editor settings, reachable from the rail and the dashboard.
@@ -169,7 +170,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
 
   function renderUpdateSection() {
     const box = el('div');
-    box.appendChild(el('h4', null, 'Version & Update'));
+    box.appendChild(el('h4', null, 'Server-Version'));
     const info = note('Lade …');
     box.appendChild(info);
     adminApi.updateStatus().then((u) => {
@@ -219,13 +220,19 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     const box = el('div');
     const list = el('div');
     list.id = 'admin-user-list';
-    box.append(el('h4', null, 'Nutzer'), list);
+    box.append(el('h4', null, 'Konten'), list);
     async function refresh() {
       const { users } = await adminApi.listUsers();
       list.innerHTML = '';
+      list.className = 'admin-list';
       for (const u of users) {
-        const row = el('div', 'invite-row');
-        row.appendChild(el('span', 'invite-status', `${u.username} (${u.email})${u.isAdmin ? ' – Admin' : ''}${u.verified ? '' : ' – E-Mail unbestätigt'}, seit ${formatDate(u.createdAt)}`));
+        const row = el('div', 'admin-row');
+        const name = el('strong', null, u.username);
+        if (u.isAdmin) name.appendChild(badge('Admin', 'ok'));
+        if (!u.verified) name.appendChild(badge('E-Mail unbestätigt', 'warn'));
+        const main = el('div', 'admin-row-main');
+        main.append(name, el('span', 'admin-row-meta', `${u.email} · seit ${formatDate(u.createdAt)}`));
+        row.appendChild(main);
         if (!u.verified) {
           const ver = el('button', null, 'E-Mail bestätigen');
           ver.addEventListener('click', async () => {
@@ -252,36 +259,37 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
 
   function renderMailSection() {
     const box = el('div');
-    box.appendChild(el('h4', null, 'E-Mail'));
-    const form = el('div');
-    box.appendChild(form);
-    const field = (label, type = 'text') => {
+    const status = note('');
+    const form = el('div', 'admin-form');
+    box.append(el('h4', null, 'SMTP-Server'), status, form);
+    const field = (label, type = 'text', cls = '') => {
       const i = el('input');
       i.type = type;
-      const l = el('label', null, label + ' ');
-      l.appendChild(i);
+      const l = el('label', `settings-field${type === 'checkbox' ? ' settings-field-checkbox' : ''} ${cls}`);
+      if (type === 'checkbox') l.append(i, label);
+      else l.append(label, i);
       form.appendChild(l);
-      form.appendChild(el('br'));
       return i;
     };
     const host = field('Server (Host)');
     const port = field('Port', 'number');
-    const secure = field('SSL/TLS von Anfang an (Port 465)', 'checkbox');
     const user = field('Benutzer');
     const pass = field('Passwort', 'password');
-    const from = field('Absender');
+    const from = field('Absender', 'text', 'wide');
+    const secure = field('SSL/TLS von Anfang an (Port 465)', 'checkbox', 'wide');
     const mode = el('select');
     for (const [v, t] of [['mail', 'per Mail (Bestätigungslink)'], ['admin', 'Admin bestätigt manuell'], ['auto', 'automatisch bei Einladung']]) {
       const o = el('option', null, t);
       o.value = v;
       mode.appendChild(o);
     }
-    const ml = el('label', null, 'Bestätigung neuer Konten ');
-    ml.appendChild(mode);
-    const status = note('');
+    const ml = el('label', 'settings-field');
+    ml.append('Bestätigung neuer Konten', mode);
     const saveBtn = el('button', 'primary', 'Speichern');
     const testBtn = el('button', null, 'Testmail an mich senden');
-    form.append(ml, el('br'), status, saveBtn, testBtn);
+    const actions = el('div', 'admin-actions');
+    actions.append(saveBtn, testBtn);
+    box.append(el('h4', null, 'Kontobestätigung'), ml, actions);
     let loaded = null;
     const apply = (st) => {
       loaded = st;
@@ -310,26 +318,31 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
   function renderInviteSection() {
     const box = el('div');
     const createBtn = el('button', 'primary', '+ Neue Einladung erstellen');
-    const list = el('div');
-    list.id = 'invite-list';
+    const list = el('div', 'admin-list');
+    const empty = note('Noch keine Einladungen erstellt.');
     box.append(
-      el('h4', null, 'Einladungen (selbst registrieren lassen)'),
-      note('Neuer Link erzeugt eine Registrierungs-URL (7 Tage gültig, einmal verwendbar) - manuell an die Person schicken (WhatsApp/Mail/…), es wird nichts automatisch versendet.'),
+      el('h4', null, 'Einladungen'),
+      note('Ein Link ist 7 Tage gültig und einmal verwendbar. Er wird nicht automatisch versendet – selbst an die Person schicken (Mail, Messenger …).'),
       createBtn,
       list
     );
     async function refresh() {
       const { invites, baseUrl } = await adminApi.listInvites();
       list.innerHTML = '';
-      if (!invites.length) return list.appendChild(note('Noch keine Einladungen erstellt.'));
+      empty.remove();
+      if (!invites.length) return box.appendChild(empty);
       for (const invite of invites) {
-        const row = el('div', 'invite-row' + (invite.usedByEmail ? ' used' : invite.expired ? ' expired' : ''));
-        const text = invite.usedByEmail
-          ? `Verwendet von ${invite.usedByEmail} am ${formatDate(invite.usedAt || invite.createdAt)}`
+        const row = el('div', 'admin-row');
+        const [label, kind, meta] = invite.usedByEmail
+          ? ['Verwendet', 'ok', `von ${invite.usedByEmail} am ${formatDate(invite.usedAt || invite.createdAt)}`]
           : invite.expired
-            ? `Abgelaufen (erstellt ${formatDate(invite.createdAt)})`
-            : `Offen, gültig bis ${formatDate(invite.expiresAt)}`;
-        row.appendChild(el('span', 'invite-status', text));
+            ? ['Abgelaufen', '', `erstellt ${formatDate(invite.createdAt)}`]
+            : ['Offen', 'warn', `gültig bis ${formatDate(invite.expiresAt)}`];
+        const main = el('div', 'admin-row-main');
+        const title = el('strong', null, 'Einladung');
+        title.appendChild(badge(label, kind));
+        main.append(title, el('span', 'admin-row-meta', meta));
+        row.appendChild(main);
         if (!invite.usedByEmail && !invite.expired) {
           const copyBtn = el('button', null, 'Link kopieren');
           copyBtn.addEventListener('click', async () => {
@@ -356,10 +369,24 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     return box;
   }
 
+  const TABS = {
+    update: () => [renderUpdateSection()],
+    users: () => [renderUserSection(), renderInviteSection()],
+    mail: () => [renderMailSection()],
+  };
+  const tabsBar = document.getElementById('admin-tabs');
+  let activeTab = 'update';
   function render() {
+    for (const b of tabsBar.querySelectorAll('[data-admin-tab]')) b.classList.toggle('active', b.dataset.adminTab === activeTab);
     body.innerHTML = '';
-    body.append(renderUpdateSection(), renderMailSection(), renderUserSection(), renderInviteSection());
+    body.append(...TABS[activeTab]());
   }
+  tabsBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-admin-tab]');
+    if (!btn) return;
+    activeTab = btn.dataset.adminTab;
+    render();
+  });
 
   const show = () => {
     if (!currentUser.isAdmin || currentUser.localMode) return;
