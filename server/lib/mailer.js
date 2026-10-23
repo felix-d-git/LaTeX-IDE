@@ -16,7 +16,7 @@ function getConfig() {
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
-    from: getConfig().from || getConfig().user,
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
   };
 }
 const isConfigured = () => !!getConfig();
