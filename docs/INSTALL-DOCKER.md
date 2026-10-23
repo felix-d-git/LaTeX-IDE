@@ -181,7 +181,7 @@ Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit `0` ohne).
 Das Image enthält neben der IDE (AGPL-3.0-only) Debian-Pakete unter eigenen
 Lizenzen, u. a. unter GPL, LGPL und AGPL:
 
-- Debian-Basissystem (`node:24-bookworm-slim`), z. B. bash und coreutils
+- Debian-Basissystem (`node:24.22.1-bookworm-slim`), z. B. bash und coreutils
   (GPL-3.0+), mawk (GPL-2.0), glibc und GMP (LGPL)
 - `perl` (GPL-1.0+ oder Artistic)
 - beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL,
@@ -219,7 +219,7 @@ Verteilung des Images beim Release.
 Die Quellen genau dieser Versionen, auch der unter Built-Using und
 Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
 (`https://snapshot.debian.org/package/<Quellpaket>/<Quellversion>/`).
-Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
+Node.js stammt aus dem offiziellen Image `node:24.22.1-bookworm-slim` (Quellen:
 <https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
 `THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
 Quellcode der IDE: die zur Laufzeit nötigen Quelltexte liegen im Image unter `/app`; der
