@@ -65,6 +65,7 @@ test('server-update.sh: neues Release mit längerem Skriptkopf -> Update läuft 
   assert.doesNotMatch(r.stderr, /syntax error|command not found/, r.stderr);
   assert.strictEqual(fs.readFileSync(path.join(app, 'scripts', 'server-update.sh'), 'utf8'), newScript, 'neuer Quellstand nicht entpackt');
   assert.ok(fs.existsSync(path.join(app, 'docker-aufrufe')), 'kein Neubau (docker nie aufgerufen)');
+  assert.match(fs.readFileSync(path.join(app, 'docker-aufrufe'), 'utf8'), /compose build --pull\n.*compose up -d\n/, 'Basis-Image nicht frisch gezogen');
   assert.strictEqual(fs.readFileSync(path.join(app, '.release'), 'utf8').trim(), 'v9.9.9');
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(data, '.update-status'), 'utf8')).state, 'done');
 });
