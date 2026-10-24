@@ -46,7 +46,7 @@ Jedes Token hat Einzelrechte, entweder für alle Projekte oder pro ausgewähltem
 
 `compile` ist standardmäßig aus. Kompilieren ist langsam und belastet den Server – daher selten nutzen.
 
-- `compile` startet asynchron und antwortet sofort mit Status und geschätzter Dauer (Mittel der letzten 5 Läufe, sonst Schätzung nach Projektgröße).
+- `compile` startet asynchron und antwortet sofort mit Status und geschätzter Dauer (längster der letzten 5 Läufe, sonst Schätzung nach Projektgröße).
 - `compile_status` liefert Fortschritt in % (höchstens 99 %, bis fertig) bzw. das Ergebnis und die Abweichung von der Schätzung.
 - Pro Projekt läuft ein Job; ein zweiter Aufruf liefert den laufenden.
 

@@ -118,9 +118,10 @@ fi
 cp "$tmp/files" "$APP_DIR/.release-files"
 say "Quellstand $tag entpackt"
 
-# 3. Rebuild + restart.
+# 3. Rebuild (--pull: fresh base image, the cached node:24 tag would stay old) + restart.
 cd "$APP_DIR"
-docker compose ${COMPOSE:+-f "$COMPOSE"} up -d --build >>"$RUNLOG" 2>&1
+docker compose ${COMPOSE:+-f "$COMPOSE"} build --pull >>"$RUNLOG" 2>&1
+docker compose ${COMPOSE:+-f "$COMPOSE"} up -d >>"$RUNLOG" 2>&1
 printf '%s\n' "$tag" > "$APP_DIR/.release"
 say "fertig ($tag)"
 status done

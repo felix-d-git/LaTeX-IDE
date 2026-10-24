@@ -90,4 +90,12 @@ test('mailer: sendMailSafe never throws when SMTP is unreachable', async () => {
   const r = await mailer.sendMailSafe({ to: 'a@example.invalid', subject: 's', text: 't' });
   assert.strictEqual(r.delivered, false);
   assert.ok(r.error);
+  assert.doesNotMatch(String(r.error), /call stack/);
+});
+
+test('mailer: SMTP from .env resolves without recursion', () => {
+  const mailer = require('../server/lib/mailer');
+  process.env.SMTP_USER = 'u@example.invalid';
+  assert.strictEqual(mailer.getConfig().from, 'u@example.invalid');
+  assert.strictEqual(mailer.configSource(), 'env');
 });
