@@ -57,6 +57,12 @@ services:
       # Verschluesselter Speicher (muss dem Container-User node, uid 1000, gehoeren)
       - ${LATEX_DATA_DIR:?LATEX_DATA_DIR fehlt - muss auf die SSD zeigen}/vault:/vault
       - ${LATEX_TEXLIVE_DIR:?LATEX_TEXLIVE_DIR fehlt}:/data/texlive:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3077/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     ports:
       # Nur zum Prüfen auf dem Pi selbst (ssh -L 8095:127.0.0.1:8095 ...).
       - "127.0.0.1:8095:3077"

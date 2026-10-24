@@ -98,6 +98,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Latex-IDE', '1');
   next();
 });
+// Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
+app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));

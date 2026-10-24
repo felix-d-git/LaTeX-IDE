@@ -27,5 +27,11 @@ services:
       - ${LATEX_DATA_DIR:-./data}:/app/data
       # Nur bei TEXLIVE=host: TeX Live 2025, installiert nach /data/texlive (dieser Pfad ist fest).
       # - /pfad/zu/texlive:/data/texlive:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3077/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     ports:
       - "${HOST_PORT:-3077}:3077"
