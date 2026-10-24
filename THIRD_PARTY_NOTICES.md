@@ -54,7 +54,7 @@ Not covered here:
 | bare-url | 2.4.6 | Apache-2.0 |
 | base64-js | 1.5.1 | MIT |
 | bcryptjs | 3.0.3 | BSD-3-Clause |
-| body-parser | 1.20.8 | MIT |
+| body-parser | 1.20.9 | MIT |
 | brace-expansion | 2.1.7 | MIT |
 | buffer | 6.0.3 | MIT |
 | buffer-crc32 | 1.0.0 | MIT |
@@ -2289,7 +2289,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## body-parser@1.20.8
+## body-parser@1.20.9
 
 License: MIT
 
