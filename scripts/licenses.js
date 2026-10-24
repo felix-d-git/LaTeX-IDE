@@ -295,7 +295,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`,
 // Parts of the package under other licenses than its LICENSE file.
 const EXTRA_NOTICES = {
   katex: {
-    version: '0.16.47',
+    version: '0.19.0',
     displayLicense: 'MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem)',
     notices: [
       {
