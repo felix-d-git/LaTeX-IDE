@@ -1,0 +1,37 @@
+# Standard A: Dependabot-PRs (patch/minor) automatisch squash-mergen - erst wenn ALLE Checks des
+# Head-Commits abgeschlossen und grün sind. Läuft nach jedem PR-Workflow; der letzte fertige mergt.
+# Majors bleiben offen (stehen im Commit-Text als semver-major).
+name: Dependabot automerge
+on:
+  workflow_run:
+    workflows: ["CI", "DCO", "Licenses"]
+    types: [completed]
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+jobs:
+  merge:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.actor.login == 'dependabot[bot]' && startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          pr=$(gh pr list --head "$BRANCH" --json number -q '.[0].number')
+          [ -n "$pr" ] || exit 0
+          if gh pr view "$pr" --json commits -q '.commits[].messageBody' | grep -q semver-major; then
+            echo "Major-Update -> bleibt offen"; exit 0
+          fi
+          # Alle Checks (alle Workflows + externe Status) auf genau diesem Commit: fertig und grün?
+          open=$(gh api "repos/$GH_REPO/commits/$SHA/check-runs?per_page=100" \
+            -q '[.check_runs[] | select(.status != "completed" or (.conclusion | IN("success","skipped","neutral") | not))] | length')
+          state=$(gh api "repos/$GH_REPO/commits/$SHA/status" -q '.state + " " + (.total_count|tostring)')
+          [ "$open" = 0 ] || { echo "$open Checks offen/rot -> warten"; exit 0; }
+          case "$state" in success*|"pending 0") ;; *) echo "Status $state -> warten"; exit 0;; esac
+          gh pr merge "$pr" --squash --delete-branch --match-head-commit "$SHA"
+          # Sofort releasen statt bis 00:30 warten: der Pi-Watchdog installiert es binnen einer Stunde.
+          gh workflow run auto-release.yml
