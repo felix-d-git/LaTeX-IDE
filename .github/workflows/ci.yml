@@ -1,0 +1,30 @@
+# Tests + Client-Build bei jedem Push und Pull Request. Ohne TeX im Runner:
+# die latexmk-Tests ueberspringen sich selbst (hasTex), der Rest laeuft voll.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+
+      - name: Client bauen
+        run: npm run build:client
+
+      - name: Tests
+        run: npm test
