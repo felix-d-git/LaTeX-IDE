@@ -113,7 +113,8 @@ test('Änderung zwischen Manifest und Download erzeugt keinen Scheinkonflikt (#4
   assert.strictEqual(fs.readFileSync(path.join(dir, 'main.tex'), 'utf8'), 's3');
 });
 
-test('Umbenennen nur in Groß-/Kleinschreibung löscht nichts (#47)', async () => {
+// Braucht ein echt case-insensitives Dateisystem (Windows/macOS), sonst liegen kapitel1.tex und Kapitel1.tex nebeneinander.
+test('Umbenennen nur in Groß-/Kleinschreibung löscht nichts (#47)', { skip: process.platform === 'linux' && 'case-sensitives Dateisystem' }, async () => {
   const { dir, index, io } = await setup({ 'main.tex': 'x', 'kapitel1.tex': 'k', 'kap/a.tex': 'a' }, { caseInsensitive: true });
   // Web-IDE on a case-sensitive server renames file and folder.
   io.srv.set('Kapitel1.tex', io.srv.get('kapitel1.tex'));
