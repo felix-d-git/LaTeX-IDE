@@ -23,5 +23,5 @@ jobs:
           [ "$authors" = "dependabot[bot]" ] || { echo "eigene Commits seit $last -> manuelles Release"; exit 0; }
           IFS=. read -r ma mi pa <<< "${last#v}"
           next="v$ma.$mi.$((${pa%%[!0-9]*}+1))"
-          gh release create "$next" --target "$GITHUB_SHA" --generate-notes --title "$next"
-          for wf in container-image.yml release.yml; do gh workflow run "$wf" --ref "$next"; done
+          git tag "$next" "$GITHUB_SHA" && git push origin "$next"
+          gh workflow run release.yml --ref "$next" -f tag="$next"
