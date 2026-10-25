@@ -23,5 +23,10 @@ jobs:
           [ "$authors" = "dependabot[bot]" ] || { echo "eigene Commits seit $last -> manuelles Release"; exit 0; }
           IFS=. read -r ma mi pa <<< "${last#v}"
           next="v$ma.$mi.$((${pa%%[!0-9]*}+1))"
-          git tag "$next" "$GITHUB_SHA" && git push origin "$next"
+          # release.yml verlangt Tag == package.json, master ist PR-geschützt -> Bump-Commit nur am Tag
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          npm version "${next#v}" --no-git-tag-version
+          git commit -qam "Release $next"
+          git tag "$next" && git push origin "$next"
           gh workflow run release.yml --ref "$next" -f tag="$next"
