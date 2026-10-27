@@ -51,7 +51,12 @@ jobs:
           # Link auf den Tag bzw. Commit, nicht auf master; hoechstens 512 Zeichen.
           DESC="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Enthaelt Debian-Pakete unter eigenen Lizenzen (u. a. GPL, LGPL, AGPL), Liste unter /app/DEBIAN-PACKAGES.txt. Lizenzhinweise und Quellcode-Angebot: https://github.com/$GITHUB_REPOSITORY/blob/${TAG:-$GITHUB_SHA}/docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image"
           [ ${#DESC} -le 512 ] || { echo "Beschreibung zu lang (${#DESC} Zeichen)"; exit 1; }
+          # /source zeigt auf genau den gebauten Stand: Release-Tag bzw. Commit (manueller Start, Forks).
+          if [ -n "$RELEASE_RUN" ]; then REF=$TAG; else REF=$GITHUB_SHA; fi
+          SRC="https://github.com/$GITHUB_REPOSITORY/tree/$REF"
+          echo "SOURCE_URL=$SRC" >> "$GITHUB_ENV"
           docker build --pull --no-cache --build-arg PANDOC=1 \
+            --build-arg SOURCE_URL="$SRC" \
             --build-arg IMAGE_SOURCE="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg IMAGE_AUTHORS="${GITHUB_REPOSITORY%%/*}" \
             --label "org.opencontainers.image.version=$VER" \
@@ -70,6 +75,9 @@ jobs:
           docker logs ide
           [ "$code" = "401" ] || { echo "Server antwortet nicht (HTTP $code)"; exit 1; }
           docker exec ide latexmk -v
+          # AGPL §13: /source fuehrt auf den Quellcode genau dieses Images
+          loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3077/source)
+          [ "$loc" = "$SOURCE_URL" ] || { echo "/source zeigt auf '$loc' statt '$SOURCE_URL'"; exit 1; }
           # Node-Mindestversion (Sicherheitsfix 24.22.1)
           docker exec ide node -e "const [a,b,c]=process.versions.node.split('.').map(Number); console.log('node', process.version); process.exit(a>24||(a==24&&(b>22||(b==22&&c>=1)))?0:1)"
 

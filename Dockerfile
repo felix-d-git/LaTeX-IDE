@@ -36,6 +36,11 @@ LABEL org.opencontainers.image.title="latex-ide" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.source="${IMAGE_SOURCE}"
 
+# /source of the image (AGPL §13/§6): container-image.yml passes the tag or commit it built.
+# Empty = default in server/lib/legal.js (tag of the package.json version); .env still wins.
+ARG SOURCE_URL=""
+ENV SOURCE_URL=${SOURCE_URL}
+
 ARG TEXLIVE=apt
 ARG PANDOC=1
 # latexmk and several TeX Live scripts are Perl.
