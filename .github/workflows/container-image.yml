@@ -174,7 +174,8 @@ jobs:
           python3 scripts/debian-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > debian-sources.txt
           echo "::notice::$(wc -l < debian-sources.txt) Debian-Quellpakete"
           DIR=/mnt/debian-sources
-          sudo mkdir -p "$DIR" && sudo chown "$(id -u):$(id -g)" "$DIR"
+          sudo mkdir -p "$DIR" /mnt/debian-sources-parts
+          sudo chown "$(id -u):$(id -g)" "$DIR" /mnt/debian-sources-parts
           cp debian-sources.txt "$DIR/SOURCES.txt"
           echo "::notice::Platz vorher: $(df -h --output=avail /mnt | tail -1) frei auf /mnt"
           # Fehlende Quellen alle melden (Annotationen), nicht nur die erste.
@@ -195,7 +196,6 @@ jobs:
             [ "$missing" -eq 0 ] && [ "$n" -ge "$(wc -l < SOURCES.txt)" ]
           '
           echo "::notice::Quellen: $(du -sh "$DIR" | cut -f1), frei: $(df -h --output=avail /mnt | tail -1)"
-          mkdir -p /mnt/debian-sources-parts
           tar -cf - -C "$DIR" . | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part"
           rm -rf "$DIR"
           echo "::notice::$(ls /mnt/debian-sources-parts | wc -l) Teile, $(du -sh /mnt/debian-sources-parts | cut -f1)"
