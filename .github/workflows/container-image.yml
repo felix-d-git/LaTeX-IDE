@@ -172,30 +172,33 @@ jobs:
       - name: Debian-Quellen sammeln
         run: |
           python3 scripts/debian-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > debian-sources.txt
-          wc -l debian-sources.txt
+          echo "::notice::$(wc -l < debian-sources.txt) Debian-Quellpakete"
           DIR=/mnt/debian-sources
           sudo mkdir -p "$DIR" && sudo chown "$(id -u):$(id -g)" "$DIR"
           cp debian-sources.txt "$DIR/SOURCES.txt"
-          df -h /mnt "$GITHUB_WORKSPACE"
-          docker run --rm -v "$DIR:/out" debian:bookworm bash -euo pipefail -c '
+          echo "::notice::Platz vorher: $(df -h --output=avail /mnt | tail -1) frei auf /mnt"
+          # Fehlende Quellen alle melden (Annotationen), nicht nur die erste.
+          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:bookworm bash -uo pipefail -c '
             sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
-            apt-get update -qq
-            apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null
+            apt-get update -qq || exit 1
+            apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null || exit 1
             cd /out
+            missing=0
             while read -r src ver; do
-              apt-get source -qq --download-only "$src=$ver" </dev/null >/dev/null \
-                || debsnap -f -d . "$src" "$ver" </dev/null \
-                || { echo "Quelle nicht gefunden: $src $ver"; exit 1; }
+              apt-get source -qq --download-only "$src=$ver" </dev/null >/dev/null 2>&1 \
+                || debsnap -f -d . "$src" "$ver" </dev/null >/dev/null 2>&1 \
+                || { echo "::error::Quelle nicht gefunden: $src $ver"; missing=$((missing+1)); }
             done < SOURCES.txt
+            chown -R "$OWNER" /out
             n=$(ls *.dsc | wc -l)
-            [ "$n" -eq "$(wc -l < SOURCES.txt)" ] || { echo "$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete"; exit 1; }
-            chown -R '"$(id -u):$(id -g)"' /out
+            echo "::notice::$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete, $missing fehlen"
+            [ "$missing" -eq 0 ] && [ "$n" -ge "$(wc -l < SOURCES.txt)" ]
           '
-          du -sh "$DIR"
+          echo "::notice::Quellen: $(du -sh "$DIR" | cut -f1), frei: $(df -h --output=avail /mnt | tail -1)"
           mkdir -p /mnt/debian-sources-parts
           tar -cf - -C "$DIR" . | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part"
           rm -rf "$DIR"
-          ls -lh /mnt/debian-sources-parts
+          echo "::notice::$(ls /mnt/debian-sources-parts | wc -l) Teile, $(du -sh /mnt/debian-sources-parts | cut -f1)"
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
         if: env.PUBLISH == 'true'
