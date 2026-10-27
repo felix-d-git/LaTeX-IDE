@@ -191,7 +191,7 @@ Zielmaschine).
 
 ## Lizenz
 
-Copyright (C) 2026 felix-d-git
+Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors
 
 Freie Software unter der GNU Affero General Public License, ausschließlich
 Version 3 (`AGPL-3.0-only`), siehe [LICENSE](LICENSE). Sie wird OHNE JEDE
@@ -208,7 +208,7 @@ der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
   Repository. Wer eine veränderte Fassung betreibt oder weitergibt, setzt
   `SOURCE_URL` auf den eigenen Quellcode (AGPL Abschnitt 13 bzw. 6, siehe
   `.env.example`).
-- Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md), Urheber: [AUTHORS](AUTHORS).
 
 ## Marken
 
