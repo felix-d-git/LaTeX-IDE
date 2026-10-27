@@ -144,6 +144,9 @@ try {
     $PdfjsUnused = @('cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'build\pdf.sandbox*') |
         ForEach-Object { Join-Path $PdfjsDir $_ }
     Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+    # Eigene Lizenzen (Adobe-cmaps, Foxit/Liberation-Fonts, QuickJS) deckt THIRD_PARTY_NOTICES nicht ab.
+    $PdfjsLeft = Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue
+    if ($PdfjsLeft) { throw "pdfjs-dist-Teile ohne Lizenzhinweis im Staging: $($PdfjsLeft.FullName -join ', ')" }
 } finally {
     Pop-Location
 }

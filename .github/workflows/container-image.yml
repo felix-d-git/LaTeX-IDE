@@ -83,6 +83,10 @@ jobs:
             test -s /app/THIRD_PARTY_NOTICES.md || fail "THIRD_PARTY_NOTICES.md fehlt"
             grep -q "Schriftliches Angebot" /app/docs/INSTALL-DOCKER.md || fail "Quellcode-Angebot fehlt"
             for p in @napi-rs @esbuild esbuild; do test ! -e /app/node_modules/$p || fail "node_modules/$p im Image"; done
+            # Teile mit eigenen Lizenzen, die THIRD_PARTY_NOTICES nicht abdeckt (STRIPPED in scripts/licenses.js)
+            for p in cmaps standard_fonts legacy image_decoders web types build/pdf.sandbox*; do
+              ! ls -d /app/node_modules/pdfjs-dist/$p >/dev/null 2>&1 || fail "node_modules/pdfjs-dist/$p im Image"
+            done
             test ! -e /root/.npm || fail "/root/.npm im Image"
             command -v pandoc >/dev/null || fail "pandoc fehlt"
             echo "Selbstpruefung ok"
