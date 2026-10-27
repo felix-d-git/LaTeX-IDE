@@ -205,7 +205,7 @@ jobs:
             echo "::error::tar=${rc[0]} $(tail -c 400 "$RUNNER_TEMP/tar.err" | tr '\n' ' ') split=${rc[1]} $(tail -c 400 "$RUNNER_TEMP/split.err" | tr '\n' ' ')"
             exit 1
           fi
-          rm -rf "$DIR" || { echo "::error::rm $DIR fehlgeschlagen: $(ls -la "$DIR" | head -5 | tr '\n' ' ')"; exit 1; }
+          sudo rm -rf "$DIR"   # /mnt gehoert root
           echo "::notice::$(ls /mnt/debian-sources-parts | wc -l) Teile, $(du -sh /mnt/debian-sources-parts | cut -f1)"
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
