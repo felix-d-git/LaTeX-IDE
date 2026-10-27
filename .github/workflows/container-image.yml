@@ -6,7 +6,8 @@
 # :latest und :<version> bekommt nur ein regulaeres Release; ein manueller Start pusht
 # :<version>-<commit> und haengt seine Dateien unter diesem Namen an, ueberschreibt also nichts vom Release.
 # pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL-2.0+) mit: deren Debian-Quellpakete
-# gehen als pandoc-sources-<tag>.tar ans Release, bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
+# gehen als pandoc-sources-<tag>.tar ans Release, die Quellen aller uebrigen Debian-Pakete im Image als
+# debian-sources-<tag>.tar.partNN, beides bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
 name: Container-Image
 
 on:
@@ -161,12 +162,44 @@ jobs:
           '
           tar -cf "pandoc-sources-$ASSET.tar" -C "$RUNNER_TEMP/src" .
           ls -lh "pandoc-sources-$ASSET.tar"
+          rm -rf "$RUNNER_TEMP/src"
+
+      # GPLv3/AGPLv3 §6(d): Quellen aller Debian-Pakete im Image selbst bereithalten, nicht nur
+      # ueber snapshot.debian.org. Mehrere GB, daher auf /mnt (zweite Platte des Runners) und in
+      # Teilen unter der Asset-Grenze von 2 GiB.
+      - name: Debian-Quellen sammeln
+        run: |
+          python3 scripts/debian-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > debian-sources.txt
+          wc -l debian-sources.txt
+          DIR=/mnt/debian-sources
+          sudo mkdir -p "$DIR" && sudo chown "$(id -u):$(id -g)" "$DIR"
+          cp debian-sources.txt "$DIR/SOURCES.txt"
+          df -h /mnt "$GITHUB_WORKSPACE"
+          docker run --rm -v "$DIR:/out" debian:bookworm bash -euo pipefail -c '
+            sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null
+            cd /out
+            while read -r src ver; do
+              apt-get source -qq --download-only "$src=$ver" </dev/null >/dev/null \
+                || debsnap -f -d . "$src" "$ver" </dev/null \
+                || { echo "Quelle nicht gefunden: $src $ver"; exit 1; }
+            done < SOURCES.txt
+            n=$(ls *.dsc | wc -l)
+            [ "$n" -eq "$(wc -l < SOURCES.txt)" ] || { echo "$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete"; exit 1; }
+            chown -R '"$(id -u):$(id -g)"' /out
+          '
+          du -sh "$DIR"
+          mkdir -p /mnt/debian-sources-parts
+          tar -cf - -C "$DIR" . | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part"
+          rm -rf "$DIR"
+          ls -lh /mnt/debian-sources-parts
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$ASSET.txt" "pandoc-sources-$ASSET.tar" --clobber
+        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$ASSET.txt" "pandoc-sources-$ASSET.tar" /mnt/debian-sources-parts/debian-sources-"$ASSET".tar.part* --clobber
 
       - name: Nach ghcr.io pushen
         if: env.PUBLISH == 'true'

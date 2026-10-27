@@ -200,8 +200,8 @@ deren Quellen.
 
 Die genauen Pakete und Versionen stehen im Image unter `/app/DEBIAN-PACKAGES.txt`,
 tabulatorgetrennt mit den Spalten Paket, Version, Quellpaket, Quellversion,
-Built-Using und Static-Built-Using (die letzten beiden nennen weitere
-Quellpakete, die beim Bauen in das Paket eingeflossen sind, meist leer):
+Built-Using, Static-Built-Using und X-Cargo-Built-Using (die letzten drei nennen
+weitere Quellpakete, die beim Bauen in das Paket eingeflossen sind, meist leer):
 
 ```bash
 docker run --rm ghcr.io/felix-d-git/latex-ide:<version> cat /app/DEBIAN-PACKAGES.txt
@@ -212,12 +212,20 @@ Zu jedem Release mit veröffentlichtem Image liegt dieselbe Liste als
 `pandoc-sources-<tag>.tar`: die Debian-Quellpakete (`.dsc`, `.orig.tar.*`,
 `.debian.tar.*`) von pandoc, ghc und aller Haskell-Bibliotheken, gegen die pandoc laut
 offizieller Debian-buildinfo gebaut wurde (`libghc-*-dev`), Liste in
-`SOURCES.txt`. Die Datei wird vor dem
-Image veröffentlicht und bleibt mindestens drei Jahre nach der letzten
-Verteilung des Images beim Release.
+`SOURCES.txt`. Außerdem `debian-sources-<tag>.tar.part00`, `.part01`, …: die
+Debian-Quellpakete **aller** Pakete im Image in genau diesen Versionen, auch der
+unter Built-Using, Static-Built-Using und X-Cargo-Built-Using genannten (Liste in
+`SOURCES.txt`, erzeugt von `scripts/debian-sources.py`). Die Teile ergeben
+aneinandergehängt ein tar-Archiv:
 
-Die Quellen genau dieser Versionen, auch der unter Built-Using und
-Static-Built-Using genannten, liegen unter <https://snapshot.debian.org>
+```bash
+cat debian-sources-<tag>.tar.part* | tar -xf -
+```
+
+Alle Dateien werden vor dem Image veröffentlicht und bleiben mindestens drei
+Jahre nach der letzten Verteilung des Images beim Release.
+
+Zusätzlich liegen die Quellen unter <https://snapshot.debian.org>
 (`https://snapshot.debian.org/package/<Quellpaket>/<Quellversion>/`).
 Node.js stammt aus dem offiziellen Image `node:24-bookworm-slim` (Quellen:
 <https://github.com/nodejs/node>), die npm-Abhängigkeiten der IDE stehen in
@@ -227,8 +235,8 @@ vollständige Quellcode einschließlich Build- und Hilfsskripten (`scripts/`, `i
 `.github/`) liegt unter der `/source`-Adresse des Servers (Tag dieser Version).
 
 Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
-und LGPL-3.0 (jeweils §6 d) über diese Hinweise und snapshot.debian.org
-bereitgestellt. Das folgende Angebot gilt zusätzlich, vor allem für Teile unter
+und LGPL-3.0 (jeweils §6 d) über diese Release-Dateien beim GitHub-Release derselben Version bereitgestellt,
+die das Projekt selbst vorhält. Das folgende Angebot gilt zusätzlich, vor allem für Teile unter
 GPL-2.0 wie mawk.
 
 **Schriftliches Angebot:** Für jede auf ghcr.io veröffentlichte Version des
