@@ -89,3 +89,11 @@ einmal mit dem Setup aus der Weboberfläche neu installieren.
   Desktop-Apps“ trennen und neu anmelden.
 - **Kompilieren schlägt lokal fehl**: TeX-Live-Installation unvollständig →
   Setup erneut ausführen (TeX Live wird nur installiert, wenn `latexmk` fehlt).
+
+## Lizenzen
+
+LaTeX-IDE steht unter AGPL-3.0-only. Im Installationsordner liegen `LICENSE`,
+`AUTHORS`, `THIRD_PARTY_NOTICES.md` (npm-Pakete) und `LICENSES-INSTALLER.txt`
+(Node.js, TeX Live, Inno Setup, Link zum Quellcode genau dieser Version); in der
+laufenden App unter Help ▸ Licenses (`/licenses`). TeX Live ist nicht Teil des
+Pakets, sondern wird bei Bedarf direkt von einem CTAN-Spiegel installiert.

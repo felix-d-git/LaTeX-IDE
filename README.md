@@ -212,7 +212,8 @@ der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
 
 ## Marken
 
-Overleaf ist eine Marke der Digital Science UK Limited. Dieses Projekt ist eine
+TeX ist eine Marke der American Mathematical Society. Overleaf ist eine Marke
+der Digital Science UK Limited. Dieses Projekt ist eine
 unabhängige Eigenentwicklung, kein Fork von Overleaf, und steht in keiner
 Verbindung zu Overleaf oder Digital Science. Zotero ist eine eingetragene Marke
 der Corporation for Digital Scholarship; die IDE greift nur über die

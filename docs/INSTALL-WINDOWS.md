@@ -74,3 +74,11 @@ Windows-Einstellungen → Apps → LatexIDE. Die vom Installer angelegte TeX-Liv
 Installation, Caches und die `.env` werden entfernt (Admin-Zugangsdaten gelten
 nach einer Neuinstallation also neu). Projekte und Einstellungen löscht der
 Deinstaller nur nach Rückfrage.
+
+## Lizenzen
+
+LaTeX-IDE steht unter AGPL-3.0-only. Im Installationsordner liegen `LICENSE`,
+`AUTHORS`, `THIRD_PARTY_NOTICES.md` (npm-Pakete) und `LICENSES-INSTALLER.txt`
+(Node.js, TeX Live, Inno Setup, Link zum Quellcode genau dieser Version); in der
+laufenden App unter Help ▸ Licenses (`/licenses`). TeX Live ist nicht Teil des
+Pakets, sondern wird bei Bedarf direkt von einem CTAN-Spiegel installiert.
