@@ -952,6 +952,8 @@ THE SOFTWARE.
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1188,6 +1190,8 @@ SOFTWARE.
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1396,6 +1400,8 @@ License: Apache-2.0
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1604,6 +1610,8 @@ License: Apache-2.0
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1845,6 +1853,8 @@ in all copies or substantial portions of the Software.
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2053,6 +2063,8 @@ License: Apache-2.0
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -3402,6 +3414,7 @@ License: MIT
 
 ```
 Copyright komagata
+Copyright (c) 2011 takenspc
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3768,6 +3781,8 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -4672,6 +4687,8 @@ SOFTWARE.
 License: BlueOak-1.0.0
 
 ```
+Author per package.json (the license text names no copyright holder): Isaac Z. Schlueter
+
 # Blue Oak Model License
 
 Version 1.0.0
@@ -5268,6 +5285,8 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 License: BlueOak-1.0.0
 
 ```
+Author per package.json (the license text names no copyright holder): Isaac Z. Schlueter
+
 # Blue Oak Model License
 
 Version 1.0.0
@@ -5555,6 +5574,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 License: BlueOak-1.0.0
 
 ```
+Author per package.json (the license text names no copyright holder): Isaac Z. Schlueter
+
 All packages under `src/` are licensed according to the terms in
 their respective `LICENSE` or `LICENSE.md` files.
 
@@ -5672,6 +5693,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 License: BlueOak-1.0.0
 
 ```
+Author per package.json (the license text names no copyright holder): Isaac Z. Schlueter
+
 # Blue Oak Model License
 
 Version 1.0.0
@@ -7299,6 +7322,8 @@ THE SOFTWARE.
 License: Apache-2.0
 
 ```
+Author per package.json (the license text names no copyright holder): Holepunch
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/

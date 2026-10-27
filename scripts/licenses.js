@@ -136,10 +136,7 @@ const MANUAL_LICENSES = {
   'cookie-signature@1.0.7': COOKIE_SIGNATURE_1_0,
   // https://github.com/komagata/eastasianwidth/blob/master/MIT-LICENSE.txt
   'eastasianwidth@0.2.0': `Copyright komagata
-
-${MIT_BODY}`,
-  // README.md; https://github.com/jensyt/imurmurhash-js/blob/master/LICENSE
-  'imurmurhash@0.1.4': `Copyright (c) 2013 Gary Court, Jens Taylor
+Copyright (c) 2011 takenspc
 
 ${MIT_BODY}`,
   // README.md; https://github.com/juliangruber/isarray/blob/master/LICENSE
@@ -421,6 +418,12 @@ function licstartCopyright(file) {
   return line ? line[1] : null;
 }
 
+// A line that starts with "Copyright" and is not the Apache appendix template.
+function hasCopyrightLine(text) {
+  return text.split('\n').some((l) => !/\[yyyy\]/.test(l)
+    && /^\s*(copyright\s+(?!(owner|notice|holders?|license|and|statement|to|of|the|in|or|is)\b)\S|\(c\)\s+\d|©)/i.test(l));
+}
+
 function compareSemver(a, b) {
   const re = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/;
   const ma = re.exec(a);
@@ -448,6 +451,7 @@ function compareSemver(a, b) {
 function collect(root, errors) {
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
   const byId = new Map();
+  const usedManual = new Set();
   for (const [pkgPath, meta] of Object.entries(lock.packages || {})) {
     if (pkgPath === '') continue; // the project itself
     if (!pkgPath.includes('node_modules/')) continue;
@@ -473,18 +477,31 @@ function collect(root, errors) {
     }
     if (byId.has(id)) continue; // a package can appear at multiple lockfile paths
 
-    const license = licenseToString(pkgJson.license) || 'UNKNOWN';
+    // "licenses" is the deprecated array form of the field
+    const license = licenseToString(pkgJson.license || pkgJson.licenses) || 'UNKNOWN';
+    if (meta.license && meta.license !== license) {
+      errors.push(`${id}: package-lock.json says ${meta.license}, package.json says ${license}`);
+    }
     const entries = listDir(absDir);
     const licenseFile = findLicenseFile(absDir, entries);
-    const licenseText = licenseFile
-      ? readText(licenseFile)
-      : (license === 'MIT' && MANUAL_LICENSES[id]) || null;
+    const manual = !licenseFile && license === 'MIT' && MANUAL_LICENSES[id];
+    if (manual) usedManual.add(id);
+    const licenseText = licenseFile ? readText(licenseFile) : manual || null;
     if (!licenseText) errors.push(`${id}: no license text found (add it to MANUAL_LICENSES)`);
+    // Some license files keep the template line "Copyright [yyyy] [name of copyright owner]"
+    // (Apache-2.0) or have no copyright line at all (BlueOak-1.0.0): name the package author.
+    const author = typeof pkgJson.author === 'string' ? pkgJson.author.replace(/\s*[<(].*$/, '') : pkgJson.author && pkgJson.author.name;
+    const authorLine = licenseText && !hasCopyrightLine(licenseText) && author
+      ? `Author per package.json (the license text names no copyright holder): ${author}`
+      : null;
     const noticeFiles = entries
       .filter((e) => NOTICE_FILE_RE.test(e))
       .map((e) => ({ title: e, text: readText(path.join(absDir, e)) }));
 
-    byId.set(id, { name, version: meta.version, license, licenseText, noticeFiles, absDir });
+    byId.set(id, { name, version: meta.version, license, licenseText, authorLine, noticeFiles, absDir });
+  }
+  for (const id of Object.keys(MANUAL_LICENSES)) {
+    if (!usedManual.has(id)) errors.push(`MANUAL_LICENSES['${id}']: not used any more, remove the entry`);
   }
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'en') || compareSemver(a.version, b.version));
 }
@@ -546,7 +563,8 @@ function render(packages) {
     lines.push('');
     lines.push(`License: ${p.displayLicense || p.license}`);
     lines.push('');
-    block(p.copyrightLine ? `${p.copyrightLine}\n\n${p.licenseText.replace(/^\n+/, '')}` : p.licenseText);
+    const lead = p.copyrightLine || p.authorLine;
+    block(lead ? `${lead}\n\n${p.licenseText.replace(/^\n+/, '')}` : p.licenseText);
     for (const n of p.noticeFiles.concat(p.extraNotices || [])) {
       lines.push(`### ${n.title}`);
       lines.push('');
