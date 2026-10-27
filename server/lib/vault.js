@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // At-rest-Verschluesselung: DATA_DIR (fluechtig, z. B. tmpfs) wird in VAULT_DIR (Platte)
 // verschluesselt gespiegelt. Aktiv nur mit DATA_KEY + VAULT_DIR, sonst No-op.
 // Eintrag: Dateiname = HMAC(relPfad) hex, Inhalt = iv(12) | tag(16) | AES-256-GCM({len,relPfad,Daten}).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop offline copy: two-way sync of one project folder against the server,
 // using the hash each file had at the last sync ("base") to tell who changed it.
 //   only server changed -> download      only local changed -> upload

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Gemeinsames Dropdown-System für Menüleiste, Projekt-/Layout-/Zoom-Menü und
 // die Kontextmenüs im Dateibaum: fester Icon-Slot, Kürzel rechtsbündig,
 // Submenü öffnet bei Hover.

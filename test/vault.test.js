@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P11 (#55): VAULT_DIR inside DATA_DIR mirrored its own entries endlessly,
 // and an unwritable VAULT_DIR left all data only in the volatile DATA_DIR.
 // vault.start() must refuse both at startup.

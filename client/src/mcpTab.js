@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { publicOrigin, authApi } from './api.js';
 
 // Settings tab "MCP": tokens for external AI tools (Claude, Codex, Cursor) with single rights per project.

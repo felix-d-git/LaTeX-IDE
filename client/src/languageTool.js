@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Grammatik/Rechtschreibung über einen selbst betriebenen LanguageTool-Server
 // (LANGUAGETOOL_URL in der Server-.env; ohne Eintrag liefert /api/languagetool 501).
 import { api } from './api.js';

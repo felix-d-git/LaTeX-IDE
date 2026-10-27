@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // THIRD_PARTY_NOTICES.md leaves out the pdfjs-dist parts with their own licenses
 // (STRIPPED in scripts/licenses.js) because the Docker build, the installer build
 // and the image check delete or reject them. The three lists must stay in sync.

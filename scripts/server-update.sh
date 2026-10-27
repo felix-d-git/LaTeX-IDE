@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Auto-update of a Docker-hosted server: if GitHub has a newer release than the one
 # installed, back up the data dir (keeps the newest 3 backups), unpack the
 # release over APP_DIR and rebuild the container. Meant for cron; which line

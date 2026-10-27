@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Small file-backed express-session store (replaces session-file-store).
 // Same on-disk format: <sid>.json holding the session plus __lastAccess (ms), so existing
 // sessions stay valid. A session expires ttl after its last access, or after the cookie's

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop installers served by this server, with its own address built in.
 // The server fetches the assets of the GitHub release matching its own version
 // (built by .github/workflows/release.yml) once into DATA_DIR/desktop/<version>

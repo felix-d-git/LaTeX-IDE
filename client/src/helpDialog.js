@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Help page: first tab is the onboarding tour, the rest explain the areas.
 // Opens once automatically for every new browser (localStorage flag).
 import { version } from '../../package.json';

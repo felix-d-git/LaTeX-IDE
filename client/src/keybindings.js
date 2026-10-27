@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const STORAGE_KEY = 'latex-ide-hotkeys-v1';
 
 // Scopes are how duplicate bindings stay non-interfering: 'editor' combos are

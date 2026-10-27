@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { listChanges, acceptChange, rejectChange, onReviewChanged } from './trackChanges.js';
 import { listConflicts, resolveConflict } from './collab.js';
 

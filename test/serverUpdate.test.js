@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P11 (#54): server-update.sh copies the new release over itself while
 // running. Bash then read on at the old byte offset in the new file -> syntax
 // error, no rebuild, .release stays old, exit code 0. Runs the script in a temp

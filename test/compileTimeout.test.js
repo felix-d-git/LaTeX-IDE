@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P7 (#35): an endless loop in a document must not block the global
 // compile queue - compile() returns after the time limit and kills the whole
 // TeX process tree (latexmk -> perl -> pdflatex).

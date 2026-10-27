@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # LaTeX-IDE Desktop - macOS Installer.
 # Doppelklickbar (Finder). Bei Gatekeeper-Warnung: Systemeinstellungen ->
 # Datenschutz & Sicherheit -> "Dennoch oeffnen" (oder: bash install.command).

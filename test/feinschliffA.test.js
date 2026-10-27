@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // P12 Bereich A (Server index.js + Hilfsmodule): Feinschliff-Fixes aus BEFUNDE-P12.md.
 const test = require('node:test');
 const assert = require('node:assert');

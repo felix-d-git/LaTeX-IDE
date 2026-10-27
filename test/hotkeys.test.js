@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Globale Hotkeys (#51): im Editor verdrängen sie CodeMirrors eigene Bindung,
 // aus Dialogen/Eingabefeldern/Projektübersicht laufen sie nicht.
 const test = require('node:test');

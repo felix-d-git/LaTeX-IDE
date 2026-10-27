@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only AND MIT
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+// SPDX-FileCopyrightText: 2019 Kevin Jahns
 // Live collaboration: one Y.Doc per (project root, text file), served over the
 // standard y-websocket protocol (sync + awareness), so y-websocket's
 // WebsocketProvider on the client talks to it unchanged.

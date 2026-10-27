@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P7 (#37): version history must not grow without bound - content-addressed
 // blobs, autocompile throttled like autosave, retention with a hard cap.
 const test = require('node:test');

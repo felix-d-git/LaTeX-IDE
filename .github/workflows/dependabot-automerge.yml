@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Standard A: Dependabot-PRs (patch/minor) automatisch squash-mergen - erst wenn ALLE Checks des
 # Head-Commits abgeschlossen und grün sind. Läuft nach jedem PR-Workflow; der letzte fertige mergt.
 # Majors bleiben offen (stehen im Commit-Text als semver-major).

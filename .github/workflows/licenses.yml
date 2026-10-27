@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Prueft bei jedem Push und Pull Request, dass THIRD_PARTY_NOTICES.md zu
 # package-lock.json passt. Schlaegt auch fehl, wenn ein Prod-Paket fehlt oder keinen
 # Lizenztext hat oder pdfjs-dist/katex nicht die Version haben, fuer die die
@@ -27,3 +29,7 @@ jobs:
 
       - name: THIRD_PARTY_NOTICES.md pruefen
         run: node scripts/licenses.js --check
+
+      # Lizenz- und Copyright-Angabe fuer jede Datei (SPDX-Kopf oder REUSE.toml)
+      - name: REUSE pruefen
+        run: pipx run reuse==6.2.0 lint

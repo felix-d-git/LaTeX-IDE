@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // SMTP nur aus der .env (keine Einstellung in der UI), ergänzt crashSafety (#66):
 // Absender aus SMTP_FROM vor SMTP_USER, Fehler kommt vom Verbindungsaufbau statt aus getConfig().
 const test = require('node:test');

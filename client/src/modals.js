@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Gemeinsames Modal-Verhalten, ohne jeden Dialog einzeln
 // anzufassen: jedes Element mit .modal-backdrop-Kind gilt als Modal. Beim
 // Einblenden wandert der Fokus in den Dialog, Tab bleibt darin (Fokusfalle),

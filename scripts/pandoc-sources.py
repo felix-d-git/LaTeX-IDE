@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 """Lists the Debian source packages statically linked into pandoc, as "<source> <version>" lines.
 
 bookworm's pandoc has no (Static-)Built-Using field, so the Haskell libraries come from the

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Generates THIRD_PARTY_NOTICES.md from production dependencies listed in
 // package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only.
 //

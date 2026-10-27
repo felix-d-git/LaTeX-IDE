@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Gemeinsame Text-Einfüge-Helfer für Menüleiste (R2) und die neue
 // Formatierungs-Toolbar über dem Editor (R5) — beide lösen dieselben
 // Aktionen aus, deshalb liegen sie hier statt doppelt in beiden Modulen.

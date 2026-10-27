@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop sync deletes (DELETE /api/collab/raw) go to the project's .trash instead of rmSync.
 const test = require('node:test');
 const assert = require('node:assert');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Issue #42: owner renames a project while a member is typing in it. Pending edits land in the
 // renamed folder, the member is sent away (4410), the old folder never comes back.
 const test = require('node:test');

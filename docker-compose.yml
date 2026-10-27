@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # LatexIDE-Server selbst hosten (Linux oder Docker Desktop unter Windows/macOS).
 # Einrichtung: siehe docs/INSTALL-DOCKER.md.
 #   cp .env.example .env   # ausfuellen

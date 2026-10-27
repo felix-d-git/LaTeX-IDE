@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Tests + Client-Build bei jedem Push und Pull Request. Ohne TeX im Runner:
 # die latexmk-Tests ueberspringen sich selbst (hasTex), der Rest laeuft voll.
 name: CI

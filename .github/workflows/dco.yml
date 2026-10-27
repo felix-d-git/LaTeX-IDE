@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Jeder Commit eines Pull Requests braucht eine Zeile "Signed-off-by:"
 # (Developer Certificate of Origin 1.1, siehe CONTRIBUTING.md).
 name: DCO

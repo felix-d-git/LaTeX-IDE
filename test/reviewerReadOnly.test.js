@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Rolle „Nur kommentieren“ (#52): lokale Änderungen kommen nicht ins Dokument
 // (Toolbar/Menü/Kontextmenü/Vorschlag annehmen laufen über view.dispatch), und der
 // Server weist Text-Updates eines Kommentierenden hörbar ab (4403 statt still verwerfen).

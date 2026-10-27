@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Live collaboration client: one Y.Doc per open text file, synced to the
 // server over /yjs and cached in IndexedDB, so files stay editable offline.
 // Yjs merges concurrent edits automatically; only when edits made while

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { selectAll, indentMore, indentLess } from '@codemirror/commands';
 import { yUndo as undo, yRedo as redo } from './collab.js';
 import { withPid } from './api.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Der Watcher meldet PDFs im Ausgabeordner nicht mehr (#45): pdfChanged kommt nur aus
 // doCompile, gefiltert auf den kompilierenden Nutzer.
 const test = require('node:test');

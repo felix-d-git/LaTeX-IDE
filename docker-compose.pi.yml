@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # LaTeX IDE (Mehrbenutzer) auf einem kleinen Server (z. B. Raspberry Pi), öffentlich per
 # Tailscale Funnel unter https://latex.<tailnet>.ts.net. TeX Live liegt auf dem Host.
 #   docker compose -f docker-compose.pi.yml up -d --build

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Issue #30: errors that used to end the whole server process (uncaught exception /
 // unhandled 'error' event / unhandled rejection) must now stay local.
 const test = require('node:test');

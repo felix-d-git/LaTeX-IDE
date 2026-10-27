@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, mit pandoc) und
 # prueft, dass der Container startet, latexmk findet und die Lizenzdateien mitbringt.
 # Veroeffentlicht wird es unter ghcr.io/<owner>/latex-ide nur, wenn das Repo oeffentlich

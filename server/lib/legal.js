@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Lizenz- und Quellcode-Hinweise (AGPL-3.0-only §5, §13) für Server, Desktop-App und Bundle-Banner.
 const fs = require('fs');
 const path = require('path');

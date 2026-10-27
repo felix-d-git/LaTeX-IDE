@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { yUndo as undo, yRedo as redo } from './collab.js';
 import { openDropdown, closeDropdown, isDropdownOpenFor } from './dropdown.js';
 import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './editorCommands.js';

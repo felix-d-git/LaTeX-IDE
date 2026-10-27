@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { clearPdfThumbs } from './visualEditor.js';
 import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';

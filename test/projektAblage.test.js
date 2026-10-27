@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Issue #39: per-project state (settings, main file, shares, labels) moves with the folder into the
 // trash/archive and back; a new project of the same name starts clean; parked projects are closed to members.
 const test = require('node:test');

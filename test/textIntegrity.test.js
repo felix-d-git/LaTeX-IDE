@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P3 (#27, #31, #43, #44): text must reach disk and every client exactly as typed -
 // no CRLF offset shift, no duplicated external edits, no U+FFFD for Latin-1, and
 // comment/track-change anchors must survive external changes.

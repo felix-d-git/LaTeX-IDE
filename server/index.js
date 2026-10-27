@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.

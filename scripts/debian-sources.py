@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 """Lists every Debian source package of the image, as "<source> <version>" lines.
 
 Input is DEBIAN-PACKAGES.txt (Dockerfile: package, version, source, source version,

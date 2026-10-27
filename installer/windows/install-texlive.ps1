@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 #Requires -Version 5.1
 <#
   Installiert TeX Live 2025 (scheme-full) per-user unter

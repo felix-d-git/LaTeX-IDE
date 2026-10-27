@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Das macOS-Release-ZIP muss install.command ausführbar enthalten (#56).
 const test = require('node:test');
 const assert = require('node:assert');

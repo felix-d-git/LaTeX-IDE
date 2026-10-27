@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const { execFile } = require('child_process');
 
 // Parses the "Key:value" line blocks the synctex CLI prints between

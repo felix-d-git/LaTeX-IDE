@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop app: serves the same web client on localhost, forwards everything
 // to the shared server (REMOTE_URL) with the user's desktop token, and
 // compiles locally against a mirror of the project - the Pi can't compile

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Yellow bar at the top while the server is unreachable. × shrinks it to a
 // thin strip at the very top edge (click the strip to expand again).
 // Offline = any source says so: Yjs WebSocket ('collab') or HTTP answers ('http',

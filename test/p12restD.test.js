@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // P12-Rest D (#64): Desktop-Sync - If-Match, Ordner-Marker, Hash-Cache, Offline-Abbruch.
 const test = require('node:test');
 const assert = require('node:assert');

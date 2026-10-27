@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // P12-F Feinschliff Client: Hotkey-Defaults/macOS und .bib-Auswahl.
 const test = require('node:test');
 const assert = require('node:assert');

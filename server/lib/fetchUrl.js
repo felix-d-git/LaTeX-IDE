@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // "Add files > From external URL": the server downloads the file, so it must
 // not become a door into the Pi's network (SSRF). Every connection - incl.
 // each redirect hop - is checked at DNS-lookup time (no rebinding window)
