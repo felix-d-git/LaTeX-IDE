@@ -196,8 +196,16 @@ jobs:
             [ "$missing" -eq 0 ] && [ "$n" -ge "$(wc -l < SOURCES.txt)" ]
           '
           echo "::notice::Quellen: $(du -sh "$DIR" | cut -f1), frei: $(df -h --output=avail /mnt | tail -1)"
-          tar -cf - -C "$DIR" . | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part"
-          rm -rf "$DIR"
+          set +e
+          tar -cf - -C "$DIR" . 2>"$RUNNER_TEMP/tar.err" \
+            | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part" 2>"$RUNNER_TEMP/split.err"
+          rc=("${PIPESTATUS[@]}")
+          set -e
+          if [ "${rc[0]}" != 0 ] || [ "${rc[1]}" != 0 ]; then
+            echo "::error::tar=${rc[0]} $(tail -c 400 "$RUNNER_TEMP/tar.err" | tr '\n' ' ') split=${rc[1]} $(tail -c 400 "$RUNNER_TEMP/split.err" | tr '\n' ' ')"
+            exit 1
+          fi
+          rm -rf "$DIR" || { echo "::error::rm $DIR fehlgeschlagen: $(ls -la "$DIR" | head -5 | tr '\n' ' ')"; exit 1; }
           echo "::notice::$(ls /mnt/debian-sources-parts | wc -l) Teile, $(du -sh /mnt/debian-sources-parts | cut -f1)"
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
