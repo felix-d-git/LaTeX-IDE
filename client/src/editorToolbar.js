@@ -6,9 +6,9 @@ import { insertAtCursor, wrapSelection, insertAtLineStart, SNIPPETS } from './ed
 // links Formatierung, Mitte der Code/Visual-Umschalter, rechts Werkzeuge.
 export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComment, onSetVisual, isVisual }) {
   const bar = document.getElementById('editor-toolbar');
-  const left = bar.querySelector('.ol-toolbar-left');
-  const mode = bar.querySelector('.ol-toolbar-mode');
-  const right = bar.querySelector('.ol-toolbar-right');
+  const left = bar.querySelector('.ui-toolbar-left');
+  const mode = bar.querySelector('.ui-toolbar-mode');
+  const right = bar.querySelector('.ui-toolbar-right');
 
   const withView = (fn) => () => {
     const v = getView();
@@ -20,14 +20,14 @@ export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComm
     btn.type = 'button';
     btn.title = title;
     btn.setAttribute('aria-label', title);
-    btn.innerHTML = `<svg class="ol-icon"><use href="#i-${icon}"></use></svg>`;
+    btn.innerHTML = `<svg class="ui-icon"><use href="#i-${icon}"></use></svg>`;
     btn.addEventListener('click', onClick);
     return btn;
   }
 
   function separator() {
     const sep = document.createElement('span');
-    sep.className = 'ol-toolbar-sep';
+    sep.className = 'ui-toolbar-sep';
     return sep;
   }
 
@@ -52,7 +52,7 @@ export function setupEditorToolbar({ getView, onFind, onFindInProject, onAddComm
     button('table', 'Tabelle einfügen', withView((v) => insertAtCursor(v, SNIPPETS.table)))
   );
 
-  // Zu schmal → Formatierungs-Buttons von rechts in ein "…"-Popover (wie Overleaf).
+  // Zu schmal → Formatierungs-Buttons von rechts in ein "…"-Popover.
   const items = [...left.children];
   let overflowed = [];
   const more = button('dots', 'Weitere Werkzeuge', (e) => {

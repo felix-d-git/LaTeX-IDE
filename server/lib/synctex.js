@@ -27,7 +27,7 @@ function forward(pdfAbs, texAbs, line, cwd) {
         if (!parsed.Page) return reject(new Error('Keine passende PDF-Position gefunden.'));
         const page = Number(parsed.Page);
         // Alle Treffer-Boxen der ersten Seite (je Textlauf eine), damit der
-        // Client wie Overleaf den ganzen Absatz hinterlegen kann.
+        // Client den ganzen Absatz hinterlegen kann.
         const boxes = stdout
           .split(/Output:/)
           .slice(1)

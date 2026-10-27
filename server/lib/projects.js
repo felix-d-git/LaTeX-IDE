@@ -170,7 +170,7 @@ function renameProject(projectsDir, oldName, newName) {
   return dest;
 }
 
-// Duplicates a project folder, mirroring Overleaf's "Copy project" action.
+// Duplicates a project folder ("Copy project" action).
 // Without an explicit newName, auto-suffixes "<name> (Copy)" / "(Copy 2)" / ...
 // (dashboard quick-action); with one (Copy-project modal), uses that name exactly.
 function copyProject(projectsDir, name, newName) {

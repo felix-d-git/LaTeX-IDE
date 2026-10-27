@@ -275,7 +275,7 @@ function renderTabbar() {
 
     const icon = document.createElement('span');
     icon.className = 'tab-icon';
-    icon.innerHTML = `<svg class="ol-icon"><use href="#i-${tabIconFor(path)}"></use></svg>`;
+    icon.innerHTML = `<svg class="ui-icon"><use href="#i-${tabIconFor(path)}"></use></svg>`;
     content.appendChild(icon);
 
     const label = document.createElement('span');
@@ -287,7 +287,7 @@ function renderTabbar() {
     close.type = 'button';
     close.className = 'tab-close';
     close.title = 'Tab schließen';
-    close.innerHTML = '<svg class="ol-icon"><use href="#i-close"></use></svg>';
+    close.innerHTML = '<svg class="ui-icon"><use href="#i-close"></use></svg>';
     close.addEventListener('click', (e) => {
       e.stopPropagation();
       closeTabs([path]);

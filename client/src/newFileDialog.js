@@ -30,7 +30,7 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     input.value = 'name.tex';
     label.appendChild(input);
     wrap.appendChild(label);
-    // Mirrors Overleaf: only "name" is pre-selected so typing immediately replaces it, ".tex" stays untouched.
+    // Only "name" is pre-selected so typing immediately replaces it, ".tex" stays untouched.
     setTimeout(() => {
       input.focus();
       input.setSelectionRange(0, input.value.lastIndexOf('.'));

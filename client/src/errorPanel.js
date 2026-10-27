@@ -3,7 +3,7 @@ import { toggleDropdown } from './dropdown.js';
 import { fixHint } from './fixHint.js';
 
 // R1/R6: Die Log-/Fehleransicht ist ein volldeckendes Overlay der PDF-Spalte
-// (z-index 11). Aufbau wie Overleaf: Tabs All/Errors/Warnings/Info mit
+// (z-index 11). Aufbau: Tabs All/Errors/Warnings/Info mit
 // Zählern, aufklappbare Karten (Klartext-Hinweis + Log-Auszug + ⌖), Fuß mit
 // "Clear cached files"/"Other logs and files", "Back to PDF" als Pille in
 // der PDF-Toolbar. Der rote Zähler sitzt als Badge auf dem Logs-Button.
@@ -77,7 +77,7 @@ export function setupErrorPanel({ onJumpTo }) {
     chevron.className = 'log-card-chevron';
     chevron.setAttribute('aria-label', 'Details');
     chevron.setAttribute('aria-expanded', 'false');
-    chevron.innerHTML = '<svg class="ol-icon"><use href="#i-chevron-right"></use></svg>';
+    chevron.innerHTML = '<svg class="ui-icon"><use href="#i-chevron-right"></use></svg>';
     const title = document.createElement('div');
     title.className = 'log-card-title';
     title.textContent = e.message;
@@ -86,7 +86,7 @@ export function setupErrorPanel({ onJumpTo }) {
     loc.textContent = e.file ? `${e.file}${e.line ? `, ${e.line}` : ''}` : '';
     head.append(chevron, title, loc);
     if (e.file && e.line) {
-      // ⌖ springt in den Editor, das Log bleibt offen (wie Overleaf).
+      // ⌖ springt in den Editor, das Log bleibt offen.
       const go = document.createElement('button');
       go.className = 'log-card-goto';
       go.title = 'Zur Stelle im Code springen';

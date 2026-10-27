@@ -1,4 +1,4 @@
-// Gemeinsames Modal-Verhalten wie in Overleaf, ohne jeden Dialog einzeln
+// Gemeinsames Modal-Verhalten, ohne jeden Dialog einzeln
 // anzufassen: jedes Element mit .modal-backdrop-Kind gilt als Modal. Beim
 // Einblenden wandert der Fokus in den Dialog, Tab bleibt darin (Fokusfalle),
 // Escape klickt den Schließen-Knopf des obersten Modals (damit läuft dessen

@@ -31,7 +31,7 @@ const MATH_DISPLAY_RE =
   /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\begin\{(?:equation|align|gather|multline)\*?\}[\s\S]*?\\end\{(?:equation|align|gather|multline)\*?\}/g;
 const MATH_INLINE_RE = /\$(?:[^$\\]|\\.)+\$|\\\((?:[^\\]|\\.)*?\\\)/g;
 
-// Rough approximation of Overleaf's word count (LaTeX-aware but not a full
+// Rough word count (LaTeX-aware but not a full
 // parser): strips comments, expands one level of \input/\include, counts
 // headers/math regions separately, then strips remaining commands/braces
 // before counting words in what's left.

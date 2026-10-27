@@ -36,7 +36,7 @@ function texCommand(mainRelPath, settings, outDir) {
       ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex,
       '-g', // force a real rerun even if latexmk thinks nothing changed since the last (possibly failed) run
       '-interaction=nonstopmode', // skip past recoverable errors instead of blocking on stdin
-      // Default (Overleaf-style): keep producing a best-effort PDF past errors.
+      // Default: keep producing a best-effort PDF past errors.
       // Opt-in "Stop on first error" setting swaps that for a hard halt instead.
       ...(settings.stopOnFirstError ? ['-halt-on-error'] : ['-f']),
       '-file-line-error', // emit "file:line: message" so errors can be mapped back to source
@@ -177,7 +177,7 @@ function normalizeTexPath(root, raw) {
   return p;
 }
 
-// Klartext-Erklärungen wie in Overleafs Log-Karten, nur für die häufigsten Meldungen.
+// Klartext-Erklärungen in den Log-Karten, nur für die häufigsten Meldungen.
 const HINTS = [
   [/Undefined control sequence/, 'Der Befehl ist unbekannt: Tippfehler oder fehlendes \\usepackage.'],
   [/Missing \$ inserted/, 'Mathe-Zeichen (z. B. _ oder ^) außerhalb einer Mathe-Umgebung. Mit $…$ umschließen oder escapen.'],

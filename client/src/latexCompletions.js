@@ -9,7 +9,7 @@ import { api } from './api.js';
 // otherwise Tab would insert the backslash a second time.
 
 function cmd(name, detail, snippet, { type = 'function', boost = 0 } = {}) {
-  // Overleaf zeigt rechts grau den Typ (cmd/env); die Beschreibung steht im Info-Feld.
+  // Rechts grau der Typ (cmd/env); die Beschreibung steht im Info-Feld.
   return snippetCompletion(snippet, { label: `\\${name}`, type, detail: 'cmd', info: detail, boost });
 }
 
@@ -34,7 +34,7 @@ const GREEK_LETTERS = [
 ].map((name) => symbol(name, `griechischer Buchstabe (${name})`));
 
 const COMMANDS = [
-  // Overleaf-Reihenfolge: \usepackage{}, \begin{}, \end{} ganz oben.
+  // Reihenfolge: \usepackage{}, \begin{}, \end{} ganz oben.
   cmd('usepackage', 'Paket laden', '\\usepackage{${1:paket}}', { boost: 10 }),
   cmd('begin', 'Umgebung beginnen', '\\begin{${1}}', { boost: 9 }),
   cmd('end', 'Umgebung beenden', '\\end{${1}}', { boost: 8 }),
@@ -90,7 +90,7 @@ const COMMANDS = [
   env('center', 'Zentrierter Inhalt', '\t${0}'),
 ];
 
-// Umgebungsnamen für das Popup direkt nach "\begin{" (wie Overleaf).
+// Umgebungsnamen für das Popup direkt nach "\begin{".
 const ENV_NAMES = [...new Set([
   ...COMMANDS.filter((c) => c.label.startsWith('\\begin{')).map((c) => c.label.slice(7, -1)),
   'abstract', 'tabular', 'minipage', 'verbatim', 'quote', 'array', 'gather', 'multline',

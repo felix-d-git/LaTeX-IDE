@@ -908,7 +908,7 @@ app.post('/api/share/role', (req, res) => {
   res.json(shareInfo(root, req.user));
 });
 
-// Share link per role (like Overleaf's edit/view links). Whoever opens it
+// Share link per role (edit/view links). Whoever opens it
 // while logged in becomes a member; the owner can revoke it any time.
 app.post('/api/share/link', (req, res) => {
   const root = requireManagedRoot(req, res);
@@ -1142,7 +1142,7 @@ app.post('/api/import/url', limitImport, ah(async (req, res) => {
 }));
 
 // Literatur: DOI → BibTeX (doi.org Content-Negotiation) und Zotero-Bibliothek als .bib.
-// replace: Zotero-Refresh überschreibt die Datei (wie Overleaf), DOI hängt an.
+// replace: Zotero-Refresh überschreibt die Datei, DOI hängt an.
 function appendOrUpload(root, dir, name, text, replace = false) {
   if (!/\.bib$/i.test(name)) throw new Error('Zieldatei muss auf .bib enden.');
   const rel = path.posix.join(String(dir || ''), name);
@@ -1839,7 +1839,7 @@ app.get('/api/raw', (req, res) => {
 });
 
 // Download the whole project as a .zip (File -> Download -> Source in the
-// Overleaf-style menu bar), skipping the same generated/hidden dirs the file
+// menu bar), skipping the same generated/hidden dirs the file
 // tree already hides (fsTree.isIgnored).
 app.get('/api/export', ah(async (req, res) => {
   const root = requireRoot(req, res);

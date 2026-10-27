@@ -4,7 +4,7 @@ import katex from 'katex';
 import { withPid } from './api.js';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Visual-Modus wie Overleaf: dieselbe LaTeX-Quelle, nur per Dekorationen
+// Visual-Modus: dieselbe LaTeX-Quelle, nur per Dekorationen
 // gerendert. Jedes Konstrukt, das die Auswahl berührt, zeigt wieder seine
 // Quelle - so bleibt alles editierbar, ohne eigenes Rich-Text-Modell.
 // ponytail: baut bei jeder Änderung/Cursorbewegung alle Dekorationen der Datei

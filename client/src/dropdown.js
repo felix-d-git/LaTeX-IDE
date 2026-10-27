@@ -3,26 +3,26 @@
 // Submenü öffnet bei Hover.
 
 const ICON = (name) =>
-  `<svg class="ol-icon"><use href="#i-${name}"></use></svg>`;
+  `<svg class="ui-icon"><use href="#i-${name}"></use></svg>`;
 
 let current = null; // { menu, anchor, onClose }
 
 function buildItem(item, close) {
   if (item.type === 'divider') {
     const el = document.createElement('div');
-    el.className = 'ol-dropdown-divider';
+    el.className = 'ui-dropdown-divider';
     return el;
   }
   if (item.type === 'header') {
     const el = document.createElement('div');
-    el.className = 'ol-dropdown-header';
+    el.className = 'ui-dropdown-header';
     el.textContent = item.label;
     return el;
   }
 
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'ol-dropdown-item' + (item.checked ? ' is-selected' : '');
+  row.className = 'ui-dropdown-item' + (item.checked ? ' is-selected' : '');
 
   const icon = document.createElement('span');
   icon.className = 'item-icon';
@@ -51,11 +51,11 @@ function buildItem(item, close) {
 
   if (item.submenu) {
     const wrap = document.createElement('div');
-    wrap.className = 'ol-dropend';
+    wrap.className = 'ui-dropend';
     wrap.appendChild(row);
     wrap.appendChild(buildMenu(item.submenu, {}, close));
     const setOpen = (on) => {
-      if (on) for (const sib of wrap.parentElement.querySelectorAll(':scope > .ol-dropend.open')) sib.classList.remove('open');
+      if (on) for (const sib of wrap.parentElement.querySelectorAll(':scope > .ui-dropend.open')) sib.classList.remove('open');
       wrap.classList.toggle('open', on);
     };
     wrap.addEventListener('mouseenter', () => setOpen(true));
@@ -63,7 +63,7 @@ function buildItem(item, close) {
     row.addEventListener('click', (e) => {
       e.stopPropagation();
       setOpen(true);
-      wrap.querySelector('.ol-dropdown .ol-dropdown-item')?.focus();
+      wrap.querySelector('.ui-dropdown .ui-dropdown-item')?.focus();
     });
     row.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight') row.click();
@@ -84,7 +84,7 @@ function buildItem(item, close) {
 
 function buildMenu(items, opts, close) {
   const menu = document.createElement('div');
-  menu.className = 'ol-dropdown' + (opts.className ? ' ' + opts.className : '');
+  menu.className = 'ui-dropdown' + (opts.className ? ' ' + opts.className : '');
   menu.setAttribute('role', 'menu');
   for (const item of items) menu.appendChild(buildItem(item, close));
   return menu;
@@ -99,14 +99,14 @@ function onDocMouseDown(e) {
 
 function onKey(e) {
   if (!current) return;
-  // Stufenweise wie Overleaf: erst das innerste offene Submenü schließen.
-  const openSubs = current.menu.querySelectorAll('.ol-dropend.open');
+  // Stufenweise: erst das innerste offene Submenü schließen.
+  const openSubs = current.menu.querySelectorAll('.ui-dropend.open');
   const innermost = openSubs[openSubs.length - 1];
   if (innermost && (e.key === 'Escape' || e.key === 'ArrowLeft')) {
     e.stopPropagation();
     e.preventDefault();
     innermost.classList.remove('open');
-    innermost.querySelector(':scope > .ol-dropdown-item').focus();
+    innermost.querySelector(':scope > .ui-dropdown-item').focus();
     return;
   }
   if (e.key === 'Escape') {
