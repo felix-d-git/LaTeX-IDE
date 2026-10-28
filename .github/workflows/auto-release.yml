@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Standard A: seit dem letzten Release nur Dependabot-Commits -> Patch-Release (der Pi zieht es nachts).
 # Sobald auch eigene Commits dabei sind, wird nicht automatisch released.
 name: Auto-Release

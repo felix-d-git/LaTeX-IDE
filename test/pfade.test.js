@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P4 (#33, #34): one absolute, normalized path per project/file - self-write
 // detection and every per-root setting must not depend on how a root was spelled.
 const test = require('node:test');

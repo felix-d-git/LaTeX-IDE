@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop app (server/desktop.js) against a fake remote server: offline detection and offline answers.
 const test = require('node:test');
 const assert = require('node:assert');

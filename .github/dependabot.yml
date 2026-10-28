@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Standard A (.claude/bin/standard-a.py): Security-Updates sofort, Rest wöchentlich gebündelt.
 # Majors ignoriert -> kommen über check-majors.py in die Coding-Sitzung.
 version: 2

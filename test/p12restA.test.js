@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Issue #64 A: Robustheit (Schreibfehler, Verlaufsindex, Datenordner, Pfad-Normalisierung).
 const test = require('node:test');
 const assert = require('node:assert');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Throwaway server for API tests: server/ + package.json copied to a temp dir (so the repo's
 // .env is never loaded), node_modules via NODE_PATH, fresh DATA_DIR, free port. Not a *.test.js.
 const fs = require('fs');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Export to Word/Markdown/HTML with Pandoc (GPL, run as an external program).
 // Pandoc's LaTeX reader would happily read any file on the server
 // (\include{/etc/passwd}, absolute image paths, bibliography/csl in metadata),

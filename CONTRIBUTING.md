@@ -20,8 +20,18 @@ Beitrag unter dieser Lizenz einbringen darfst.
   dass du den Beitrag einbringen darfst. Der Check „DCO“ prüft das bei jedem
   Pull Request; fehlende Sign-offs nachholen mit
   `git rebase --signoff <Basis>` und erneutem Push.
+- Neue Quelldateien beginnen (nach einer Shebang-Zeile) mit dem SPDX-Kopf
+  in der Kommentarsyntax der Datei:
+  ```
+  // SPDX-License-Identifier: AGPL-3.0-only
+  // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+  ```
+  Dateien ohne Kommentarsyntax deckt `REUSE.toml` ab. Geprüft von
+  `test/spdx.test.js` und `reuse lint` (Workflow „Licenses“).
 - Fremden Code nur mit kompatibler Lizenz übernehmen und Herkunft samt
-  Copyright-Zeile im Kopfkommentar der Datei nennen.
+  Copyright-Zeile im Kopfkommentar der Datei nennen, dazu Lizenz und Inhaber
+  im SPDX-Kopf ergänzen (z. B. `AGPL-3.0-only AND MIT`, siehe
+  `server/lib/collab.js`) und den Lizenztext unter `LICENSES/` ablegen.
 
 ## Abhängigkeiten
 

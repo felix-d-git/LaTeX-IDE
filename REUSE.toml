@@ -1,0 +1,13 @@
+# Lizenz- und Copyright-Angaben nach REUSE 3.3 (https://reuse.software) für Dateien
+# ohne eigenen SPDX-Kopf (Daten, Bilder, Doku, Windows-Starter). Quelldateien tragen
+# ihren Kopf selbst (test/spdx.test.js). Prüfen: pipx run reuse lint
+version = 1
+SPDX-PackageName = "LaTeX-IDE"
+SPDX-PackageSupplier = "felix-d-git"
+SPDX-PackageDownloadLocation = "https://github.com/felix-d-git/LaTeX-IDE"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"

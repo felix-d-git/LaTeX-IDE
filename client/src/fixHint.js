@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Heuristischer "Vermutlicher Fix" aus Fehlertext (+ Quellzeile, falls bekannt).
 // ponytail: reine Regex-Tabelle, keine Syntaxanalyse; sonst leer -> keine Zeile.
 const count = (s, c) => s.split(c).length - 1;

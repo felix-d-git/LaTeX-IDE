@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { EditorView } from 'codemirror';
 import {
   lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor,
@@ -82,36 +84,36 @@ const basicSetup = [
 // Grau, "scroll past end" als 50vh Innenabstand unten.
 const editorTheme = EditorView.theme(
   {
-    '&': { fontSize: '12px', backgroundColor: 'var(--ol-surface)', color: 'var(--ol-text)' },
+    '&': { fontSize: '12px', backgroundColor: 'var(--ui-surface)', color: 'var(--ui-text)' },
     '.cm-scroller': {
-      lineHeight: 'var(--ol-editor-lh, 19.2px)',
-      fontFamily: 'var(--ol-font-mono)',
+      lineHeight: 'var(--ui-editor-lh, 19.2px)',
+      fontFamily: 'var(--ui-font-mono)',
     },
     '.cm-content': { padding: '4px 0 50vh' },
     '.cm-line': { padding: '0 2px 0 6px' },
     '.cm-gutters': {
-      backgroundColor: 'var(--ol-gutter-bg)',
-      color: 'var(--ol-gutter-fg)',
+      backgroundColor: 'var(--ui-gutter-bg)',
+      color: 'var(--ui-gutter-fg)',
       border: 'none',
-      fontSize: 'var(--ol-editor-fs, 12px)',
-      lineHeight: 'var(--ol-editor-lh, 19.2px)',
+      fontSize: 'var(--ui-editor-fs, 12px)',
+      lineHeight: 'var(--ui-editor-lh, 19.2px)',
     },
-    '.cm-activeLine': { backgroundColor: 'var(--ol-active-line)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--ol-active-gutter)', minWidth: '20px' },
-    '.cm-cursor, .cm-dropCursor': { borderLeftWidth: '1.8px', borderLeftColor: 'var(--ol-text)' },
+    '.cm-activeLine': { backgroundColor: 'var(--ui-active-line)' },
+    '.cm-activeLineGutter': { backgroundColor: 'var(--ui-active-gutter)', minWidth: '20px' },
+    '.cm-cursor, .cm-dropCursor': { borderLeftWidth: '1.8px', borderLeftColor: 'var(--ui-text)' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-      backgroundColor: 'var(--ol-selection)',
+      backgroundColor: 'var(--ui-selection)',
     },
-    '.cm-panels': { backgroundColor: 'var(--ol-surface-alt)', color: 'var(--ol-text)' },
+    '.cm-panels': { backgroundColor: 'var(--ui-surface-alt)', color: 'var(--ui-text)' },
     '.cm-tooltip': {
       border: '0',
       borderRadius: '4px',
-      backgroundColor: 'var(--ol-surface)',
-      boxShadow: 'var(--ol-shadow)',
+      backgroundColor: 'var(--ui-surface)',
+      boxShadow: 'var(--ui-shadow)',
     },
     '.cm-tooltip-autocomplete ul li[aria-selected]': {
-      backgroundColor: 'var(--ol-accent-bg)',
-      color: 'var(--ol-accent-fg)',
+      backgroundColor: 'var(--ui-accent-bg)',
+      color: 'var(--ui-accent-fg)',
     },
   },
   { dark: false }
@@ -240,7 +242,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
           })
         ),
         EditorView.lineWrapping,
-        // Overleaf: ein getipptes "\" ist ein eigener Undo-Schritt, damit
+        // Ein getipptes "\" ist ein eigener Undo-Schritt, damit
         // Undo "\" und den folgenden Befehlsnamen getrennt zurücknimmt.
         EditorView.inputHandler.of((v, from, to, text) => {
           if (text === '\\') session.undoManager.stopCapturing();
@@ -351,9 +353,9 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   function setFontSettings({ fontSize, fontFamily, lineHeight }) {
     if (fontSize) {
       view.dom.style.fontSize = fontSize;
-      view.dom.style.setProperty('--ol-editor-fs', fontSize);
+      view.dom.style.setProperty('--ui-editor-fs', fontSize);
     }
-    if (lineHeight) view.dom.style.setProperty('--ol-editor-lh', lineHeight); // .cm-scroller/.cm-gutters read it
+    if (lineHeight) view.dom.style.setProperty('--ui-editor-lh', lineHeight); // .cm-scroller/.cm-gutters read it
     const scroller = view.dom.querySelector('.cm-scroller');
     if (fontFamily && scroller) scroller.style.fontFamily = fontFamily;
   }

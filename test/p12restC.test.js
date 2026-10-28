@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // P12-Rest C: SMTP im Admin, Bestätigungsmodus, "E-Mail bestätigen" (#64).
 const test = require('node:test');
 const assert = require('node:assert');

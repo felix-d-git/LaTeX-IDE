@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Issue #61 (stage 2 of #41): the project is per window. Two windows of one account work in
 // different projects at the same time; ws events follow the window's subscription.
 const test = require('node:test');

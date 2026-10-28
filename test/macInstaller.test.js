@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // installer/macos/install.command mit umgebogenem HOME und Stubs für
 // uname/curl/sudo ausführen (kein Mac nötig, nur bash).
 const test = require('node:test');

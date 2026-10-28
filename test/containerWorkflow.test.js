@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P11: a manual run (workflow_dispatch) of container-image.yml on master
 // pushed ghcr :<version> and clobbered the release's package list/pandoc
 // sources, although it builds master, not the release commit. Runs the naming

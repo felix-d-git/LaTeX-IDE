@@ -3,7 +3,7 @@ LaTeX-IDE Desktop - Lizenzhinweise zum Installer
 
 LaTeX-IDE selbst
 ---------------
-Copyright (C) 2026 felix-d-git
+Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors
 GNU Affero General Public License, nur Version 3 (AGPL-3.0-only), siehe
 LICENSE. OHNE JEDE GEWAEHRLEISTUNG. Zum Installieren und Nutzen muss die
 Lizenz nicht angenommen werden (AGPL-3.0 Abschnitt 9).

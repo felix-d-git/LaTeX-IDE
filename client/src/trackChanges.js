@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { Decoration, WidgetType, ViewPlugin } from '@codemirror/view';
 import { StateEffect } from '@codemirror/state';
 import * as Y from 'yjs';

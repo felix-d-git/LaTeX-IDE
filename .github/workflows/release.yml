@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Baut zu jedem Tag vX.Y.Z die Desktop-Pakete und haengt sie als Assets an
 # (LatexIDE-Setup.exe, LatexIDE-macOS.zip). Desktop-Apps und das Server-Update-Skript
 # holen sich daraus die neue Version.

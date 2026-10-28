@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Paket P7 (#36): a main file in a subfolder finds its PDF and its \input files,
 // log paths stay tree-relative.
 const test = require('node:test');

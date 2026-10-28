@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { selectAll, indentMore, indentLess } from '@codemirror/commands';
 import { yUndo as undo, yRedo as redo } from './collab.js';
 import { withPid } from './api.js';
@@ -36,7 +38,7 @@ export function setupMenuBar(ctx) {
   home.title = 'Alle Projekte';
   home.innerHTML =
     '<img class="home-logo" src="/logo.svg" alt="" width="32" height="32">' +
-    '<span class="home-icon"><svg class="ol-icon"><use href="#i-home"></use></svg></span>';
+    '<span class="home-icon"><svg class="ui-icon"><use href="#i-home"></use></svg></span>';
   home.addEventListener('click', () => ctx.onHome && ctx.onHome());
   bar.appendChild(home);
 

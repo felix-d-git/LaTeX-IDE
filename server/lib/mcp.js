@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // MCP server (Model Context Protocol, Streamable HTTP, stateless, JSON replies) so external
 // AI tools (Claude Desktop/Code, Cursor) can work on projects with a per-user token.
 // JSON-RPC 2.0 by hand - the handful of methods needed don't justify the SDK.

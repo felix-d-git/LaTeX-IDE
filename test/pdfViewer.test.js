@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // PDF-Viewer (#45, #46): nur ein laufender load(), alte Dokumente werden zerstört,
 // Seite/Scrollposition bleibt beim Neuladen erhalten. pdfjs-dist ist gemockt, das DOM
 // ist eine Minimal-Nachbildung (Seiten 1000 px hoch, 12 px Abstand).

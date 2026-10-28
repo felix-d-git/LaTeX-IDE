@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import * as pdfjsLib from 'pdfjs-dist';
 import { withPid } from './api.js';
 
@@ -335,7 +337,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     return currentPath;
   }
 
-  // Overleaf: Ziel-Absatz gelb hinterlegen (eine Box je SyncTeX-Treffer,
+  // Ziel-Absatz gelb hinterlegen (eine Box je SyncTeX-Treffer,
   // h/v = Grundlinie links, H = Höhe), dann ausblenden.
   function jumpToPoint(page, h, v, boxes = []) {
     const wrapper = pageWrappers.get(page);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Help page: first tab is the onboarding tour, the rest explain the areas.
 // Opens once automatically for every new browser (localStorage flag).
 import { version } from '../../package.json';
@@ -53,7 +55,7 @@ const SECTIONS = [
   ]],
   // Letzter Reiter = Help ▸ About (AGPL §0/§5: Copyright, Gewährleistungsausschluss, Lizenz, Quellcode).
   ['Über & Lizenz', [
-    `LaTeX-IDE ${version} – Copyright (C) 2026 felix-d-git.`,
+    `LaTeX-IDE ${version} – Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors.`,
     'Freie Software ohne jede Gewährleistung. Weitergabe und Änderung sind unter der GNU Affero General Public License, ausschließlich Version 3 (AGPL-3.0-only), erlaubt.',
     '[Quellcode dieser Version](/source)',
     '[Lizenzen (AGPL & Drittanbieter)](/licenses): Lizenztext und Hinweise zur enthaltenen Fremdsoftware.',

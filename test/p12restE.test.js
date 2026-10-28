@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // P12-Rest E (#64): INSTALL_KIND, Dockerfile labels, release.yml draft flow, own session store.
 const test = require('node:test');
 const assert = require('node:assert');

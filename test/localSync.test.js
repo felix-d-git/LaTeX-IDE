@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Desktop offline sync (server/lib/localSync.js) against a mock server, local side in a temp dir.
 const test = require('node:test');
 const assert = require('node:assert');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // #53: Strg+Z im Review-Modus muss den Review-Eintrag mit zurücknehmen, sonst
 // bleibt die Löschung sichtbar und "Reject" fügt den Text ein zweites Mal ein.
 const test = require('node:test');

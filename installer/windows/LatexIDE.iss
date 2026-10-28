@@ -22,7 +22,7 @@ AppPublisher=felix-d-git
 AppPublisherURL=https://github.com/felix-d-git/LaTeX-IDE
 AppSupportURL=https://github.com/felix-d-git/LaTeX-IDE
 AppUpdatesURL=https://github.com/felix-d-git/LaTeX-IDE
-AppCopyright=Copyright (C) 2026 felix-d-git - AGPL-3.0-only
+AppCopyright=Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors - AGPL-3.0-only
 ; Ordner bleibt LatexIDE (Updates bestehender Installationen, Pfade in Starter/Uninstall)
 DefaultDirName={localappdata}\Programs\LatexIDE
 DefaultGroupName={#MyAppName}

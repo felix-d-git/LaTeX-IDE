@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { api } from './api.js';
 
 function formatLastModified(ms) {
@@ -24,7 +26,7 @@ function triggerDownload(url, filename) {
 }
 
 function iconMarkup(name) {
-  return `<svg class="ol-icon"><use href="#i-${name}"></use></svg>`;
+  return `<svg class="ui-icon"><use href="#i-${name}"></use></svg>`;
 }
 
 export function setupProjectsView({ onOpenProject, currentUser }) {
@@ -450,7 +452,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     }
   }
 
-  // Mirrors Overleaf's "Copy project" modal: name field pre-filled with
+  // "Copy project" modal: name field pre-filled with
   // "<name> (Copy)", confirming navigates straight into the new project
   // instead of just refreshing the dashboard row.
   function showCopyDialogFor(name) {

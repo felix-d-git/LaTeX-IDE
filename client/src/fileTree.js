@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { openDropdownAt } from './dropdown.js';
 import { withPid } from './api.js';
 
@@ -156,7 +158,7 @@ function renderNodes(nodes, ctx, container) {
 }
 
 function iconMarkup(name) {
-  return `<svg class="ol-icon"><use href="#i-${name}"></use></svg>`;
+  return `<svg class="ui-icon"><use href="#i-${name}"></use></svg>`;
 }
 
 function fileIcon(name) {
@@ -201,7 +203,7 @@ function openNodeMenu(x, y, node, ctx, container) {
     }
   }
   if (ctx.onCreateFile) {
-    // Bei Dateien (wie Overleaf) im Elternordner anlegen.
+    // Bei Dateien im Elternordner anlegen.
     const dir = isDir ? node.path : node.path.split('/').slice(0, -1).join('/');
     items.push({ type: 'divider' });
     items.push({ label: 'New file', icon: 'note-add', onClick: () => ctx.onCreateFile(dir) });

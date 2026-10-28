@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 #Requires -Version 5.1
 <#
   Baut die Desktop-Release fuer LaTeX-IDE:
@@ -103,6 +105,7 @@ Copy-ToStaging 'package-lock.json' 'package-lock.json'
 Copy-ToStaging 'build.js' 'build.js'
 Copy-ToStaging 'LICENSE' 'LICENSE'
 Copy-ToStaging 'THIRD_PARTY_NOTICES.md' 'THIRD_PARTY_NOTICES.md'
+Copy-ToStaging 'AUTHORS' 'AUTHORS'
 Write-LicenseNotice (Join-Path 'installer' 'LICENSES-INSTALLER.txt') 'LICENSES-INSTALLER.txt'
 Write-LicenseNotice (Join-Path 'installer\windows' 'LICENSES-INSTALLER-en.txt') 'LICENSES-INSTALLER-en.txt'
 Copy-ToStaging (Join-Path 'installer\windows' 'install-texlive.ps1') 'install-texlive.ps1'
@@ -144,6 +147,9 @@ try {
     $PdfjsUnused = @('cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'build\pdf.sandbox*') |
         ForEach-Object { Join-Path $PdfjsDir $_ }
     Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+    # Eigene Lizenzen (Adobe-cmaps, Foxit/Liberation-Fonts, QuickJS) deckt THIRD_PARTY_NOTICES nicht ab.
+    $PdfjsLeft = Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue
+    if ($PdfjsLeft) { throw "pdfjs-dist-Teile ohne Lizenzhinweis im Staging: $($PdfjsLeft.FullName -join ', ')" }
 } finally {
     Pop-Location
 }

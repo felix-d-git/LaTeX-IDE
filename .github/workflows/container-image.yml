@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Baut bei jedem Release das Server-Image (docker-compose.yml, TEXLIVE=apt, mit pandoc) und
 # prueft, dass der Container startet, latexmk findet und die Lizenzdateien mitbringt.
 # Veroeffentlicht wird es unter ghcr.io/<owner>/latex-ide nur, wenn das Repo oeffentlich
@@ -6,7 +8,8 @@
 # :latest und :<version> bekommt nur ein regulaeres Release; ein manueller Start pusht
 # :<version>-<commit> und haengt seine Dateien unter diesem Namen an, ueberschreibt also nichts vom Release.
 # pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL-2.0+) mit: deren Debian-Quellpakete
-# gehen als pandoc-sources-<tag>.tar ans Release, bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
+# gehen als pandoc-sources-<tag>.tar ans Release, die Quellen aller uebrigen Debian-Pakete im Image als
+# debian-sources-<tag>.tar.partNN, beides bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
 name: Container-Image
 
 on:
@@ -51,7 +54,12 @@ jobs:
           # Link auf den Tag bzw. Commit, nicht auf master; hoechstens 512 Zeichen.
           DESC="Web-IDE fuer LaTeX-Projekte mit Live-Zusammenarbeit (AGPL-3.0-only). Enthaelt Debian-Pakete unter eigenen Lizenzen (u. a. GPL, LGPL, AGPL), Liste unter /app/DEBIAN-PACKAGES.txt. Lizenzhinweise und Quellcode-Angebot: https://github.com/$GITHUB_REPOSITORY/blob/${TAG:-$GITHUB_SHA}/docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image"
           [ ${#DESC} -le 512 ] || { echo "Beschreibung zu lang (${#DESC} Zeichen)"; exit 1; }
+          # /source zeigt auf genau den gebauten Stand: Release-Tag bzw. Commit (manueller Start, Forks).
+          if [ -n "$RELEASE_RUN" ]; then REF=$TAG; else REF=$GITHUB_SHA; fi
+          SRC="https://github.com/$GITHUB_REPOSITORY/tree/$REF"
+          echo "SOURCE_URL=$SRC" >> "$GITHUB_ENV"
           docker build --pull --no-cache --build-arg PANDOC=1 \
+            --build-arg SOURCE_URL="$SRC" \
             --build-arg IMAGE_SOURCE="https://github.com/$GITHUB_REPOSITORY" \
             --build-arg IMAGE_AUTHORS="${GITHUB_REPOSITORY%%/*}" \
             --label "org.opencontainers.image.version=$VER" \
@@ -70,6 +78,9 @@ jobs:
           docker logs ide
           [ "$code" = "401" ] || { echo "Server antwortet nicht (HTTP $code)"; exit 1; }
           docker exec ide latexmk -v
+          # AGPL §13: /source fuehrt auf den Quellcode genau dieses Images
+          loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3077/source)
+          [ "$loc" = "$SOURCE_URL" ] || { echo "/source zeigt auf '$loc' statt '$SOURCE_URL'"; exit 1; }
           # Node-Mindestversion (Sicherheitsfix 24.22.1)
           docker exec ide node -e "const [a,b,c]=process.versions.node.split('.').map(Number); console.log('node', process.version); process.exit(a>24||(a==24&&(b>22||(b==22&&c>=1)))?0:1)"
 
@@ -83,6 +94,10 @@ jobs:
             test -s /app/THIRD_PARTY_NOTICES.md || fail "THIRD_PARTY_NOTICES.md fehlt"
             grep -q "Schriftliches Angebot" /app/docs/INSTALL-DOCKER.md || fail "Quellcode-Angebot fehlt"
             for p in @napi-rs @esbuild esbuild; do test ! -e /app/node_modules/$p || fail "node_modules/$p im Image"; done
+            # Teile mit eigenen Lizenzen, die THIRD_PARTY_NOTICES nicht abdeckt (STRIPPED in scripts/licenses.js)
+            for p in cmaps standard_fonts legacy image_decoders web types build/pdf.sandbox*; do
+              ! ls -d /app/node_modules/pdfjs-dist/$p >/dev/null 2>&1 || fail "node_modules/pdfjs-dist/$p im Image"
+            done
             test ! -e /root/.npm || fail "/root/.npm im Image"
             command -v pandoc >/dev/null || fail "pandoc fehlt"
             echo "Selbstpruefung ok"
@@ -149,12 +164,55 @@ jobs:
           '
           tar -cf "pandoc-sources-$ASSET.tar" -C "$RUNNER_TEMP/src" .
           ls -lh "pandoc-sources-$ASSET.tar"
+          rm -rf "$RUNNER_TEMP/src"
+
+      # GPLv3/AGPLv3 §6(d): Quellen aller Debian-Pakete im Image selbst bereithalten, nicht nur
+      # ueber snapshot.debian.org. Mehrere GB, daher auf /mnt (zweite Platte des Runners) und in
+      # Teilen unter der Asset-Grenze von 2 GiB.
+      - name: Debian-Quellen sammeln
+        run: |
+          python3 scripts/debian-sources.py "DEBIAN-PACKAGES-$ASSET.txt" > debian-sources.txt
+          echo "::notice::$(wc -l < debian-sources.txt) Debian-Quellpakete"
+          DIR=/mnt/debian-sources
+          sudo mkdir -p "$DIR" /mnt/debian-sources-parts
+          sudo chown "$(id -u):$(id -g)" "$DIR" /mnt/debian-sources-parts
+          cp debian-sources.txt "$DIR/SOURCES.txt"
+          echo "::notice::Platz vorher: $(df -h --output=avail /mnt | tail -1) frei auf /mnt"
+          # Fehlende Quellen alle melden (Annotationen), nicht nur die erste.
+          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:bookworm bash -uo pipefail -c '
+            sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
+            apt-get update -qq || exit 1
+            apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null || exit 1
+            cd /out
+            missing=0
+            while read -r src ver; do
+              apt-get source -qq --download-only "$src=$ver" </dev/null >/dev/null 2>&1 \
+                || debsnap -f -d . "$src" "$ver" </dev/null >/dev/null 2>&1 \
+                || { echo "::error::Quelle nicht gefunden: $src $ver"; missing=$((missing+1)); }
+            done < SOURCES.txt
+            chown -R "$OWNER" /out
+            n=$(ls *.dsc | wc -l)
+            echo "::notice::$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete, $missing fehlen"
+            [ "$missing" -eq 0 ] && [ "$n" -ge "$(wc -l < SOURCES.txt)" ]
+          '
+          echo "::notice::Quellen: $(du -sh "$DIR" | cut -f1), frei: $(df -h --output=avail /mnt | tail -1)"
+          set +e
+          tar -cf - -C "$DIR" . 2>"$RUNNER_TEMP/tar.err" \
+            | split -b 1900M -d -a 2 - "/mnt/debian-sources-parts/debian-sources-$ASSET.tar.part" 2>"$RUNNER_TEMP/split.err"
+          rc=("${PIPESTATUS[@]}")
+          set -e
+          if [ "${rc[0]}" != 0 ] || [ "${rc[1]}" != 0 ]; then
+            echo "::error::tar=${rc[0]} $(tail -c 400 "$RUNNER_TEMP/tar.err" | tr '\n' ' ') split=${rc[1]} $(tail -c 400 "$RUNNER_TEMP/split.err" | tr '\n' ' ')"
+            exit 1
+          fi
+          sudo rm -rf "$DIR"   # /mnt gehoert root
+          echo "::notice::$(ls /mnt/debian-sources-parts | wc -l) Teile, $(du -sh /mnt/debian-sources-parts | cut -f1)"
 
       - name: Paketliste und pandoc-Quellen an das Release haengen
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$ASSET.txt" "pandoc-sources-$ASSET.tar" --clobber
+        run: gh release upload "$TAG" "DEBIAN-PACKAGES-$ASSET.txt" "pandoc-sources-$ASSET.tar" /mnt/debian-sources-parts/debian-sources-"$ASSET".tar.part* --clobber
 
       - name: Nach ghcr.io pushen
         if: env.PUBLISH == 'true'

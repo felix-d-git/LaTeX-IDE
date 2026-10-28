@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { api } from './api.js';
 
 export function setupSyncTex({ editorMgr, pdfViewer, getActivePath, onJumpToCode }) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { api } from './api.js';
 
 import { referencePrefs } from './latexCompletions.js';
@@ -30,7 +32,7 @@ export function setupNewFileDialog({ onCreated, onUpload }) {
     input.value = 'name.tex';
     label.appendChild(input);
     wrap.appendChild(label);
-    // Mirrors Overleaf: only "name" is pre-selected so typing immediately replaces it, ".tex" stays untouched.
+    // Only "name" is pre-selected so typing immediately replaces it, ".tex" stays untouched.
     setTimeout(() => {
       input.focus();
       input.setSelectionRange(0, input.value.lastIndexOf('.'));

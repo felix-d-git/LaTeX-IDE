@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors -->
 <html lang="de">
 <head>
   <meta charset="utf-8" />
@@ -81,24 +83,24 @@
       <div id="project-selector">
         <button id="active-project-label" aria-expanded="false" aria-haspopup="true">
           <span class="project-name">Kein Projekt geöffnet</span>
-          <svg class="chevron ol-icon"><use href="#i-chevron-down"></use></svg>
+          <svg class="chevron ui-icon"><use href="#i-chevron-down"></use></svg>
         </button>
       </div>
 
       <div id="topbar-actions">
         <div class="toolbar-button-container">
           <button id="btn-history" aria-label="Verlauf anzeigen" title="Verlauf anzeigen">
-            <svg class="ol-icon"><use href="#i-history"></use></svg>
+            <svg class="ui-icon"><use href="#i-history"></use></svg>
           </button>
         </div>
         <div class="toolbar-button-container">
           <button id="btn-layout" aria-label="Layout-Optionen" aria-expanded="false" title="Layout-Optionen">
-            <svg class="ol-icon"><use href="#i-layout"></use></svg>
+            <svg class="ui-icon"><use href="#i-layout"></use></svg>
           </button>
         </div>
         <div class="toolbar-button-container">
           <button id="btn-share" class="primary" title="Projekt freigeben">
-            <span class="button-content"><svg class="ol-icon"><use href="#i-share"></use></svg>Share</span>
+            <span class="button-content"><svg class="ui-icon"><use href="#i-share"></use></svg>Share</span>
           </button>
         </div>
       </div>
@@ -109,27 +111,27 @@
       <nav id="rail">
         <div id="rail-tabs">
           <button id="btn-rail-files" class="rail-tab is-active" data-pane="pane-files" data-tip="Dateibaum">
-            <svg class="ol-icon"><use href="#i-file"></use></svg>
+            <svg class="ui-icon"><use href="#i-file"></use></svg>
           </button>
           <button id="btn-search" class="rail-tab" data-pane="search-panel" data-tip="Projektsuche">
-            <svg class="ol-icon"><use href="#i-search"></use></svg>
+            <svg class="ui-icon"><use href="#i-search"></use></svg>
           </button>
           <button id="btn-review" class="rail-tab" data-pane="review-panel" data-tip="Review">
-            <svg class="ol-icon"><use href="#i-review"></use></svg>
+            <svg class="ui-icon"><use href="#i-review"></use></svg>
           </button>
           <button id="btn-comments" class="rail-tab" data-pane="comments-panel" data-tip="Kommentare">
-            <svg class="ol-icon"><use href="#i-comment"></use></svg>
+            <svg class="ui-icon"><use href="#i-comment"></use></svg>
           </button>
         </div>
         <div id="rail-footer">
           <button id="btn-help" class="rail-tab" data-tip="Hilfe & Einführung">
-            <svg class="ol-icon"><use href="#i-help"></use></svg>
+            <svg class="ui-icon"><use href="#i-help"></use></svg>
           </button>
           <button id="btn-settings" class="rail-tab" data-tip="Einstellungen">
-            <svg class="ol-icon"><use href="#i-settings"></use></svg>
+            <svg class="ui-icon"><use href="#i-settings"></use></svg>
           </button>
           <button id="btn-profile" class="rail-tab" data-tip="Profil">
-            <svg class="ol-icon"><use href="#i-user"></use></svg>
+            <svg class="ui-icon"><use href="#i-user"></use></svg>
           </button>
         </div>
       </nav>
@@ -140,21 +142,21 @@
         <div id="pane-files" class="rail-pane">
           <div id="file-tree-header">
             <button class="file-tree-expand-collapse" aria-label="Dateibaum ein-/ausklappen">
-              <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+              <svg class="ui-icon"><use href="#i-chevron-down"></use></svg>
               <h4 class="title">File tree</h4>
             </button>
             <div id="file-tree-actions">
               <button id="btn-tree-new-file" title="Neue Datei">
-                <svg class="ol-icon"><use href="#i-note-add"></use></svg>
+                <svg class="ui-icon"><use href="#i-note-add"></use></svg>
               </button>
               <button id="btn-tree-new-folder" title="Neuer Ordner">
-                <svg class="ol-icon"><use href="#i-folder-add"></use></svg>
+                <svg class="ui-icon"><use href="#i-folder-add"></use></svg>
               </button>
               <button id="btn-tree-upload" title="Datei hochladen">
-                <svg class="ol-icon"><use href="#i-upload"></use></svg>
+                <svg class="ui-icon"><use href="#i-upload"></use></svg>
               </button>
               <button id="btn-tree-close" title="Panel schließen">
-                <svg class="ol-icon"><use href="#i-close"></use></svg>
+                <svg class="ui-icon"><use href="#i-close"></use></svg>
               </button>
             </div>
           </div>
@@ -163,7 +165,7 @@
           <div id="file-outline">
             <div class="outline-header">
               <button class="outline-toggle" aria-label="Gliederung ein-/ausklappen">
-                <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+                <svg class="ui-icon"><use href="#i-chevron-down"></use></svg>
                 <span>File outline</span>
               </button>
             </div>
@@ -175,7 +177,7 @@
           <div class="rail-panel-header">
             <strong>Projektsuche</strong>
             <button id="btn-close-search" class="panel-close" title="Schließen">
-              <svg class="ol-icon"><use href="#i-close"></use></svg>
+              <svg class="ui-icon"><use href="#i-close"></use></svg>
             </button>
           </div>
           <!-- Reine Suche über alle Projektdateien - Ersetzen passiert
@@ -198,7 +200,7 @@
           <div class="rail-panel-header">
             <strong>Review <span id="review-file-label"></span></strong>
             <button id="btn-close-review" class="panel-close" title="Schließen">
-              <svg class="ol-icon"><use href="#i-close"></use></svg>
+              <svg class="ui-icon"><use href="#i-close"></use></svg>
             </button>
           </div>
           <div id="review-panel-body">
@@ -215,7 +217,7 @@
           <div class="rail-panel-header">
             <strong>Kommentare <span id="comments-file-label"></span></strong>
             <button id="btn-close-comments" class="panel-close" title="Schließen">
-              <svg class="ol-icon"><use href="#i-close"></use></svg>
+              <svg class="ui-icon"><use href="#i-close"></use></svg>
             </button>
           </div>
           <div id="comments-panel-body">
@@ -236,9 +238,9 @@
 
           <!-- R5: Formatierungs-Toolbar über dem Text, 32px, sticky -->
           <div id="editor-toolbar">
-            <div class="ol-toolbar-left"></div>
-            <div class="ol-toolbar-mode"></div>
-            <div class="ol-toolbar-right"></div>
+            <div class="ui-toolbar-left"></div>
+            <div class="ui-toolbar-mode"></div>
+            <div class="ui-toolbar-right"></div>
           </div>
 
           <div id="editor-breadcrumbs" class="hidden"></div>
@@ -255,33 +257,33 @@
               <div class="compile-button-group">
                 <button id="btn-compile">Kompilieren</button>
                 <button id="btn-compile-options" aria-label="Kompilier-Optionen" aria-expanded="false">
-                  <svg class="ol-icon"><use href="#i-chevron-down"></use></svg>
+                  <svg class="ui-icon"><use href="#i-chevron-down"></use></svg>
                 </button>
               </div>
               <button id="btn-errors" class="icon-btn" title="Logs und Fehler anzeigen">
-                <svg class="ol-icon"><use href="#i-bug"></use></svg>
+                <svg class="ui-icon"><use href="#i-bug"></use></svg>
                 <span id="error-badge" class="badge hidden">0</span>
               </button>
               <button id="btn-download-pdf" title="Kompiliertes PDF herunterladen">
-                <svg class="ol-icon"><use href="#i-download"></use></svg>
+                <svg class="ui-icon"><use href="#i-download"></use></svg>
               </button>
               <button id="btn-close-errors" class="back-to-pdf hidden">Back to PDF</button>
             </div>
             <div class="toolbar-pdf-right">
               <div id="toolbar-pdf-controls">
                 <button id="pdf-prev" class="icon-btn" title="Vorherige Seite">
-                  <svg class="ol-icon"><use href="#i-chevron-left"></use></svg>
+                  <svg class="ui-icon"><use href="#i-chevron-left"></use></svg>
                 </button>
                 <button id="pdf-next" class="icon-btn" title="Nächste Seite">
-                  <svg class="ol-icon"><use href="#i-chevron-right"></use></svg>
+                  <svg class="ui-icon"><use href="#i-chevron-right"></use></svg>
                 </button>
                 <input id="pdf-page-input" class="page-input" value="1" aria-label="Seite" />
                 <span id="pdf-page-label">–/–</span>
                 <button id="pdf-zoom-out" class="icon-btn" title="Verkleinern">
-                  <svg class="ol-icon"><use href="#i-zoom-out"></use></svg>
+                  <svg class="ui-icon"><use href="#i-zoom-out"></use></svg>
                 </button>
                 <button id="pdf-zoom-in" class="icon-btn" title="Vergrößern">
-                  <svg class="ol-icon"><use href="#i-zoom-in"></use></svg>
+                  <svg class="ui-icon"><use href="#i-zoom-in"></use></svg>
                 </button>
                 <button id="pdf-zoom-level" class="zoom-select" aria-expanded="false" title="Zoomstufe">100%</button>
               </div>
@@ -293,10 +295,10 @@
           <!-- R1: SyncTeX als schwebende Pille auf dem Editor/PDF-Resizer -->
           <div id="sync-bar">
             <button id="btn-sync-to-pdf" title="Cursor-Position im PDF anzeigen (Code → PDF)">
-              <svg class="ol-icon"><use href="#i-sync-right"></use></svg>
+              <svg class="ui-icon"><use href="#i-sync-right"></use></svg>
             </button>
             <button id="btn-sync-to-code" title="Zuletzt im PDF angeklickte Stelle im Code anzeigen (PDF → Code)">
-              <svg class="ol-icon"><use href="#i-sync-left"></use></svg>
+              <svg class="ui-icon"><use href="#i-sync-left"></use></svg>
             </button>
           </div>
 
@@ -330,10 +332,10 @@
         <img class="dash-logo" src="/logo.svg" alt="" width="28" height="28">
         <span class="dash-nav-title">LaTeX-IDE</span>
         <div class="dash-nav-actions">
-          <button id="btn-dash-help" title="Hilfe & Einführung" aria-label="Hilfe & Einführung"><svg class="ol-icon"><use href="#i-help"></use></svg></button>
-          <button id="btn-dash-settings" title="Einstellungen" aria-label="Einstellungen"><svg class="ol-icon"><use href="#i-settings"></use></svg></button>
-          <button id="btn-dash-admin" class="hidden" title="Server-Verwaltung" aria-label="Server-Verwaltung"><svg class="ol-icon"><use href="#i-admin"></use></svg></button>
-          <button id="btn-dash-profile" title="Profil" aria-label="Profil"><svg class="ol-icon"><use href="#i-user"></use></svg></button>
+          <button id="btn-dash-help" title="Hilfe & Einführung" aria-label="Hilfe & Einführung"><svg class="ui-icon"><use href="#i-help"></use></svg></button>
+          <button id="btn-dash-settings" title="Einstellungen" aria-label="Einstellungen"><svg class="ui-icon"><use href="#i-settings"></use></svg></button>
+          <button id="btn-dash-admin" class="hidden" title="Server-Verwaltung" aria-label="Server-Verwaltung"><svg class="ui-icon"><use href="#i-admin"></use></svg></button>
+          <button id="btn-dash-profile" title="Profil" aria-label="Profil"><svg class="ui-icon"><use href="#i-user"></use></svg></button>
         </div>
       </nav>
       <div class="dash-body">
@@ -363,7 +365,7 @@
           <h1>Alle Projekte</h1>
           <div class="dash-toolbar">
             <div class="dash-search-wrap">
-              <svg class="ol-icon dash-search-icon"><use href="#i-search"></use></svg>
+              <svg class="ui-icon dash-search-icon"><use href="#i-search"></use></svg>
               <input id="projects-search" class="dash-search" placeholder="In Projekten suchen…" />
             </div>
             <div class="new-project-wrap">
@@ -416,7 +418,7 @@
         <div class="dialog-header">
           <h3>Kommentar hinzufügen</h3>
           <button id="btn-cancel-comment" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -436,7 +438,7 @@
         <div class="dialog-header">
           <h3>Tastenkürzel</h3>
           <button id="btn-close-hotkeys" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -453,14 +455,14 @@
       </div>
     </div>
 
-    <!-- Help > Keyboard shortcuts: read-only Referenz wie Overleaf -->
+    <!-- Help > Keyboard shortcuts: read-only Referenz -->
     <div id="shortcuts-dialog" class="hidden">
       <div class="modal-backdrop"></div>
       <div class="dialog-box modal-lg">
         <div class="dialog-header">
           <h3>Hotkeys</h3>
           <button id="btn-close-shortcuts" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad"><div id="shortcuts-grid"></div></div>
@@ -473,7 +475,7 @@
         <div class="dialog-header">
           <h3>Projekt öffnen</h3>
           <button id="btn-cancel-open" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -493,7 +495,7 @@
         <div class="dialog-header">
           <h3>Freigabe</h3>
           <button id="btn-close-share" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -520,7 +522,7 @@
         <div class="dialog-header">
           <h3>Settings</h3>
           <button id="btn-close-settings" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body">
@@ -544,7 +546,7 @@
         <div class="dialog-header">
           <h3>Server-Verwaltung</h3>
           <button id="btn-close-admin" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body">
@@ -564,7 +566,7 @@
         <div class="dialog-header">
           <h3>Profil</h3>
           <button id="btn-close-profile" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad" id="profile-body"></div>
@@ -577,7 +579,7 @@
         <div class="dialog-header">
           <h3>Hilfe &amp; Einführung</h3>
           <button id="btn-close-help" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body">
@@ -613,7 +615,7 @@
         <div class="dialog-header">
           <h3>Add files</h3>
           <button id="btn-close-new-file" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body">
@@ -635,7 +637,7 @@
         <div class="dialog-header">
           <h3>New folder</h3>
           <button id="btn-close-new-folder" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -654,7 +656,7 @@
         <div class="dialog-header">
           <h3>Copy project</h3>
           <button id="btn-close-copy-project" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -673,7 +675,7 @@
         <div class="dialog-header">
           <h3>Word count</h3>
           <button id="btn-close-word-count" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">
@@ -688,7 +690,7 @@
         <div class="dialog-header">
           <h3>Datei existiert bereits</h3>
           <button id="btn-upload-conflict-close" class="dialog-close" title="Schließen">
-            <svg class="ol-icon"><use href="#i-close"></use></svg>
+            <svg class="ui-icon"><use href="#i-close"></use></svg>
           </button>
         </div>
         <div class="dialog-body-pad">

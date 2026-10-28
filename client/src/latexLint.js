@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Live-Syntaxprüfung beim Tippen (ohne Kompilieren): Klammern {} und \begin/\end.
 // ponytail: zeichenweiser Scan, kennt nur Kommentare, \verb und verbatim-artige Umgebungen;
 // \iffalse-Blöcke, catcode-Tricks oder Makros mit unbalancierten Argumenten melden ggf. falsch.

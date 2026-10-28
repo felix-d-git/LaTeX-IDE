@@ -36,6 +36,11 @@ LABEL org.opencontainers.image.title="latex-ide" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.source="${IMAGE_SOURCE}"
 
+# /source of the image (AGPL §13/§6): container-image.yml passes the tag or commit it built.
+# Empty = default in server/lib/legal.js (tag of the package.json version); .env still wins.
+ARG SOURCE_URL=""
+ENV SOURCE_URL=${SOURCE_URL}
+
 ARG TEXLIVE=apt
 ARG PANDOC=1
 # latexmk and several TeX Live scripts are Perl.
@@ -51,7 +56,7 @@ WORKDIR /app
 COPY --from=build /app /app
 # DEBIAN-PACKAGES.txt: exact versions for the source offer (docs/INSTALL-DOCKER.md),
 # written after COPY so nothing from the build context can replace it.
-RUN dpkg-query -W -f='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Built-Using}\t${Static-Built-Using}\n' > /app/DEBIAN-PACKAGES.txt \
+RUN dpkg-query -W -f='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Built-Using}\t${Static-Built-Using}\t${X-Cargo-Built-Using}\n' > /app/DEBIAN-PACKAGES.txt \
     && mkdir -p /app/data && chown node:node /app/data
 
 # A mounted TeX Live wins over the Debian one.

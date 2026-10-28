@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Lizenz- und Quellcode-Hinweise (AGPL-3.0-only §5, §13) für Server, Desktop-App und Bundle-Banner.
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const { version: VERSION } = require('../../package.json');
-const COPYRIGHT = 'Copyright (C) 2026 felix-d-git';
+const COPYRIGHT = 'Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors';
 const UPDATE_REPO = process.env.UPDATE_REPO || 'felix-d-git/LaTeX-IDE';
 // Wer veränderten Code betreibt oder weitergibt, muss SOURCE_URL auf den eigenen,
 // vollständigen Quellcode dieses Stands setzen (AGPL §13 bzw. §6).

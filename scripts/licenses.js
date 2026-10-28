@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Generates THIRD_PARTY_NOTICES.md from production dependencies listed in
 // package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only.
 //
@@ -136,10 +138,7 @@ const MANUAL_LICENSES = {
   'cookie-signature@1.0.7': COOKIE_SIGNATURE_1_0,
   // https://github.com/komagata/eastasianwidth/blob/master/MIT-LICENSE.txt
   'eastasianwidth@0.2.0': `Copyright komagata
-
-${MIT_BODY}`,
-  // README.md; https://github.com/jensyt/imurmurhash-js/blob/master/LICENSE
-  'imurmurhash@0.1.4': `Copyright (c) 2013 Gary Court, Jens Taylor
+Copyright (c) 2011 takenspc
 
 ${MIT_BODY}`,
   // README.md; https://github.com/juliangruber/isarray/blob/master/LICENSE
@@ -337,6 +336,16 @@ limitations under the License.`,
   },
 };
 
+// Parts of packages that Dockerfile and installer/build-release.ps1 delete before shipping,
+// so their own licenses (pdfjs-dist: Adobe cmaps, Foxit/Liberation fonts, QuickJS in
+// pdf.sandbox*) are not reproduced here. test/licenses.test.js checks that both delete
+// lists match this one, container-image.yml checks the image.
+const STRIPPED = {
+  'pdfjs-dist': ['cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'build/pdf.sandbox*'],
+};
+
+const NESTED_LICENSE_RE = /^(licen[cs]e|copying|notice)/i;
+
 const LICENSE_FILE_NAMES = [
   'LICENSE', 'LICENSE.md', 'LICENSE.txt',
   'LICENCE', 'LICENCE.md', 'LICENCE.txt',
@@ -421,6 +430,28 @@ function licstartCopyright(file) {
   return line ? line[1] : null;
 }
 
+// License/notice files below the package root (nested node_modules excluded), minus STRIPPED parts.
+function nestedLicenseFiles(pkgDir, stripped) {
+  const gone = stripped.map((g) => new RegExp('^' + g.replace(/[.]/g, '\\.').replace(/\*/g, '[^/]*') + '(/|$)'));
+  const hits = [];
+  const walk = (dir, rel) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.name === 'node_modules' || gone.some((re) => re.test(r))) continue;
+      if (e.isDirectory()) walk(path.join(dir, e.name), r);
+      else if (rel && NESTED_LICENSE_RE.test(e.name)) hits.push(r);
+    }
+  };
+  walk(pkgDir, '');
+  return hits;
+}
+
+// A line that starts with "Copyright" and is not the Apache appendix template.
+function hasCopyrightLine(text) {
+  return text.split('\n').some((l) => !/\[yyyy\]/.test(l)
+    && /^\s*(copyright\s+(?!(owner|notice|holders?|license|and|statement|to|of|the|in|or|is)\b)\S|\(c\)\s+\d|©)/i.test(l));
+}
+
 function compareSemver(a, b) {
   const re = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/;
   const ma = re.exec(a);
@@ -448,6 +479,7 @@ function compareSemver(a, b) {
 function collect(root, errors) {
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
   const byId = new Map();
+  const usedManual = new Set();
   for (const [pkgPath, meta] of Object.entries(lock.packages || {})) {
     if (pkgPath === '') continue; // the project itself
     if (!pkgPath.includes('node_modules/')) continue;
@@ -473,18 +505,35 @@ function collect(root, errors) {
     }
     if (byId.has(id)) continue; // a package can appear at multiple lockfile paths
 
-    const license = licenseToString(pkgJson.license) || 'UNKNOWN';
+    // "licenses" is the deprecated array form of the field
+    const license = licenseToString(pkgJson.license || pkgJson.licenses) || 'UNKNOWN';
+    if (meta.license && meta.license !== license) {
+      errors.push(`${id}: package-lock.json says ${meta.license}, package.json says ${license}`);
+    }
     const entries = listDir(absDir);
     const licenseFile = findLicenseFile(absDir, entries);
-    const licenseText = licenseFile
-      ? readText(licenseFile)
-      : (license === 'MIT' && MANUAL_LICENSES[id]) || null;
+    const manual = !licenseFile && license === 'MIT' && MANUAL_LICENSES[id];
+    if (manual) usedManual.add(id);
+    const licenseText = licenseFile ? readText(licenseFile) : manual || null;
     if (!licenseText) errors.push(`${id}: no license text found (add it to MANUAL_LICENSES)`);
+    // Some license files keep the template line "Copyright [yyyy] [name of copyright owner]"
+    // (Apache-2.0) or have no copyright line at all (BlueOak-1.0.0): name the package author.
+    const author = typeof pkgJson.author === 'string' ? pkgJson.author.replace(/\s*[<(].*$/, '') : pkgJson.author && pkgJson.author.name;
+    const authorLine = licenseText && !hasCopyrightLine(licenseText) && author
+      ? `Author per package.json (the license text names no copyright holder): ${author}`
+      : null;
     const noticeFiles = entries
       .filter((e) => NOTICE_FILE_RE.test(e))
       .map((e) => ({ title: e, text: readText(path.join(absDir, e)) }));
 
-    byId.set(id, { name, version: meta.version, license, licenseText, noticeFiles, absDir });
+    for (const rel of nestedLicenseFiles(absDir, STRIPPED[name] || [])) {
+      errors.push(`${id}: ${rel} carries its own license; cover it in EMBEDDED_NOTICES/EXTRA_NOTICES or add the folder to STRIPPED`);
+    }
+
+    byId.set(id, { name, version: meta.version, license, licenseText, authorLine, noticeFiles, absDir });
+  }
+  for (const id of Object.keys(MANUAL_LICENSES)) {
+    if (!usedManual.has(id)) errors.push(`MANUAL_LICENSES['${id}']: not used any more, remove the entry`);
   }
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'en') || compareSemver(a.version, b.version));
 }
@@ -523,6 +572,10 @@ function render(packages) {
   lines.push(`Scope: the npm packages the app ships (${packages.length} packages), i.e. the production`);
   lines.push('dependencies from package-lock.json without dev and optional packages, as left by');
   lines.push('`npm prune --omit=dev --omit=optional`. This includes the code bundled into client/dist.');
+  for (const [name, parts] of Object.entries(STRIPPED)) {
+    lines.push(`Not shipped and therefore not covered (deleted by the Docker and installer builds): from ${name}`);
+    lines.push(`${parts.map((x) => `\`${x}\``).join(', ')}.`);
+  }
   lines.push('Generated by scripts/licenses.js, do not edit by hand.');
   lines.push('');
   lines.push('Not covered here:');
@@ -530,7 +583,8 @@ function render(packages) {
   lines.push('  (in the repository: installer/LICENSES-INSTALLER.txt). The Windows package ships');
   lines.push('  Node.js with its license in `node\\LICENSE`.');
   lines.push('- Docker image: Debian packages, listed with exact versions in /app/DEBIAN-PACKAGES.txt');
-  lines.push('  inside the image (see docs/INSTALL-DOCKER.md).');
+  lines.push('  inside the image (see docs/INSTALL-DOCKER.md), and Node.js with npm from the official');
+  lines.push('  node image, license in /usr/local/LICENSE.');
   lines.push('');
   lines.push('| Package | Version | License |');
   lines.push('|---|---|---|');
@@ -546,7 +600,8 @@ function render(packages) {
     lines.push('');
     lines.push(`License: ${p.displayLicense || p.license}`);
     lines.push('');
-    block(p.copyrightLine ? `${p.copyrightLine}\n\n${p.licenseText.replace(/^\n+/, '')}` : p.licenseText);
+    const lead = p.copyrightLine || p.authorLine;
+    block(lead ? `${lead}\n\n${p.licenseText.replace(/^\n+/, '')}` : p.licenseText);
     for (const n of p.noticeFiles.concat(p.extraNotices || [])) {
       lines.push(`### ${n.title}`);
       lines.push('');
@@ -589,4 +644,6 @@ function main() {
   console.log(`Packages: ${packages.length}`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { STRIPPED };

@@ -3,7 +3,7 @@ LaTeX-IDE Desktop - License notes for the Windows setup
 
 LaTeX-IDE
 --------
-Copyright (C) 2026 felix-d-git
+Copyright (C) 2026 felix-d-git and LaTeX-IDE contributors
 GNU Affero General Public License, version 3 only (AGPL-3.0-only), see
 LICENSE. WITHOUT ANY WARRANTY. You do not have to accept the license to
 install or run LaTeX-IDE (AGPL-3.0 section 9).

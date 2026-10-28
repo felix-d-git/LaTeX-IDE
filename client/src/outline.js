@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // R4: „File outline" unter dem Dateibaum — Gliederung der aktiven .tex-Datei
 // aus den Sectioning-Befehlen, 28px-Zeilen, 24px Einzug je Ebene, genau eine
 // Zeile trägt die Hervorhebung (die Sektion an der Cursorposition).

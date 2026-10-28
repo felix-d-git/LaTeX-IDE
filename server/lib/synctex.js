@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const { execFile } = require('child_process');
 
 // Parses the "Key:value" line blocks the synctex CLI prints between
@@ -27,7 +29,7 @@ function forward(pdfAbs, texAbs, line, cwd) {
         if (!parsed.Page) return reject(new Error('Keine passende PDF-Position gefunden.'));
         const page = Number(parsed.Page);
         // Alle Treffer-Boxen der ersten Seite (je Textlauf eine), damit der
-        // Client wie Overleaf den ganzen Absatz hinterlegen kann.
+        // Client den ganzen Absatz hinterlegen kann.
         const boxes = stdout
           .split(/Output:/)
           .slice(1)

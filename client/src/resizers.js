@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // R1: drei Resizer — 7px zwischen Sidebar und Editor/PDF-Gruppe, 7px zwischen
 // Editor und PDF, 6px zwischen Dateibaum und Gliederung. Die Spalten teilen
 // sich den Platz über flex-grow (flex-basis 0), nicht über feste Breiten;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 function snippetOf(text, max = 80) {
   const clean = text.replace(/\s+/g, ' ').trim();
   return clean.length > max ? clean.slice(0, max) + '…' : clean;

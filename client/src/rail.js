@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // R4/R7: Die Rail schaltet den Inhalt der Sidebar-Spalte inline um — es gibt
 // keine schwebenden Panels mehr. Die Panel-Module (search/review/comments)
 // blenden sich weiterhin selbst über .hidden ein/aus; die Rail beobachtet das
