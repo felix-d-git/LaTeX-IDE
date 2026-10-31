@@ -132,7 +132,7 @@ Not covered here:
 | isexe | 2.0.0 | ISC |
 | isomorphic.js | 0.2.5 | MIT |
 | jackspeak | 3.4.3 | BlueOak-1.0.0 |
-| katex | 0.19.0 | MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem) |
+| katex | 0.19.1 | MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem) |
 | lazystream | 1.0.1 | MIT |
 | lib0 | 0.2.119 | MIT |
 | lodash | 4.18.1 | MIT |
@@ -4749,7 +4749,7 @@ will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim._**
 ```
 
-## katex@0.19.0
+## katex@0.19.1
 
 License: MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem)
 
