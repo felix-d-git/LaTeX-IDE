@@ -48,7 +48,7 @@ jobs:
           tlpdbopt_file_assocs 0
           "@ -replace '(?m)^\s+', '' | Set-Content tl.profile -Encoding ascii
           & "$Dir/install-tl-windows.bat" -no-gui -profile tl.profile -repository $Repo
-          & "$Tex/bin/windows/tlmgr.bat" install latexmk
+          & "$Tex/bin/windows/tlmgr.bat" install latexmk synctex
           "$Tex/bin/windows" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Test
