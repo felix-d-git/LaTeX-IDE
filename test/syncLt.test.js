@@ -61,7 +61,9 @@ test('toProjectPath: echter Pfad hinter Symlink, ./-Marke, fremde Dateien', () =
   }
 });
 
-test('inverseInProject: Doppelklick im PDF findet die Zeile auch über einen Symlink', { skip: !hasTex && 'latexmk/synctex fehlt' }, async () => {
+const skipTex = !hasTex && !process.env.REQUIRE_TEX && 'latexmk/synctex fehlt';
+
+test('inverseInProject: Doppelklick im PDF findet die Zeile auch über einen Symlink', { skip: skipTex }, async () => {
   const real = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-sync-'));
   const link = real + '-link';
   fs.symlinkSync(real, link, 'junction');
@@ -78,5 +80,38 @@ test('inverseInProject: Doppelklick im PDF findet die Zeile auch über einen Sym
   } finally {
     fs.rmSync(link, { force: true });
     fs.rmSync(real, { recursive: true, force: true });
+  }
+});
+
+test('inverseInProject: Umlaut und Leerzeichen im Projektpfad', { skip: skipTex }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lide sync ä-'));
+  try {
+    fs.mkdirSync(path.join(root, 'kap'));
+    fs.writeFileSync(path.join(root, 'main.tex'), '\\documentclass{article}\n\\begin{document}\nErster Absatz.\n\n\\input{kap/eins}\n\\end{document}\n');
+    fs.writeFileSync(path.join(root, 'kap', 'eins.tex'), '\\vspace*{5cm}\nKapiteltext.\n');
+    const r = await compile(root, 'main.tex', {}, '.latex-ide-out', 120000);
+    assert.ok(r.pdfPath, r.log.slice(-2000));
+    const pdf = path.join(root, r.pdfPath);
+    assert.deepStrictEqual(await inverseInProject(root, pdf, 1, 150, 134), { file: 'main.tex', line: 3 });
+    assert.strictEqual((await inverseInProject(root, pdf, 1, 150, 134 + 5 * 28.45 + 12)).file, 'kap/eins.tex');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('toProjectPath: Windows-Ausgabe von synctex (Backslashes, Laufwerk klein)', { skip: process.platform !== 'win32' && 'nur Windows' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lide sync ä-'));
+  fs.mkdirSync(path.join(root, 'kap'));
+  fs.writeFileSync(path.join(root, 'kap', 'ä b.tex'), '');
+  try {
+    const rp = fs.realpathSync(root);
+    const lower = rp[0].toLowerCase() + rp.slice(1);
+    assert.strictEqual(toProjectPath(root, `${rp}\\.\\kap\\ä b.tex`), 'kap/ä b.tex');
+    assert.strictEqual(toProjectPath(root, `${lower.split('\\').join('/')}/./kap/ä b.tex`), 'kap/ä b.tex');
+    assert.strictEqual(toProjectPath(root, `${lower}\\kap\\ä b.tex`), 'kap/ä b.tex');
+    assert.strictEqual(toProjectPath(root, 'C:/texlive/2025/texmf-dist/tex/latex/base/article.cls'), null);
+    assert.strictEqual(toProjectPath(root, 'Z:\\anderes\\main.tex'), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

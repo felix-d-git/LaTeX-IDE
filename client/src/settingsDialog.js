@@ -262,7 +262,7 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
     });
     testRow.append(testBtn, testOut);
     wrap.appendChild(testRow);
-    wrap.appendChild(note("Lokal starten: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' und hier http://localhost:8081 eintragen. Die Desktop-App spricht ihn über ihren Proxy an; im Web fragt der Browser direkt (--allow-origin nötig; Safari blockiert HTTPS→http, Chrome fragt ggf. nach Zugriff auf lokale Geräte)."));
+    wrap.appendChild(note("Lokal starten: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin und hier http://localhost:8081 eintragen. Die Desktop-App spricht ihn über ihren Proxy an; im Web fragt der Browser direkt (--allow-origin nötig; Safari blockiert HTTPS→http, Chrome fragt ggf. nach Zugriff auf lokale Geräte)."));
     const dict = document.createElement('textarea');
     dict.rows = 6;
     dict.value = (spelling.dictionary || []).join('\n');

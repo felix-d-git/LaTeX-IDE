@@ -46,7 +46,7 @@ const SECTIONS = [
   ]],
   ['Grammatik (LanguageTool)', [
     'Einstellungen → Rechtschreibung → „Grammatik & Rechtschreibung“ einschalten. Der Server kann einen LanguageTool bereitstellen (LANGUAGETOOL_URL).',
-    "Eigener lokaler Server: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' starten und http://localhost:8081 unter „LanguageTool-URL (eigener Rechner)“ eintragen.",
+    "Eigener lokaler Server: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin starten und http://localhost:8081 unter „LanguageTool-URL (eigener Rechner)“ eintragen.",
     'Desktop-App: funktioniert direkt (Proxy). Im Web fragt der Browser den lokalen Server selbst, darum ist --allow-origin nötig; Safari blockiert das, Chrome fragt ggf. nach Zugriff auf lokale Geräte.',
     'Ist der Server nicht erreichbar, erscheint ein einmaliger Hinweis; nach 30 Sekunden wird erneut versucht.',
   ]],
