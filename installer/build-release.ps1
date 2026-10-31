@@ -9,7 +9,7 @@
       Vorlage mit Quell-Link .../tree/v<version>) und dort npm ci /
       node build.js / npm prune --omit=dev --omit=optional ausfuehren,
       danach ungenutzte pdfjs-dist-Teile loeschen.
-   2. Offizielles Node 24 LTS win-x64 ZIP laden (SHA256 gegen SHASUMS256.txt
+   2. Offizielles Node 26 win-x64 ZIP laden (SHA256 gegen SHASUMS256.txt
       pruefen) und nach staging\node entpacken (inkl. LICENSE, sonst Abbruch).
    3. Windows-Installer per Inno Setup 6/7 (ISCC.exe) bauen, falls vorhanden.
    4. Zusaetzlich installer\out\LatexIDE-macOS.zip erzeugen (Staging ohne
@@ -27,7 +27,7 @@ param(
     [switch]$StagingOnly,
     [switch]$WhatIf,
     [string]$MacStagingOut,
-    [string]$NodeVersion = "24.21.0"
+    [string]$NodeVersion = "26.13.0"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,21 +143,21 @@ try {
     $NapiDir = Join-Path $StagingDir 'node_modules\@napi-rs'
     if ((Test-Path $NapiDir) -and -not (Get-ChildItem $NapiDir -Force)) { Remove-Item $NapiDir }
 
-    # pdf.js ist in bundle.js gebuendelt, den Worker kopiert build.js; der Server laedt pdfjs-dist nicht.
+    # pdf.js ist in bundle.js gebuendelt, Worker und wasm-Dateien kopiert build.js nach client\dist; der Server laedt pdfjs-dist nicht.
     # Ungenutzte Teile raus, u. a. pdf.sandbox* mit QuickJS (MIT, ohne Lizenztext im Paket). LICENSE bleibt.
     Write-Step "Ungenutzte pdfjs-dist-Dateien entfernen"
     $PdfjsDir = Join-Path $StagingDir 'node_modules\pdfjs-dist'
-    $PdfjsUnused = @('cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'build\pdf.sandbox*') |
+    $PdfjsUnused = @('cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'wasm', 'iccs', 'build\pdf.sandbox*') |
         ForEach-Object { Join-Path $PdfjsDir $_ }
     Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
-    # Eigene Lizenzen (Adobe-cmaps, Foxit/Liberation-Fonts, QuickJS) deckt THIRD_PARTY_NOTICES nicht ab.
+    # Eigene Lizenzen (Adobe-cmaps, Foxit/Liberation-Fonts, ICC-Profile, QuickJS) deckt THIRD_PARTY_NOTICES nicht ab.
     $PdfjsLeft = Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue
     if ($PdfjsLeft) { throw "pdfjs-dist-Teile ohne Lizenzhinweis im Staging: $($PdfjsLeft.FullName -join ', ')" }
 } finally {
     Pop-Location
 }
 
-# --- 3. Node 24 LTS win-x64 laden und pruefen ------------------------------
+# --- 3. Node 26 win-x64 laden und pruefen ------------------------------
 
 Write-Step "Node.js $NodeVersion (win-x64) laden"
 

@@ -81,8 +81,8 @@ jobs:
           # AGPL §13: /source fuehrt auf den Quellcode genau dieses Images
           loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3077/source)
           [ "$loc" = "$SOURCE_URL" ] || { echo "/source zeigt auf '$loc' statt '$SOURCE_URL'"; exit 1; }
-          # Node-Mindestversion (Sicherheitsfix 24.22.1)
-          docker exec ide node -e "const [a,b,c]=process.versions.node.split('.').map(Number); console.log('node', process.version); process.exit(a>24||(a==24&&(b>22||(b==22&&c>=1)))?0:1)"
+          # Node-Mindestversion
+          docker exec ide node -e "const a=parseInt(process.versions.node); console.log('node', process.version); process.exit(a>=26?0:1)"
 
       - name: Lizenzdateien und Inhalt pruefen
         shell: bash   # mit pipefail: ein Fehler von docker save bricht ab
@@ -95,7 +95,7 @@ jobs:
             grep -q "Schriftliches Angebot" /app/docs/INSTALL-DOCKER.md || fail "Quellcode-Angebot fehlt"
             for p in @napi-rs @esbuild esbuild; do test ! -e /app/node_modules/$p || fail "node_modules/$p im Image"; done
             # Teile mit eigenen Lizenzen, die THIRD_PARTY_NOTICES nicht abdeckt (STRIPPED in scripts/licenses.js)
-            for p in cmaps standard_fonts legacy image_decoders web types build/pdf.sandbox*; do
+            for p in cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*; do
               ! ls -d /app/node_modules/pdfjs-dist/$p >/dev/null 2>&1 || fail "node_modules/pdfjs-dist/$p im Image"
             done
             test ! -e /root/.npm || fail "/root/.npm im Image"
