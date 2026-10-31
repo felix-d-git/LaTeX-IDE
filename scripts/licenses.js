@@ -618,7 +618,9 @@ function render(packages) {
     lines.push(`License: ${p.displayLicense || p.license}`);
     lines.push('');
     const lead = p.copyrightLine || p.authorLine;
-    block(lead ? `${lead}\n\n${p.licenseText.replace(/^\n+/, '')}` : p.licenseText);
+    // A third party's public copyright line that MIT requires us to keep; the marker is for the commit privacy hook.
+    const text = p.licenseText.replace(/^.*sindresorhus@gmail\.com.*$/gm, '$& privacy:allow');
+    block(lead ? `${lead}\n\n${text.replace(/^\n+/, '')}` : text);
     for (const n of p.noticeFiles.concat(p.extraNotices || [])) {
       lines.push(`### ${n.title}`);
       lines.push('');
