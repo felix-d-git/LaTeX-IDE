@@ -21,7 +21,7 @@ function freePort() {
   });
 }
 
-async function startServer() {
+async function startServer(extraEnv = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-api-'));
   fs.cpSync(path.join(REPO, 'server'), path.join(dir, 'server'), { recursive: true });
   fs.copyFileSync(path.join(REPO, 'package.json'), path.join(dir, 'package.json'));
@@ -30,6 +30,7 @@ async function startServer() {
   const port = await freePort();
   const env = { ...process.env, PORT: String(port), DATA_DIR: dataDir, LATEX_IDE_LOCAL: path.join(dir, 'local'), NODE_PATH: path.join(REPO, 'node_modules') };
   for (const k of ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'SMTP_HOST', 'DATA_KEY', 'VAULT_DIR', 'LOCAL_MODE', 'UPDATE_MODE', 'REMOTE_URL']) delete env[k];
+  Object.assign(env, extraEnv);
   const child = spawn(process.execPath, [path.join(dir, 'server', 'index.js')], { env, cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
