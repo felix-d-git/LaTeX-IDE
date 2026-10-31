@@ -34,7 +34,7 @@ powershell -File installer\build-release.ps1
    `standard_fonts`, `legacy`, `image_decoders`, `web`, `types`,
    `build/pdf.sandbox*`): pdf.js steckt gebuendelt in `client/dist`, der Server
    laedt es nicht.
-3. Laedt Node.js 24 LTS (win-x64) von nodejs.org, prueft SHA256 gegen
+3. Laedt Node.js 26 (win-x64) von nodejs.org, prueft SHA256 gegen
    `SHASUMS256.txt`, kopiert es inkl. LICENSE nach `staging\node` (fehlt die
    LICENSE, bricht der Build ab).
 4. Ruft `ISCC.exe` auf `installer\windows\LatexIDE.iss` auf ->

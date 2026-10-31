@@ -8,7 +8,7 @@
 #
 # Two stages: npm ci with dev and optional packages (esbuild, @napi-rs/canvas) only
 # happens in the build stage, which is not part of the final image.
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
@@ -17,15 +17,15 @@ COPY . .
 # esbuild is a dev dependency: build the client, then drop dev deps and optional ones
 # (@napi-rs/canvas: only pdf.js under Node needs it, the app runs pdf.js in the browser).
 # npm prune leaves the emptied scope folders (@esbuild, @napi-rs) behind.
-# pdfjs-dist: the client is bundled and build.js copies only build/pdf.worker.min.mjs,
+# pdfjs-dist: the client is bundled and build.js copies only the worker and three wasm files to client/dist,
 # the rest (cmaps, fonts, legacy build, QuickJS sandbox ...) is never served.
 RUN node build.js \
     && npm prune --omit=dev --omit=optional \
     && find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete \
     && cd node_modules/pdfjs-dist \
-    && rm -rf cmaps standard_fonts legacy image_decoders web types build/pdf.sandbox*
+    && rm -rf cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 # Repo-Zuordnung kommt vom Build (container-image.yml: github.repository), kein fester Name im Image.
 ARG IMAGE_SOURCE=""

@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const http = require('http');
 const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
-const archiver = require('archiver');
+const { ZipArchive } = require('archiver');
 
 const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
@@ -1424,7 +1424,7 @@ app.get('/api/projects/download/zip', (req, res) => {
   }
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', 'attachment; filename="projekte.zip"');
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
   const used = new Set();
@@ -1497,7 +1497,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   collab.flushRoot(root);
   res.attachment(`${req.params.name}.zip`); // RFC 5987 filename*: names outside Latin-1 no longer make setHeader throw
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
   archive.directory(root, false, (entry) => {
@@ -1875,7 +1875,7 @@ app.get('/api/download/zip', (req, res) => {
   const name = path.basename(root) || 'project';
   collab.flushRoot(root);
   res.attachment(`${name}.zip`);
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
   archive.directory(root, false, (entry) => {

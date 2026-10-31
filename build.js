@@ -4,7 +4,7 @@ const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
 // .env first: legal.js reads SOURCE_URL / UPDATE_REPO for the bundle banner.
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 const legal = require('./server/lib/legal');
 
 const watch = process.argv.includes('--watch');
@@ -16,6 +16,12 @@ function copyPdfWorker() {
   fs.mkdirSync(outDir, { recursive: true });
   const src = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'build', 'pdf.worker.min.mjs');
   fs.copyFileSync(src, path.join(outDir, 'pdf.worker.min.mjs'));
+  // Decoders for JPEG 2000 and JBIG2 images, colour management (wasmUrl in pdfViewer.js, visualEditor.js).
+  const wasmDir = path.join(outDir, 'pdfjs-wasm');
+  fs.mkdirSync(wasmDir, { recursive: true });
+  for (const f of ['openjpeg.wasm', 'jbig2.wasm', 'qcms_bg.wasm']) {
+    fs.copyFileSync(path.join(__dirname, 'node_modules', 'pdfjs-dist', 'wasm', f), path.join(wasmDir, f));
+  }
 }
 
 const options = {

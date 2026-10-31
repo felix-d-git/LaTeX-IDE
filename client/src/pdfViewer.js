@@ -95,7 +95,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       if (native) return; // inzwischen auf Browser-Viewer umgeschaltet
       const url = withPid(`/api/pdf?path=${encodeURIComponent(path)}&t=${Date.now()}`);
       sharedWorker ||= new pdfjsLib.PDFWorker();
-      const task = pdfjsLib.getDocument({ url, worker: sharedWorker });
+      const task = pdfjsLib.getDocument({ url, worker: sharedWorker, wasmUrl: '/dist/pdfjs-wasm/' });
       try {
         doc = await task.promise;
         break;

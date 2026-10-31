@@ -135,7 +135,7 @@ export const clearPdfThumbs = () => pdfThumbs.clear(); // bei Datei-/Baumänderu
 async function pdfThumb(url) {
   if (!pdfThumbs.has(url)) {
     pdfThumbs.set(url, (async () => {
-      const pdf = await pdfjsLib.getDocument(url).promise;
+      const pdf = await pdfjsLib.getDocument({ url, wasmUrl: '/dist/pdfjs-wasm/' }).promise;
       const page = await pdf.getPage(1);
       const base = page.getViewport({ scale: 1 });
       const viewport = page.getViewport({ scale: Math.min(2, 1000 / base.width) });
