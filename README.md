@@ -101,7 +101,7 @@ start.bat        (Windows)
 ./start.sh       (Linux/macOS)
 ```
 
-Braucht Node 24 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
+Braucht Node 26 und TeX Live (`latexmk`, `synctex`) im `PATH`; öffnet
 `http://localhost:3077`.
 
 ## Funktionen

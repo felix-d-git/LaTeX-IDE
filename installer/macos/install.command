@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$HOME/Applications/LatexIDE"
 APP_DIR="$APP_ROOT/app"
 NODE_DIR="$APP_ROOT/node"
-NODE_VERSION="24.21.0"
+NODE_VERSION="26.13.0"
 
 echo "=== LaTeX-IDE Desktop Installer ==="
 
