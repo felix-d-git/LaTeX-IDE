@@ -143,7 +143,7 @@ async function fetchDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onA
     if (e.status === 501) disabled = true;
     else {
       retryAt = Date.now() + 30000; // nicht bei jedem Tastendruck neu versuchen
-      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Start mit --allow-origin '*', siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
+      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Start mit --allow-origin, siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
       failed = true;
     }
     return null;

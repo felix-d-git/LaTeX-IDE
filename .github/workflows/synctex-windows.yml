@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+# PDF-zu-Code-Sprung mit echtem TeX Live unter Windows (Umlaute, Leerzeichen, Junction).
+# Nur bei Aenderungen am Sprung: die Installation dauert einige Minuten.
+name: SyncTeX Windows
+
+on:
+  pull_request:
+    paths:
+      - server/lib/synctex.js
+      - server/lib/compile.js
+      - test/syncLt.test.js
+      - .github/workflows/synctex-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synctex:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+
+      - name: TeX Live installieren
+        shell: pwsh
+        run: |
+          $Repo = 'https://ftp.tu-chemnitz.de/pub/tug/historic/systems/texlive/2025/tlnet-final'
+          $Tex = 'C:/tl'
+          Invoke-WebRequest "$Repo/install-tl.zip" -OutFile install-tl.zip
+          Expand-Archive install-tl.zip "$env:RUNNER_TEMP/itl"
+          $Dir = (Get-ChildItem "$env:RUNNER_TEMP/itl" -Directory)[0].FullName
+          @"
+          selected_scheme scheme-basic
+          TEXDIR $Tex
+          tlpdbopt_install_docfiles 0
+          tlpdbopt_install_srcfiles 0
+          instopt_adjustpath 0
+          tlpdbopt_desktop_integration 0
+          tlpdbopt_file_assocs 0
+          "@ -replace '(?m)^\s+', '' | Set-Content tl.profile -Encoding ascii
+          & "$Dir/install-tl-windows.bat" -no-gui -profile tl.profile -repository $Repo
+          & "$Tex/bin/windows/tlmgr.bat" install latexmk synctex
+          "$Tex/bin/windows" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Test
+        env:
+          REQUIRE_TEX: '1'
+        run: node --test test/syncLt.test.js
