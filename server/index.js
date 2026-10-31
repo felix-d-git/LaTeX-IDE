@@ -107,6 +107,8 @@ if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
 }
 app.use(express.json({ limit: '50mb' }));
+// Express 5 leaves req.body undefined without a body; the routes destructure it.
+app.use((req, res, next) => { req.body ??= {}; next(); });
 app.use(cookieParser());
 app.use(authMw.createSessionMiddleware());
 app.use(authMw.ensureCsrfCookie);
