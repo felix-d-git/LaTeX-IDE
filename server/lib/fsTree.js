@@ -49,6 +49,14 @@ function buildTree(root, relDir = '') {
   return nodes;
 }
 
+// Alle Dateien mit genau diesem Namen im Projekt (relative Pfade).
+function findByName(root, name, relDir = '') {
+  return buildTree(root, relDir).flatMap((n) => {
+    if (n.type === 'dir') return findByName(root, name, n.path);
+    return n.name === name ? [n.path] : [];
+  });
+}
+
 // Startdatei beim Öffnen: flachste main.tex, sonst die erste .tex (Wurzel zuerst, dann Baum-Reihenfolge).
 function pickStartFile(root) {
   let level = buildTree(root);
@@ -139,4 +147,4 @@ function dataDirError(dir) {
   }
 }
 
-module.exports = { canonRel, dataDirError, sameEntry, resolveEntry, buildTree, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
+module.exports = { canonRel, dataDirError, sameEntry, resolveEntry, buildTree, findByName, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };

@@ -239,9 +239,21 @@ end;
 
 // --- Deinstallation ---------------------------------------------------------
 
-// "localDir" aus einer JSON-Datei (install.json vom Setup, config.json der App).
-// ponytail: naiver Parser ohne UTF-8-Dekodierung - Pfade mit Umlauten werden nicht
-// gefunden und bleiben dann einfach liegen (nie falsch geloescht).
+function MultiByteToWideChar(CodePage, Flags: Cardinal; Src: AnsiString; SrcLen: Integer; Dest: String; DestLen: Integer): Integer;
+  external 'MultiByteToWideChar@kernel32.dll stdcall';
+
+function Utf8ToStr(S: AnsiString): String;
+var
+  Len: Integer;
+begin
+  Result := '';
+  if S = '' then Exit;
+  SetLength(Result, Length(S)); // UTF-16 braucht nie mehr Zeichen als UTF-8 Bytes
+  Len := MultiByteToWideChar(65001, 0, S, Length(S), Result, Length(S));
+  SetLength(Result, Len);
+end;
+
+// "localDir" aus einer JSON-Datei (install.json vom Setup, config.json der App), beide UTF-8.
 function JsonLocalDir(FileName: String): String;
 var
   S: AnsiString;
@@ -257,7 +269,7 @@ begin
   S := Copy(S, P + 1, Length(S));
   P := Pos('"', S);
   if P = 0 then Exit;
-  Result := Copy(S, 1, P - 1);
+  Result := Utf8ToStr(Copy(S, 1, P - 1));
   StringChangeEx(Result, '\\', '\', True);
 end;
 

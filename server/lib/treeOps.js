@@ -97,13 +97,32 @@ function deletePath(root, relPath) {
 
 // Desktop sync deletes land in the project's .trash (hidden, not synced/compiled via isIgnored):
 // a sync gone wrong must not destroy files for all members, binaries have no history.
-// ponytail: .trash is never emptied - add a cleanup when it grows noticeably.
-function trashPath(root, relPath) {
+// Dated buckets (.trash/deleted-<YYYY-MM-DD>/<rel>; the prefix keeps an old entry named like a date from counting as one) because rename keeps the mtime, which says nothing about the delete.
+const trashDay = (now) => `deleted-${new Date(now).toISOString().slice(0, 10)}`;
+
+function trashPath(root, relPath, now = Date.now()) {
   const abs = safeResolve(root, relPath);
   if (!fs.existsSync(abs) || abs === path.resolve(root)) throw new Error('Nicht gefunden.');
-  const dir = path.dirname(safeResolve(path.join(root, '.trash'), toRel(root, abs)));
+  const dir = path.dirname(safeResolve(path.join(root, '.trash', trashDay(now)), toRel(root, abs)));
   fs.mkdirSync(dir, { recursive: true });
   fs.renameSync(abs, uniqueDest(dir, path.basename(abs)));
+}
+
+// Removes buckets past the deadline. Entries from before the buckets have no date:
+// they move to today's bucket, so an update never deletes anything right away.
+function purgeTrash(root, maxAgeDays = 30, now = Date.now()) {
+  const trash = path.join(root, '.trash');
+  if (!fs.existsSync(trash)) return;
+  for (const entry of fs.readdirSync(trash, { withFileTypes: true })) {
+    const abs = path.join(trash, entry.name);
+    if (entry.isDirectory() && /^deleted-\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      if (now - Date.parse(entry.name.slice(8)) > maxAgeDays * 86400000) fs.rmSync(abs, { recursive: true, force: true });
+    } else {
+      const dir = path.join(trash, trashDay(now));
+      fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(abs, uniqueDest(dir, entry.name));
+    }
+  }
 }
 
 // Used both by drag&drop upload from the OS and by (future) file-picker upload.
@@ -119,4 +138,4 @@ function uploadFile(root, relDir, name, contentBase64, overwrite = false) {
   return toRel(root, dest);
 }
 
-module.exports = { createFolder, createFile, renamePath, movePath, deletePath, trashPath, uploadFile };
+module.exports = { createFolder, createFile, renamePath, movePath, deletePath, trashPath, purgeTrash, uploadFile };

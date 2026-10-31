@@ -24,7 +24,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const archiver = require('archiver');
 
-const { canonRel, buildTree, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
+const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -1225,7 +1225,13 @@ app.post('/api/import/zotero', limitImport, ah(async (req, res) => {
         await new Promise((r) => setTimeout(r, backoff * 1000));
       }
     }
-    res.json({ path: appendOrUpload(root, req.body.dir, name, parts.filter(Boolean).join('\n\n') + '\n', true) });
+    // Refresh aus einem anderen Ordner: die eine vorhandene Datei ersetzen statt eine zweite anzulegen.
+    let dir = req.body.dir;
+    if (!fs.existsSync(safeResolve(root, path.posix.join(String(dir || ''), name)))) {
+      const hits = findByName(root, name);
+      if (hits.length === 1) dir = path.posix.dirname(hits[0]);
+    }
+    res.json({ path: appendOrUpload(root, dir, name, parts.filter(Boolean).join('\n\n') + '\n', true) });
   } catch (e) {
     res.status(400).json({ error: 'Zotero: ' + e.message });
   }
@@ -2268,6 +2274,25 @@ function restoreWatchers() {
   }
 }
 
+// Sync-Papierkorb (.trash im Projekt) aller Projekte unter PROJECTS_DIR nach 30 Tagen leeren.
+// Fremde, per Pfad geöffnete Ordner bleiben unberührt; geparkte Projekte laufen erst nach dem Zurückholen ab.
+function purgeAllTrash() {
+  const subdirs = (d) => (fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : [])
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => path.join(d, e.name));
+  const usersDir = path.join(PROJECTS_DIR, 'users');
+  for (const base of [PROJECTS_DIR, ...subdirs(usersDir)]) {
+    for (const root of subdirs(base)) {
+      if (root === usersDir) continue;
+      try {
+        treeOps.purgeTrash(root);
+      } catch (e) {
+        console.error('[trash]', root, e.message);
+      }
+    }
+  }
+}
+
 // docker stop / Ctrl+C: get pending live edits onto disk first.
 function shutdown() {
   collab.flushAll();
@@ -2299,6 +2324,8 @@ const LOCAL_IDLE_MS = Number(process.env.LOCAL_IDLE_MS) || 30000;
 bootstrapAdmin()
   .then(() => {
     restoreWatchers();
+    purgeAllTrash();
+    setInterval(purgeAllTrash, 86400000).unref();
     if (authMw.LOCAL_MODE) {
       // Zweiter Start, während schon einer läuft: nur den Browser öffnen.
       server.on('error', (e) => {

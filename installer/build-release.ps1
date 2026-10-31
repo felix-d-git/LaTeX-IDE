@@ -139,6 +139,9 @@ try {
     Write-Step "npm prune --omit=dev --omit=optional"
     npm prune --omit=dev --omit=optional
     if ($LASTEXITCODE -ne 0) { throw "npm prune fehlgeschlagen (Exit $LASTEXITCODE)" }
+    # prune laesst den leeren Scope-Ordner stehen.
+    $NapiDir = Join-Path $StagingDir 'node_modules\@napi-rs'
+    if ((Test-Path $NapiDir) -and -not (Get-ChildItem $NapiDir -Force)) { Remove-Item $NapiDir }
 
     # pdf.js ist in bundle.js gebuendelt, den Worker kopiert build.js; der Server laedt pdfjs-dist nicht.
     # Ungenutzte Teile raus, u. a. pdf.sandbox* mit QuickJS (MIT, ohne Lizenztext im Paket). LICENSE bleibt.

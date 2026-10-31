@@ -20,6 +20,8 @@ $ExistingLatexmk = Join-Path $TexDir 'bin\windows\latexmk.exe'
 function Test-LatexmkOnPath {
     $cmd = Get-Command latexmk.exe -ErrorAction SilentlyContinue
     if ($null -eq $cmd) { return $false }
+    # latexmk schreibt unter UTF-8-Konsolen nach stderr; mit 'Stop' waere das in PowerShell 5.1 ein Abbruch.
+    $ErrorActionPreference = 'Continue'
     try { & $cmd.Source -v *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 
