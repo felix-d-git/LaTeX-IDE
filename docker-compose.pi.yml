@@ -28,6 +28,8 @@ services:
       - ALL
     env_file: .env
     environment:
+      # env_file reicht die ganze .env durch; der Tailscale-Schluessel gehoert nur in den tailscale-Container.
+      TS_AUTHKEY: ""
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt in .env}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD fehlt in .env}

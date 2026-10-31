@@ -382,6 +382,9 @@ const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
+const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
+// Local mode has no mail and only one login-free account: these routes have nothing to do there.
+const notLocal = (req, res, next) => (authMw.LOCAL_MODE ? res.status(404).json({ error: 'Im lokalen Modus nicht verfügbar.' }) : next());
 
 // Admin-chosen SMTP (auth-data.json) overrides .env; apply at startup.
 {
@@ -431,13 +434,13 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   });
 }));
 
-app.post('/api/auth/verify', limitToken, (req, res) => {
+app.post('/api/auth/verify', notLocal, limitToken, (req, res) => {
   const user = auth.consumeVerifyToken(req.body.token || '');
   if (!user) return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
   res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
 });
 
-app.post('/api/auth/resend-verification', limitMail, ah(async (req, res) => {
+app.post('/api/auth/resend-verification', notLocal, limitMail, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Not awaited: same answer and timing whether or not the account exists, and a hanging SMTP server doesn't block.
   if (user && !auth.isVerified(user) && verifyMode() === 'mail') sendVerifyMail(req, user);
@@ -474,7 +477,7 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE }, features: { pandoc: exporter.pandocAvailable() } });
 });
 
-app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
+app.post('/api/auth/forgot-password', notLocal, limitMail, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Always answer the same way, whether or not the account exists -
   // otherwise the endpoint would leak which e-mails/usernames are registered.
@@ -491,7 +494,7 @@ app.post('/api/auth/forgot-password', limitMail, ah(async (req, res) => {
   res.json({ ok: true, message: 'Falls das Konto existiert, wurde ein Link zum Zurücksetzen an die hinterlegte E-Mail-Adresse verschickt.' });
 }));
 
-app.post('/api/auth/reset-password', limitToken, ah(async (req, res) => {
+app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) => {
   const { token, password } = req.body;
   // Check first: a typo must not burn the single-use link.
   try { auth.validatePassword(password); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -661,7 +664,7 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp',ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
+app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
