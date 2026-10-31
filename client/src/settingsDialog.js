@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { linkify } from './helpDialog.js';
 import { renderMcpTab } from './mcpTab.js';
 import { REFERENCES_KEY, referencePrefs } from './latexCompletions.js';
+import { normalizeLtUrl, testLanguageTool } from './languageTool.js';
 
 const APPEARANCE_KEY = 'latex-ide-appearance-v1';
 const SPELLING_KEY = 'latex-ide-spelling-v1';
@@ -239,9 +240,28 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
     wrap.appendChild(lt);
     if (noServerLt) wrap.appendChild(note('Auf diesem Server ist kein LanguageTool eingerichtet (LANGUAGETOOL_URL in der .env). Alternativ unten die URL eines LanguageTool auf deinem eigenen Rechner eintragen.'));
     wrap.appendChild(textField('LanguageTool-URL (eigener Rechner)', spelling.ltUrl || '', (v) => {
-      saveSpelling({ ltUrl: v.trim() });
+      const ltUrl = normalizeLtUrl(v);
+      // Wer eine Adresse einträgt, will die Prüfung auch an haben.
+      saveSpelling(ltUrl && ltUrl !== spelling.ltUrl ? { ltUrl, grammar: true } : { ltUrl });
       render();
     }));
+    const testRow = document.createElement('div');
+    testRow.className = 'settings-field';
+    testRow.style.cssText = 'flex-direction:row;align-items:center;gap:12px';
+    const testBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'btn-secondary', textContent: 'Verbindung testen' });
+    const testOut = document.createElement('span');
+    testBtn.disabled = noServerLt;
+    testBtn.addEventListener('click', async () => {
+      testOut.textContent = 'Prüfe …';
+      try {
+        const n = await testLanguageTool(spelling.ltUrl || '', spelling.lang);
+        testOut.textContent = n ? `LanguageTool antwortet (${spelling.ltUrl || 'Server'}), Testfehler erkannt.` : 'LanguageTool antwortet, hat den Testfehler aber nicht erkannt (Sprache installiert?).';
+      } catch (e) {
+        testOut.textContent = `Fehler: ${e.message}`;
+      }
+    });
+    testRow.append(testBtn, testOut);
+    wrap.appendChild(testRow);
     wrap.appendChild(note("Lokal starten: java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8081 --allow-origin '*' und hier http://localhost:8081 eintragen. Die Desktop-App spricht ihn über ihren Proxy an; im Web fragt der Browser direkt (--allow-origin nötig; Safari blockiert HTTPS→http, Chrome fragt ggf. nach Zugriff auf lokale Geräte)."));
     const dict = document.createElement('textarea');
     dict.rows = 6;

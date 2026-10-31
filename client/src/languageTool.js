@@ -45,10 +45,19 @@ let failed = false; // letzter Versuch schlug fehl → genau ein Hinweis, bis es
 let retryAt = 0;
 let noProxy = false; // kein /api/languagetool-local (Web-Server) → Browser fragt direkt
 
+// "localhost:8081" ohne Schema wäre für fetch() das URL-Schema "localhost:" → http:// ergänzen;
+// eine mit eingefügte API-Endung (/v2/check, /v2) fällt weg.
+export function normalizeLtUrl(url) {
+  let u = String(url || '').trim();
+  if (!u) return '';
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = 'http://' + u.replace(/^\/+/, '');
+  return u.replace(/\/+$/, '').replace(/\/v2(\/check)?$/i, '').replace(/\/+$/, '');
+}
+
 // POST /v2/check, Felder als x-www-form-urlencoded (so erwartet es LanguageTool).
 export function checkRequest(url, data, language) {
   return [
-    url.replace(/\/+$/, '') + '/v2/check',
+    normalizeLtUrl(url) + '/v2/check',
     { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ data, language }) },
   ];
 }
@@ -56,6 +65,7 @@ export function checkRequest(url, data, language) {
 // Eigener LanguageTool (z. B. http://localhost:8081): Desktop-App über ihren Proxy (kein CORS),
 // im Web direkt aus dem Browser (LT braucht dann --allow-origin).
 async function checkLocal(url, data, language) {
+  url = normalizeLtUrl(url);
   if (!noProxy) {
     try {
       return await api.languageToolLocal(url, data, language);
@@ -65,9 +75,25 @@ async function checkLocal(url, data, language) {
     }
   }
   const [u, opts] = checkRequest(url, data, language);
-  const r = await fetch(u, { ...opts, signal: AbortSignal.timeout(20000) });
+  let r;
+  try {
+    r = await fetch(u, { ...opts, signal: AbortSignal.timeout(20000) });
+  } catch (e) {
+    // Der Browser verrät nicht, ob CORS, Mixed Content oder ein gestoppter Server schuld ist.
+    if (e && e.name === 'TimeoutError') throw new Error('keine Antwort innerhalb von 20 s');
+    throw new Error('keine Verbindung (läuft der Server? mit --allow-origin gestartet? Browser-Zugriff auf lokale Geräte erlaubt?)');
+  }
   if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
   return r.json();
+}
+
+// Einstellungen → „Verbindung testen": ein Satz mit bekanntem Fehler.
+export async function testLanguageTool(url, lang = 'de') {
+  const language = lang === 'en' ? 'en-US' : 'de-DE';
+  const text = lang === 'en' ? 'This is an tset.' : 'Das ist ein Tset.';
+  const data = JSON.stringify({ annotation: [{ text }] });
+  const { matches } = url ? await checkLocal(url, data, language) : await api.languageTool(data, language);
+  return (matches || []).length;
 }
 
 function toastOnce(msg) {
@@ -85,7 +111,14 @@ let cache = { key: '', text: '', out: [] };
 let inflight = null;
 
 // Antwortet sofort (Cache) und fragt LanguageTool im Hintergrund; onFresh() = neu linten, wenn die Antwort da ist.
+let lastUrl = null;
 export function grammarDiagnostics(text, prefs, onAddWord, onFresh) {
+  if (prefs.ltUrl !== lastUrl) {
+    // Neue Adresse: alte Sperre/Fehlermeldung gelten nicht mehr.
+    lastUrl = prefs.ltUrl;
+    retryAt = 0;
+    failed = false;
+  }
   const key = JSON.stringify([text, prefs.lang, prefs.ltUrl, prefs.dictionary]);
   if (cache.key !== key && !inflight && !(prefs.ltUrl ? false : disabled) && text.trim() && Date.now() >= retryAt) {
     inflight = fetchDiagnostics(text, prefs, onAddWord)

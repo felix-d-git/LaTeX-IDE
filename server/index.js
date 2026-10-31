@@ -1908,10 +1908,7 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
   }
   try {
-    const { inputAbs, line } = await synctex.inverse(pdfAbs, page, x, y, root);
-    const abs = path.resolve(inputAbs.replace(/\//g, path.sep));
-    const file = path.relative(root, abs).split(path.sep).join('/');
-    res.json({ file, line });
+    res.json(await synctex.inverseInProject(root, pdfAbs, page, x, y));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
