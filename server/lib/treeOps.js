@@ -97,8 +97,8 @@ function deletePath(root, relPath) {
 
 // Desktop sync deletes land in the project's .trash (hidden, not synced/compiled via isIgnored):
 // a sync gone wrong must not destroy files for all members, binaries have no history.
-// Dated buckets (.trash/<YYYY-MM-DD>/<rel>) because rename keeps the mtime, which says nothing about the delete.
-const trashDay = (now) => new Date(now).toISOString().slice(0, 10);
+// Dated buckets (.trash/deleted-<YYYY-MM-DD>/<rel>; the prefix keeps an old entry named like a date from counting as one) because rename keeps the mtime, which says nothing about the delete.
+const trashDay = (now) => `deleted-${new Date(now).toISOString().slice(0, 10)}`;
 
 function trashPath(root, relPath, now = Date.now()) {
   const abs = safeResolve(root, relPath);
@@ -115,8 +115,8 @@ function purgeTrash(root, maxAgeDays = 30, now = Date.now()) {
   if (!fs.existsSync(trash)) return;
   for (const entry of fs.readdirSync(trash, { withFileTypes: true })) {
     const abs = path.join(trash, entry.name);
-    if (entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
-      if (now - Date.parse(entry.name) > maxAgeDays * 86400000) fs.rmSync(abs, { recursive: true, force: true });
+    if (entry.isDirectory() && /^deleted-\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      if (now - Date.parse(entry.name.slice(8)) > maxAgeDays * 86400000) fs.rmSync(abs, { recursive: true, force: true });
     } else {
       const dir = path.join(trash, trashDay(now));
       fs.mkdirSync(dir, { recursive: true });

@@ -20,7 +20,7 @@ function tmpRoot() {
 
 test('trashPath verschiebt nach .trash und überschreibt dort nichts (#28)', () => {
   const root = tmpRoot();
-  const bucket = path.join(root, '.trash', '2026-10-31', 'kap');
+  const bucket = path.join(root, '.trash', 'deleted-2026-10-31', 'kap');
   fs.mkdirSync(path.join(root, 'kap'));
   fs.writeFileSync(path.join(root, 'kap', 'a.tex'), 'eins');
   trashPath(root, 'kap/a.tex', NOW);
@@ -39,11 +39,13 @@ test('purgeTrash löscht nur abgelaufene Tage, Alt-Einträge laufen erst ab jetz
   trashPath(root, 'alt.tex', NOW - 31 * DAY);
   trashPath(root, 'neu.tex', NOW - 29 * DAY);
   fs.writeFileSync(path.join(root, '.trash', 'vorher.tex'), 'vorher');
+  fs.mkdirSync(path.join(root, '.trash', '2020-01-01')); // gelöschter Ordner, kein Bucket
   purgeTrash(root, 30, NOW);
-  assert.ok(!fs.existsSync(path.join(root, '.trash', '2026-09-30')));
-  assert.ok(fs.existsSync(path.join(root, '.trash', '2026-10-02', 'neu.tex')));
+  assert.ok(!fs.existsSync(path.join(root, '.trash', 'deleted-2026-09-30')));
+  assert.ok(fs.existsSync(path.join(root, '.trash', 'deleted-2026-10-02', 'neu.tex')));
   assert.ok(!fs.existsSync(path.join(root, '.trash', 'vorher.tex')));
-  assert.ok(fs.existsSync(path.join(root, '.trash', '2026-10-31', 'vorher.tex')));
+  assert.ok(fs.existsSync(path.join(root, '.trash', 'deleted-2026-10-31', 'vorher.tex')));
+  assert.ok(fs.existsSync(path.join(root, '.trash', 'deleted-2026-10-31', '2020-01-01')));
   purgeTrash(root, 30, NOW + 31 * DAY);
   assert.deepStrictEqual(fs.readdirSync(path.join(root, '.trash')), []);
   purgeTrash(tmpRoot(), 30, NOW); // ohne .trash: nichts zu tun
