@@ -338,13 +338,15 @@ app.post('/api/auth/logout', (req, res) => {
 // Lokaler LanguageTool (nur Loopback): der Proxy umgeht CORS/Mixed Content des Browsers.
 app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (req, res) => {
   let u;
-  try { u = new URL(String(req.body.url)); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
+  // "localhost:8081" ohne Schema wie im Client als http:// lesen.
+  const raw = String(req.body.url || '').trim();
+  try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : 'http://' + raw); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
   if (!/^https?:$/.test(u.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) {
     return res.status(400).json({ error: 'Nur lokale Adressen (localhost) erlaubt.' });
   }
   const language = /^[a-z]{2}(-[A-Z]{2})?$/.test(req.body.language) ? req.body.language : 'auto';
   try {
-    const r = await fetch(u.origin + u.pathname.replace(/\/+$/, '') + '/v2/check', {
+    const r = await fetch(u.origin + u.pathname.replace(/\/+$/, '').replace(/\/v2(\/check)?$/i, '') + '/v2/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ data: String(req.body.data || ''), language }),
@@ -677,9 +679,7 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
   if (!page || x === undefined || y === undefined) return res.status(400).json({ error: 'page, x und y sind erforderlich.' });
   if (!pdf) return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
   try {
-    const { inputAbs, line } = await synctex.inverse(pdf, page, x, y, proj.dir);
-    const abs = path.resolve(inputAbs.replace(/\//g, path.sep));
-    res.json({ file: path.relative(proj.dir, abs).split(path.sep).join('/'), line });
+    res.json(await synctex.inverseInProject(proj.dir, pdf, page, x, y));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
