@@ -38,6 +38,16 @@ test('normalizeLtUrl: localhost:8081 wird http://localhost:8081, API-Endung fäl
   assert.strictEqual(checkRequest('localhost:8081', 'x', 'de-DE')[0], 'http://localhost:8081/v2/check');
 });
 
+test('diagnoseFetchError: Server antwortet (nur CORS falsch) vs. nicht erreichbar', async () => {
+  const { diagnoseFetchError } = await load('languageTool.js');
+  let asked;
+  const up = await diagnoseFetchError('localhost:8081', async (u, o) => { asked = [u, o.mode]; return { type: 'opaque' }; });
+  assert.deepStrictEqual(asked, ['http://localhost:8081/v2/languages', 'no-cors']);
+  assert.match(up, /Server läuft.*--allow-origin ohne Wert/);
+  const down = await diagnoseFetchError('localhost:8081', async () => { throw new TypeError('Failed to fetch'); });
+  assert.match(down, /^keine Verbindung/);
+});
+
 test('toProjectPath: echter Pfad hinter Symlink, ./-Marke, fremde Dateien', () => {
   const real = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-sync-'));
   fs.mkdirSync(path.join(real, 'kap'));
