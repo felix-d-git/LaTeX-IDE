@@ -344,6 +344,13 @@ function setZotero(userId, zotero) {
   save(data);
 }
 
+function setDictionary(userId, words) {
+  const user = findUserById(userId);
+  if (!user) return;
+  user.dictionary = words;
+  save(data);
+}
+
 // Admin settings (SMTP, verification mode) live in auth-data.json -> covered by the vault like the accounts.
 function getSettings() {
   return data.settings;
@@ -382,6 +389,7 @@ module.exports = {
   deleteUser,
   listUsers,
   setZotero,
+  setDictionary,
   findUserByEmail,
   findUserByUsername,
   findUserByLogin,

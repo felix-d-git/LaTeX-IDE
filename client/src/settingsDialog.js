@@ -11,7 +11,7 @@ const SPELLING_KEY = 'latex-ide-spelling-v1';
 const EDITOR_KEY = 'latex-ide-editor-v1';
 
 const DEFAULT_APPEARANCE = { theme: 'light', fontSize: '14.5px', fontFamily: '"Cascadia Code", Consolas, monospace', lineHeight: '1.5' };
-const DEFAULT_SPELLING = { enabled: true, lang: 'de', grammar: false, dictionary: [] };
+const DEFAULT_SPELLING = { enabled: true, lang: 'de', grammar: false, dictionary: [], dictDirty: true };
 const DEFAULT_EDITOR = { keybindings: 'none', autocomplete: true, closeBrackets: true, codeCheck: true, pdfViewer: 'builtin', breadcrumbs: true };
 
 function loadJson(key, fallback) {
@@ -57,14 +57,37 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
   onPdfViewer && onPdfViewer(editorPrefs.pdfViewer);
   onBreadcrumbs && onBreadcrumbs(editorPrefs.breadcrumbs);
 
+  // Wörterbuch gehört zum Konto; localStorage ist nur Zwischenspeicher für offline.
+  // dictDirty = noch nicht beim Server (Altbestand oder offline geändert) → beim Start vereinigen, sonst gilt der Server.
+  // ponytail: offline gelöschte Wörter kommen durch das Vereinigen zurück.
+  function saveDictionary(dictionary) {
+    spelling = { ...spelling, dictionary, dictDirty: true };
+    saveJson(SPELLING_KEY, spelling);
+    api.saveDictionary(dictionary).then(() => {
+      if (spelling.dictionary !== dictionary) return;
+      spelling = { ...spelling, dictDirty: false };
+      saveJson(SPELLING_KEY, spelling);
+    }).catch(() => {});
+  }
+
+  api.getDictionary().then(({ words }) => {
+    if (!Array.isArray(words)) return; // Desktop offline
+    if (spelling.dictDirty) saveDictionary([...new Set([...(spelling.dictionary || []), ...words])].sort());
+    else {
+      spelling = { ...spelling, dictionary: words };
+      saveJson(SPELLING_KEY, spelling);
+    }
+    applyEditorPrefs();
+    if (isOpen() && activeTab === 'spelling') render();
+  }).catch(() => {});
+
   function applyEditorPrefs() {
     if (!editorMgr) return;
     editorMgr.setPrefs(
       { ...editorPrefs, dark: appearance.theme === 'dark', grammar: !!spelling.grammar, ltUrl: spelling.ltUrl || '', lang: spelling.lang, dictionary: spelling.dictionary || [] },
       {
         onAddWord: (word) => {
-          spelling = { ...spelling, dictionary: [...new Set([...(spelling.dictionary || []), word])].sort() };
-          saveJson(SPELLING_KEY, spelling);
+          saveDictionary([...new Set([...(spelling.dictionary || []), word])].sort());
           applyEditorPrefs();
           if (isOpen() && activeTab === 'spelling') render();
         },
@@ -266,7 +289,10 @@ export function setupSettingsDialog({ editorMgr, onShowHotkeys, onPdfViewer, onB
     const dict = document.createElement('textarea');
     dict.rows = 6;
     dict.value = (spelling.dictionary || []).join('\n');
-    dict.addEventListener('change', () => saveSpelling({ dictionary: [...new Set(dict.value.split(/\s+/).filter(Boolean))].sort() }));
+    dict.addEventListener('change', () => {
+      saveDictionary([...new Set(dict.value.split(/\s+/).filter(Boolean))].sort());
+      applyEditorPrefs();
+    });
     wrap.appendChild(field('Eigenes Wörterbuch (ein Wort pro Zeile; gilt für LanguageTool, die Browser-Prüfung führt ihr eigenes über das Kontextmenü)', dict));
     return wrap;
   }
