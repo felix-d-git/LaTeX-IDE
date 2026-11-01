@@ -90,6 +90,7 @@ async function startApp(currentUser) {
 
 let currentTree = null;
 let mainFile = null;
+let mainPreamble = '';
 let activeProjectRoot = '';
 let commentsPanel = null; // set once setupCommentsPanel runs (needs editorMgr first)
 let reviewPanel = null; // set once setupReviewPanel runs (needs editorMgr first)
@@ -110,7 +111,8 @@ const editorMgr = createEditorManager(els.editorContainer, {
   },
   onSelectionChanged: () => scheduleOutlineRefresh(),
   onDropImages: (files, pos) => insertDroppedImages(files, pos),
-  resolveImage: (rawPath) => resolveImagePath(rawPath),
+  resolveImage: (rawPath, paths) => resolveImagePath(rawPath, paths),
+  getPreamble: () => mainPreamble,
 });
 
 const dirOf = (p) => (p && p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
@@ -125,21 +127,36 @@ function treeFiles() {
 }
 
 // \includegraphics-Pfad → Projektdatei; LaTeX sucht relativ zur Hauptdatei,
-// Endung darf fehlen. ponytail: kein \graphicspath.
-function resolveImagePath(rawPath) {
+// Endung darf fehlen, \graphicspath-Einträge gelten als weitere Präfixe.
+function resolveImagePath(rawPath, paths = []) {
   const files = treeFiles();
   const bases = [dirOf(mainFile), dirOf(editorMgr.getActivePath())];
   for (const base of bases) {
-    const parts = [];
-    for (const seg of `${base}/${rawPath}`.split('/')) {
-      if (!seg || seg === '.') continue;
-      if (seg === '..') parts.pop();
-      else parts.push(seg);
+    for (const prefix of ['', ...paths]) {
+      const parts = [];
+      for (const seg of `${base}/${prefix}/${rawPath}`.split('/')) {
+        if (!seg || seg === '.') continue;
+        if (seg === '..') parts.pop();
+        else parts.push(seg);
+      }
+      const p = parts.join('/');
+      for (const ext of ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps']) if (files.has(p + ext)) return p + ext;
     }
-    const p = parts.join('/');
-    for (const ext of ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps']) if (files.has(p + ext)) return p + ext;
   }
   return null;
+}
+
+// Präambel der Hauptdatei für den Visual-Modus: \newcommand und \graphicspath gelten auch in Kapiteldateien.
+// ponytail: nur beim Laden des Baums gelesen, \input-Präambeln bleiben außen vor.
+async function refreshVisualContext() {
+  const file = mainFile;
+  let content = '';
+  try {
+    if (file) content = (await api.getFile(file)).content || '';
+  } catch {}
+  if (file !== mainFile) return;
+  mainPreamble = content.split('\\begin{document}')[0];
+  editorMgr.refreshVisual();
 }
 
 function relativeTo(fromDir, target) {
@@ -574,6 +591,7 @@ async function setMainFile(path) {
   await api.setMainFile(path);
   mainFile = path;
   refreshTreeHighlight();
+  refreshVisualContext();
 }
 
 let currentProjectId = null;
@@ -601,6 +619,7 @@ async function loadTree() {
   currentTree = tree;
   mainFile = mf;
   refreshTreeHighlight();
+  refreshVisualContext();
   if (isDesktop && !offlineBanner.isOffline()) prewarm([...treeFiles()].filter((p) => fileKind(p) === 'text'));
 }
 

@@ -20,7 +20,7 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { reviewerReadOnly } from './editorCommands.js';
 import { getSession, closeSession, listConflicts, conflictField, setConflictsEffect } from './collab.js';
 import { EditorState, StateField, StateEffect, Prec, Compartment } from '@codemirror/state';
-import { visualMode } from './visualEditor.js';
+import { visualMode, refreshVisual, bumpVisualEpoch } from './visualEditor.js';
 import { Decoration, keymap } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
@@ -119,7 +119,7 @@ const editorTheme = EditorView.theme(
   { dark: false }
 );
 
-export function createEditorManager(container, { onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage }) {
+export function createEditorManager(container, { onCommentClick, getInitialComments, onTrackChangeClick, onDocChanged, onSelectionChanged, onDropImages, resolveImage, getPreamble }) {
   const tabs = new Map(); // path -> { state }
   const visualComp = new Compartment();
   const readOnlyComp = new Compartment();
@@ -140,7 +140,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
   try {
     visualOn = localStorage.getItem('editorMode') === 'visual';
   } catch {}
-  const visualExt = () => (visualOn ? visualMode({ resolveImage: resolveImage || (() => null) }) : []);
+  const visualExt = () => (visualOn ? visualMode({ resolveImage: resolveImage || (() => null), getPreamble }) : []);
   const IMAGE_RE = /\.(png|jpe?g|pdf|eps)$/i;
   let activePath = null;
 
@@ -454,6 +454,10 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     setSpellcheck,
     setVisual,
     isVisual,
+    refreshVisual() {
+      bumpVisualEpoch();
+      if (visualOn) view.dispatch({ effects: refreshVisual.of(null) });
+    },
     setPrefs,
     setCompileDiagnostics,
     view,
