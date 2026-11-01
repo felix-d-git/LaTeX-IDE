@@ -4,7 +4,7 @@ LaTeX-IDE is licensed under AGPL-3.0-only (see LICENSE). That license covers onl
 the project's own code. The third-party packages listed here keep their own licenses,
 reproduced below.
 
-Scope: the npm packages the app ships (160 packages), i.e. the production
+Scope: the npm packages the app ships (161 packages), i.e. the production
 dependencies from package-lock.json without dev and optional packages, as left by
 `npm prune --omit=dev --omit=optional`. This includes the code bundled into client/dist.
 Not shipped and therefore not covered (deleted by the Docker and installer builds): from pdfjs-dist
@@ -31,6 +31,7 @@ Not covered here:
 | @codemirror/streamparser | 6.0.0 | MIT |
 | @codemirror/theme-one-dark | 6.1.3 | MIT |
 | @codemirror/view | 6.43.15 | MIT |
+| @isaacs/nonrecursive-glob-match | 1.0.3 | BlueOak-1.0.0 |
 | @lezer/common | 1.5.2 | MIT |
 | @lezer/highlight | 1.2.3 | MIT |
 | @lezer/lr | 1.4.10 | MIT |
@@ -95,7 +96,7 @@ Not covered here:
 | express-session | 1.19.0 | MIT |
 | fast-fifo | 1.3.2 | MIT |
 | finalhandler | 2.1.1 | MIT |
-| follow-redirects | 1.16.1 | MIT |
+| follow-redirects | 1.16.2 | MIT |
 | forwarded | 0.2.0 | MIT |
 | fresh | 2.0.0 | MIT |
 | function-bind | 1.1.2 | MIT |
@@ -122,7 +123,7 @@ Not covered here:
 | merge-descriptors | 2.0.0 | MIT |
 | mime-db | 1.54.0 | MIT |
 | mime-types | 3.0.2 | MIT |
-| minimatch | 10.2.6 | BlueOak-1.0.0 |
+| minimatch | 11.0.3 | BlueOak-1.0.0 |
 | ms | 2.0.0 | MIT |
 | ms | 2.1.3 | MIT |
 | negotiator | 1.1.0 | MIT |
@@ -462,6 +463,68 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+## @isaacs/nonrecursive-glob-match@1.0.3
+
+License: BlueOak-1.0.0
+
+```
+# Blue Oak Model License
+
+Version 1.0.0
+
+## Purpose
+
+This license gives everyone as much permission to work with
+this software as possible, while protecting contributors
+from liability.
+
+## Acceptance
+
+In order to receive this license, you must agree to its
+rules.  The rules of this license are both obligations
+under that agreement and conditions to your license.
+You must not do anything with this software that triggers
+a rule that you cannot or will not follow.
+
+## Copyright
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe that contributor's
+copyright in it.
+
+## Notices
+
+You must ensure that everyone who gets a copy of
+any part of this software from you, with or without
+changes, also gets the text of this license or a link to
+<https://blueoakcouncil.org/license/1.0.0>.
+
+## Excuse
+
+If anyone notifies you in writing that you have not
+complied with [Notices](#notices), you can keep your
+license by taking all practical steps to comply within 30
+days after the notice.  If you do not do so, your license
+ends immediately.
+
+## Patent
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe any patent claims
+they can license or become able to license.
+
+## Reliability
+
+No contributor can revoke this license.
+
+## No Liability
+
+***As far as the law allows, this software comes as is,
+without any warranty or condition, and no contributor
+will be liable to anyone for any damages related to this
+software or this license, under any kind of legal claim.***
 ```
 
 ## @lezer/common@1.5.2
@@ -3780,7 +3843,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## follow-redirects@1.16.1
+## follow-redirects@1.16.2
 
 License: MIT
 
@@ -4623,7 +4686,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## minimatch@10.2.6
+## minimatch@11.0.3
 
 License: BlueOak-1.0.0
 
