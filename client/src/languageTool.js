@@ -79,12 +79,22 @@ async function checkLocal(url, data, language) {
   try {
     r = await fetch(u, { ...opts, signal: AbortSignal.timeout(20000) });
   } catch (e) {
-    // Der Browser verrät nicht, ob CORS, Mixed Content oder ein gestoppter Server schuld ist.
     if (e && e.name === 'TimeoutError') throw new Error('keine Antwort innerhalb von 20 s');
-    throw new Error('keine Verbindung (läuft der Server? mit --allow-origin gestartet? Browser-Zugriff auf lokale Geräte erlaubt?)');
+    throw new Error(await diagnoseFetchError(url));
   }
   if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
   return r.json();
+}
+
+// fetch() verrät nicht, warum es scheiterte. Ein no-cors-Abruf klappt auch ohne gültigen
+// CORS-Header: gelingt er, läuft der Server und nur sein --allow-origin passt nicht.
+export async function diagnoseFetchError(url, doFetch = fetch) {
+  try {
+    await doFetch(normalizeLtUrl(url) + '/v2/languages', { mode: 'no-cors', signal: AbortSignal.timeout(5000) });
+    return 'Server läuft, aber der Browser darf seine Antwort nicht lesen. LanguageTool beenden und neu starten mit --allow-origin ohne Wert (unter Windows wird ein * zu einem Dateinamen)';
+  } catch {
+    return 'keine Verbindung (Server gestoppt oder vom Browser blockiert, z. B. Zugriff auf lokale Geräte nicht erlaubt oder HTTPS→http)';
+  }
 }
 
 // Einstellungen → „Verbindung testen": ein Satz mit bekanntem Fehler.
@@ -143,7 +153,7 @@ async function fetchDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onA
     if (e.status === 501) disabled = true;
     else {
       retryAt = Date.now() + 30000; // nicht bei jedem Tastendruck neu versuchen
-      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Start mit --allow-origin, siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
+      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
       failed = true;
     }
     return null;
