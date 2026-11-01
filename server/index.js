@@ -1203,6 +1203,17 @@ app.post('/api/zotero', (req, res) => {
   res.json({ ok: true });
 });
 
+// Eigenes Wörterbuch je Konto (statt je Browser). Ganze Liste ersetzen; der Client führt zusammen.
+app.get('/api/dictionary', (req, res) => res.json({ words: req.user.dictionary || [] }));
+app.post('/api/dictionary', (req, res) => {
+  const { words } = req.body;
+  if (!Array.isArray(words) || words.length > 20000 || words.some((w) => typeof w !== 'string' || !w || w.length > 100 || /\s/.test(w))) {
+    return res.status(400).json({ error: 'Ungültiges Wörterbuch.' });
+  }
+  auth.setDictionary(req.user.id, [...new Set(words)].sort());
+  res.json({ ok: true });
+});
+
 app.post('/api/import/zotero', limitImport, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;

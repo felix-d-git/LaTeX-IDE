@@ -183,6 +183,8 @@ export const api = {
   importZotero: (dir, name, format) => req('POST', '/api/import/zotero', { dir, name, format }),
   getZotero: () => req('GET', '/api/zotero'),
   saveZotero: (cfg) => req('POST', '/api/zotero', cfg),
+  getDictionary: () => req('GET', '/api/dictionary'),
+  saveDictionary: (words) => req('POST', '/api/dictionary', { words }),
   search: (q, opts) => {
     const params = new URLSearchParams({
       q,
