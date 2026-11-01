@@ -1320,6 +1320,9 @@ input, select, textarea{ font-family: var(--ui-font); color: var(--ui-text); }
 .cm-v-bullet{ display: inline-block; min-width: 1.4em; font-weight: 600; cursor: pointer; }
 .cm-v-math{ cursor: pointer; }
 .cm-v-math-display{ text-align: center; padding: 4px 0; }
+.cm-v-table{ padding: 6px 0; cursor: pointer; overflow-x: auto; }
+.cm-v-table table{ margin: 0 auto; border-collapse: collapse; }
+.cm-v-table td{ padding: 2px 10px; border: 1px solid var(--ui-border); }
 .cm-v-figure{ text-align: center; padding: 6px 0; cursor: pointer; }
 .cm-v-figure img{ max-width: 100%; }
 .cm-v-preamble{ margin: 4px 0; padding: 4px 10px; border: 1px dashed var(--ui-border); border-radius: var(--ui-r-sm); color: var(--ui-text-muted); font-size: var(--ui-fs-sm); cursor: pointer; }

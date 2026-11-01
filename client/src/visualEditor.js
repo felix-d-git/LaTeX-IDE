@@ -9,11 +9,16 @@ import * as pdfjsLib from 'pdfjs-dist';
 // Visual-Modus: dieselbe LaTeX-Quelle, nur per Dekorationen
 // gerendert. Jedes Konstrukt, das die Auswahl berührt, zeigt wieder seine
 // Quelle - so bleibt alles editierbar, ohne eigenes Rich-Text-Modell.
-// ponytail: baut bei jeder Änderung/Cursorbewegung alle Dekorationen der Datei
-// per Regex neu (stex ist ein Legacy-Stream-Parser ohne Syntaxbaum). Reicht für
-// Kapiteldateien mit einigen tausend Zeilen; sonst auf view.visibleRanges begrenzen.
+// Neuaufbau per Regex über die ganze Datei (stex hat keinen Syntaxbaum), aber nur wenn
+// nötig: Cursorbewegungen ohne geänderte Berührung behalten die Dekorationen, Tippen in
+// einer Zeile reinen Texts verschiebt sie nur (reusable).
+// ponytail: alles andere baut die ganze Datei neu, auch eine Strukturänderung in einer
+// einzigen Zeile; bei Problemen mit sehr großen Dateien auf view.visibleRanges begrenzen.
 
 export const refreshVisual = StateEffect.define();
+// Hauptdatei oder Dateibaum geändert: auch gecachte Tabs bei ihrer nächsten Transaktion neu bauen.
+let epoch = 0;
+export const bumpVisualEpoch = () => epoch++;
 
 const FORMAT = {
   part: 'cm-v-h cm-v-h1', chapter: 'cm-v-h cm-v-h1', section: 'cm-v-h cm-v-h2',
@@ -45,13 +50,15 @@ function revealOnClick(dom, view, pos) {
 }
 
 const mathCache = new Map();
-function renderMath(src, display) {
-  const key = (display ? 'D' : 'I') + src;
+function renderMath(src, display, macros) {
+  const macroKey = JSON.stringify(macros);
+  const key = (display ? 'D' : 'I') + macroKey + src;
   let html = mathCache.get(key);
   if (html == null) {
     // \label kennt KaTeX nicht; die Nummer liefert erst das PDF.
     const tex = src.replace(/\\label\{[^}]*\}/g, '');
-    html = katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: 'ignore' });
+    // Kopie, weil KaTeX das Objekt bei \gdef verändert.
+    html = katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: 'ignore', macros: { ...macros } });
     if (mathCache.size > 500) mathCache.clear();
     mathCache.set(key, html);
   }
@@ -59,20 +66,59 @@ function renderMath(src, display) {
 }
 
 class MathWidget extends WidgetType {
-  constructor(src, display) {
+  constructor(src, display, macros) {
     super();
     this.src = src;
     this.display = display;
+    this.macros = macros;
   }
   eq(o) {
-    return o.src === this.src && o.display === this.display;
+    return o.src === this.src && o.display === this.display && JSON.stringify(o.macros) === JSON.stringify(this.macros);
   }
   toDOM(view) {
     const el = document.createElement(this.display ? 'div' : 'span');
     el.className = this.display ? 'cm-v-math cm-v-math-display' : 'cm-v-math';
-    el.innerHTML = renderMath(this.src, this.display);
+    el.innerHTML = renderMath(this.src, this.display, this.macros);
     revealOnClick(el, view);
     return el;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class TableWidget extends WidgetType {
+  constructor(spec, body, macros) {
+    super();
+    this.spec = spec;
+    this.body = body;
+    this.macros = macros;
+  }
+  eq(o) {
+    return o.spec === this.spec && o.body === this.body && JSON.stringify(o.macros) === JSON.stringify(this.macros);
+  }
+  toDOM(view) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-v-table';
+    const table = wrap.appendChild(document.createElement('table'));
+    for (const row of parseTabular(this.spec, this.body)) {
+      const tr = table.appendChild(document.createElement('tr'));
+      for (const cell of row) {
+        const td = tr.appendChild(document.createElement('td'));
+        td.colSpan = cell.span;
+        td.style.textAlign = cell.align;
+        for (const part of cell.parts) {
+          if (part.math == null) {
+            td.appendChild(document.createTextNode(part.text));
+          } else {
+            const span = td.appendChild(document.createElement('span'));
+            span.innerHTML = renderMath(part.math, false, this.macros);
+          }
+        }
+      }
+    }
+    revealOnClick(wrap, view);
+    return wrap;
   }
   ignoreEvent() {
     return true;
@@ -265,12 +311,132 @@ function scanMath(s, from, to) {
   return out;
 }
 
-function build(state, resolveImage) {
+// \newcommand aus Präambeltext → KaTeX-Makros.
+// ponytail: Makros mit optionalem Argument bleiben undefiniert (KaTeX kennt keine Vorgabewerte).
+const NEWCOMMAND = /\\(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([a-zA-Z]+)\s*\}|\\([a-zA-Z]+))\s*(?:\[\d\])?\s*(\[)?/g;
+function parseMacros(s) {
+  const macros = {};
+  for (const m of s.matchAll(NEWCOMMAND)) {
+    if (m[3]) continue;
+    const open = m.index + m[0].length;
+    if (s[open] !== '{') continue;
+    const close = closeBrace(s, open);
+    if (close > 0) macros['\\' + (m[1] || m[2])] = s.slice(open + 1, close);
+  }
+  return macros;
+}
+
+function parseGraphicspath(s) {
+  const m = /\\graphicspath\s*\{/.exec(s);
+  if (!m) return [];
+  const open = m.index + m[0].length - 1;
+  const close = closeBrace(s, open);
+  return close < 0 ? [] : [...s.slice(open + 1, close).matchAll(/\{([^{}]*)\}/g)].map((p) => p[1].trim()).filter(Boolean);
+}
+
+const stripComments = (s) => s.replace(/(^|[^\\])%.*$/gm, '$1');
+
+// An \\ (Zeilen) oder & (Zellen) trennen, nicht innerhalb von {…} oder $…$.
+function splitTop(s, sep) {
+  const out = [];
+  let start = 0;
+  let depth = 0;
+  let math = false;
+  const top = () => depth === 0 && !math;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\') {
+      if (sep === '\\' && s[i + 1] === '\\' && top()) {
+        out.push(s.slice(start, i));
+        const opt = /^\s*\[[^\]]*\]/.exec(s.slice(i + 2, i + 40));
+        i += 1 + (opt ? opt[0].length : 0);
+        start = i + 1;
+      } else i++;
+    } else if (c === '{') depth++;
+    else if (c === '}') depth--;
+    else if (c === '$') math = !math;
+    else if (c === '&' && sep === '&' && top()) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out;
+}
+
+const TABLE_RULES = /\\(?:hline|toprule|midrule|bottomrule|cline\{[^}]*\}|cmidrule(?:\[[^\]]*\])?(?:\([^)]*\))?\{[^}]*\}|addlinespace(?:\[[^\]]*\])?)/g;
+const columnAligns = (spec) =>
+  [...spec
+    .replace(/\*\{(\d+)\}\{([^{}]*)\}/g, (_, n, x) => x.repeat(Number(n)))
+    .replace(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '')]
+    .filter((c) => 'lcrpmbX'.includes(c))
+    .map((c) => (c === 'c' ? 'center' : c === 'r' ? 'right' : 'left'));
+
+function cellParts(tex) {
+  const parts = [];
+  const pushText = (t) => {
+    const p = plain(t).replace(ESCAPED, '$1');
+    if (p) parts.push({ text: (/^\s/.test(t) ? ' ' : '') + p + (/\s$/.test(t) ? ' ' : '') });
+  };
+  let pos = 0;
+  for (const m of scanMath(tex, 0, tex.length)) {
+    pushText(tex.slice(pos, m.from));
+    parts.push({ math: m.src });
+    pos = m.to;
+  }
+  pushText(tex.slice(pos));
+  return parts;
+}
+
+function parseTabular(spec, body) {
+  const aligns = columnAligns(spec);
+  const rows = [];
+  for (const raw of splitTop(body, '\\')) {
+    const line = raw.replace(TABLE_RULES, '').trim();
+    if (!line) continue;
+    let col = 0;
+    rows.push(splitTop(line, '&').map((rawCell) => {
+      const cell = { span: 1, align: aligns[col] || 'left', tex: rawCell.trim() };
+      const m = /^\\multicolumn\s*\{(\d+)\}\s*\{/.exec(cell.tex);
+      if (m) {
+        const specOpen = m[0].length - 1;
+        const specClose = closeBrace(cell.tex, specOpen);
+        const open = cell.tex.indexOf('{', specClose);
+        const close = open < 0 ? -1 : closeBrace(cell.tex, open);
+        if (close > 0) {
+          cell.span = Number(m[1]);
+          cell.align = columnAligns(cell.tex.slice(specOpen + 1, specClose))[0] || 'left';
+          cell.tex = cell.tex.slice(open + 1, close);
+        }
+      }
+      col += cell.span;
+      return { span: cell.span, align: cell.align, parts: cellParts(cell.tex) };
+    }));
+  }
+  return rows;
+}
+
+// Ergebnis einer Berührungsprüfung: reicht zum Entscheiden, ob eine Cursorbewegung etwas ändert.
+const hit = (c, sel) =>
+  c.kind === 'preamble'
+    ? sel.some((r) => r.to > 0 && r.from <= c.to)
+    : c.kind === 'inside'
+      ? sel.some((r) => r.from < c.to && r.to > c.from)
+      : sel.some((r) => r.from <= c.to && r.to >= c.from);
+
+function build(state, resolveImage, getPreamble) {
   const doc = state.doc;
   const text = doc.toString();
   const sel = state.selection.ranges;
-  const touched = (from, to) => sel.some((r) => r.from <= to && r.to >= from);
-  const inside = (from, to) => sel.some((r) => r.from < to && r.to > from);
+  const checks = [];
+  const check = (kind, from, to) => {
+    const c = { kind, from, to };
+    c.was = hit(c, sel);
+    checks.push(c);
+    return c.was;
+  };
+  const touched = (from, to) => check('touched', from, to);
+  const inside = (from, to) => check('inside', from, to);
   const decos = [];
 
   // 1) Verbatim und Kommentare ausblenden (mit Leerzeichen maskieren, damit
@@ -303,7 +469,7 @@ function build(state, resolveImage) {
     const pre = s.slice(0, begin);
     title = { title: preambleArg(pre, 'title'), author: preambleArg(pre, 'author'), date: preambleArg(pre, 'date') };
     // Beim Öffnen steht der Cursor auf 0 → Präambel bleibt trotzdem zu; Klick springt ans Ende der Zeile.
-    if (!sel.some((r) => r.to > 0 && r.from <= line.to)) {
+    if (!check('preamble', 0, line.to)) {
       decos.push(Decoration.replace({ widget: new TextWidget('Präambel', 'cm-v-preamble', true, line.to), block: true }).range(0, line.to));
     }
   }
@@ -314,16 +480,40 @@ function build(state, resolveImage) {
     if (!touched(line.from, text.length)) decos.push(Decoration.replace({ block: true }).range(line.from, text.length));
   }
 
+  // Kapiteldateien haben keine eigene Präambel: die der Hauptdatei gilt mit, eigene Definitionen zuletzt.
+  const defs = stripComments(getPreamble()) + '\n' + s;
+  const macros = parseMacros(defs);
+  const graphicsPaths = parseGraphicspath(defs);
+
+  // Block-Widget, wenn das Konstrukt allein auf seinen Zeilen steht.
+  const pushWidget = (widget, from, to, canBlock) => {
+    const a = doc.lineAt(from);
+    const z = doc.lineAt(to);
+    const block = canBlock && !text.slice(a.from, from).trim() && !text.slice(to, z.to).trim();
+    decos.push(Decoration.replace({ widget, block }).range(block ? a.from : from, block ? z.to : to));
+  };
+
+  // 3a) Tabellen vor den Formeln, weil deren $…$ in die Zellen gehören.
+  // ponytail: verschachtelte tabular bleiben Quelltext.
+  for (const m of s.slice(0, bodyTo).matchAll(/\\begin\{tabular\}(?:\[[^\]]*\])?\s*\{/g)) {
+    if (m.index < bodyFrom) continue;
+    const open = m.index + m[0].length - 1;
+    const specClose = closeBrace(s, open);
+    const endAt = specClose < 0 ? -1 : s.indexOf('\\end{tabular}', specClose);
+    if (endAt < 0 || endAt >= bodyTo) continue;
+    const body = s.slice(specClose + 1, endAt);
+    if (body.includes('\\begin{tabular}')) continue;
+    const to = endAt + '\\end{tabular}'.length;
+    mask(m.index, to);
+    if (!touched(m.index, to)) pushWidget(new TableWidget(s.slice(open + 1, specClose), body, macros), m.index, to, true);
+  }
+  s = chars.join('');
+
   // 3) Formeln per KaTeX; danach maskieren, damit nichts darin weiter zerlegt wird.
   for (const m of scanMath(s, bodyFrom, bodyTo)) {
     mask(m.from, m.to);
     if (!m.src.trim() || touched(m.from, m.to)) continue;
-    const a = doc.lineAt(m.from);
-    const z = doc.lineAt(m.to);
-    const block = m.display && !text.slice(a.from, m.from).trim() && !text.slice(m.to, z.to).trim();
-    decos.push(
-      Decoration.replace({ widget: new MathWidget(m.src, m.display), block }).range(block ? a.from : m.from, block ? z.to : m.to)
-    );
+    pushWidget(new MathWidget(m.src, m.display, macros), m.from, m.to, m.display);
   }
   s = chars.join('');
 
@@ -395,7 +585,7 @@ function build(state, resolveImage) {
       const rawPath = s.slice(open + 1, close).trim();
       const w = /width\s*=\s*([\d.]*)\s*\\(textwidth|linewidth|columnwidth)/.exec(m[3] || '');
       const width = w ? Math.min(1, parseFloat(w[1] || '1')) : 0.8;
-      decos.push(Decoration.replace({ widget: new ImageWidget(resolveImage(rawPath), rawPath, width) }).range(from, to));
+      decos.push(Decoration.replace({ widget: new ImageWidget(resolveImage(rawPath, graphicsPaths), rawPath, width) }).range(from, to));
     }
   }
 
@@ -410,23 +600,54 @@ function build(state, resolveImage) {
     if (!touched(m.index, to)) decos.push(Decoration.replace({ widget: new TextWidget(' ', 'cm-v-space') }).range(m.index, to));
   }
 
-  return Decoration.set(decos, true);
+  return { deco: Decoration.set(decos, true), checks, bodyFrom, epoch };
 }
 
-export function visualMode({ resolveImage }) {
+// Eine Zeile reinen Texts kann keine Struktur ändern (auch nicht mit dem Getippten).
+const plainLine = (t) => !!t.trim() && !/[\\$%{}&~[\]]/.test(t);
+
+// Getippt in einer reinen Textzeile außerhalb gerenderter Konstrukte: Dekorationen nur verschieben.
+// ponytail: mehrzeiliges \newcommand in einer Kapiteldatei fällt hier durch, bis zum nächsten Neuaufbau.
+function reusable(v, tr) {
+  let n = 0;
+  let ok = true;
+  tr.changes.iterChanges((fromA, toA, fromB, toB) => {
+    n++;
+    const oldLine = tr.startState.doc.lineAt(fromA);
+    const newLine = tr.newDoc.lineAt(fromB);
+    if (fromA < v.bodyFrom || toA > oldLine.to || toB > newLine.to || !plainLine(oldLine.text) || !plainLine(newLine.text)) ok = false;
+    // Zeile liegt innerhalb einer mehrzeiligen Formel o. Ä.: deren Quelle ändert sich mit.
+    else v.deco.between(oldLine.from, oldLine.to, (a, b, d) => {
+      if (d.point && a < b) ok = false;
+    });
+  });
+  return ok && n === 1;
+}
+
+export function visualMode({ resolveImage, getPreamble = () => '' }) {
   const safeBuild = (state) => {
     try {
-      return build(state, resolveImage);
+      return build(state, resolveImage, getPreamble);
     } catch (e) {
       console.error('[visual]', e);
-      return Decoration.none;
+      return { deco: Decoration.none, checks: [], bodyFrom: 0, epoch };
     }
   };
   const field = StateField.define({
     create: safeBuild,
-    update: (deco, tr) =>
-      tr.docChanged || tr.selection || tr.effects.some((e) => e.is(refreshVisual)) ? safeBuild(tr.state) : deco,
-    provide: (f) => EditorView.decorations.from(f),
+    update: (v, tr) => {
+      if (v.epoch !== epoch || tr.effects.some((e) => e.is(refreshVisual))) return safeBuild(tr.state);
+      if (!tr.docChanged && !tr.selection) return v;
+      const sel = tr.state.selection.ranges;
+      if (!tr.docChanged) return v.checks.every((c) => hit(c, sel) === c.was) ? v : safeBuild(tr.state);
+      if (!reusable(v, tr)) return safeBuild(tr.state);
+      const checks = v.checks.map((c) => ({ ...c, from: tr.changes.mapPos(c.from), to: tr.changes.mapPos(c.to) }));
+      if (!checks.every((c) => hit(c, sel) === c.was)) return safeBuild(tr.state);
+      return { ...v, deco: v.deco.map(tr.changes), checks };
+    },
+    provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
   });
   return [field, EditorView.editorAttributes.of({ class: 'cm-visual' })];
 }
+
+export const _forTests = { parseTabular, parseMacros, parseGraphicspath };
