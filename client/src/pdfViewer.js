@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
-import * as pdfjsLib from 'pdfjs-dist';
+// Legacy-Build: das moderne setzt neueste JS-APIs voraus (Iterator, Map.getOrInsertComputed) und legt sonst die ganze App lahm (#105).
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { withPid } from './api.js';
 
 // build.js copies pdfjs-dist's worker build to client/dist/pdf.worker.min.mjs
