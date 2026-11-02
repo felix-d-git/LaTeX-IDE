@@ -156,7 +156,7 @@ const EMBEDDED_NOTICES = {
   // https://github.com/mozilla/pdf.js/blob/v6.4.299/external/openjpeg/README.md
   'pdfjs-dist': {
     version: '6.4.299',
-    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); MIT (qcms, Emscripten runtime, musl)',
+    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); MIT (qcms, Emscripten runtime, musl, core-js)',
     copyrightFrom: 'build/pdf.mjs',
     notices: [
       {
@@ -259,6 +259,32 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`,
           + 'See https://github.com/emscripten-core/emscripten/blob/main/LICENSE',
         // https://github.com/emscripten-core/emscripten/blob/main/LICENSE (MIT part)
         text: `Copyright (c) 2010-2014 Emscripten authors, see AUTHORS file.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.`,
+      },
+      {
+        title: 'Embedded: core-js (MIT)',
+        note: 'Polyfills in the legacy build of pdf.js (legacy/build/pdf.mjs and its worker), bundled into client/dist. '
+          + 'See https://github.com/zloirock/core-js/blob/v3.50.0/LICENSE',
+        // https://github.com/zloirock/core-js/blob/v3.50.0/LICENSE
+        text: `Copyright (c) 2013–2025 Denis Pushkarev (zloirock.ru)
+Copyright (c) 2025–2026 CoreJS Company (core-js.io)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

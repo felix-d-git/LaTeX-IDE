@@ -36,7 +36,7 @@ const mockUrl = 'data:text/javascript,' + encodeURIComponent(mockSrc);
 register(
   'data:text/javascript,' +
     encodeURIComponent(`export async function resolve(s, c, next) {
-      if (s === 'pdfjs-dist') return { url: ${JSON.stringify(mockUrl)}, shortCircuit: true };
+      if (s === 'pdfjs-dist/legacy/build/pdf.mjs') return { url: ${JSON.stringify(mockUrl)}, shortCircuit: true };
       return next(s, c);
     }
     // package.json sagt "commonjs", der Client-Code ist aber ESM (sonst bündelt ihn esbuild)

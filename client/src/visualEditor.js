@@ -4,7 +4,7 @@ import { StateField, StateEffect } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType } from '@codemirror/view';
 import katex from 'katex';
 import { withPid } from './api.js';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'; // Legacy-Build, siehe pdfViewer.js
 
 // Visual-Modus: dieselbe LaTeX-Quelle, nur per Dekorationen
 // gerendert. Jedes Konstrukt, das die Auswahl berührt, zeigt wieder seine

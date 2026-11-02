@@ -14,7 +14,7 @@ const serve = process.argv.includes('--serve');
 function copyPdfWorker() {
   const outDir = path.join(__dirname, 'client', 'dist');
   fs.mkdirSync(outDir, { recursive: true });
-  const src = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'build', 'pdf.worker.min.mjs');
+  const src = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.min.mjs');
   fs.copyFileSync(src, path.join(outDir, 'pdf.worker.min.mjs'));
   // Decoders for JPEG 2000 and JBIG2 images, colour management (wasmUrl in pdfViewer.js, visualEditor.js).
   const wasmDir = path.join(outDir, 'pdfjs-wasm');
