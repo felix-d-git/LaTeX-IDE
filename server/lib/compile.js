@@ -3,6 +3,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { detectEngine } = require('./detectEngine');
 
 const OUT_DIR = '.latex-ide-out';
 
@@ -86,6 +87,18 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     const outDir = path.join(root, outRel);
     fs.mkdirSync(outDir, { recursive: true });
 
+    // Engine from the document itself when the project setting can't work (see detectEngine.js).
+    let note = '';
+    if (BACKEND === 'latexmk') {
+      let source = '';
+      try { source = fs.readFileSync(path.join(root, mainRelPath), 'utf8'); } catch {}
+      const { engine, reason } = detectEngine(source, settings.compiler);
+      if (engine !== (settings.compiler || 'pdflatex')) {
+        settings = { ...settings, compiler: engine };
+        note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})
+`;
+      }
+    }
     const [cmd, args] = texCommand(mainRelPath, settings, outRel.split(path.sep).join('/'));
 
     // openin_any=p: a document may not \input absolute paths or ../ outside the
@@ -118,7 +131,7 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
       settled = true;
       clearTimeout(timer);
       running.delete(proc);
-      resolve(r);
+      resolve({ ...r, log: note + r.log });
     };
     // Resolve right away instead of waiting for 'close': a grandchild holding the
     // pipe open would delay it forever. No pdfPath - the PDF may be half-written,
