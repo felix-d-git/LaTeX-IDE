@@ -46,6 +46,7 @@ const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
 const legal = require('./lib/legal');
+const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 
 const RAW_MIME = {
   '.png': 'image/png',
@@ -100,12 +101,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Latex-IDE', '1');
   next();
 });
+// CSP, X-Frame-Options, nosniff, Referrer-Policy on every answer (#115); CSP_REPORT_ONLY=1 = only report.
+app.use(securityHeaders());
 // Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
 }
+// CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
+app.post(CSP_REPORT_PATH, ...cspReportHandler());
 app.use(express.json({ limit: '50mb' }));
 // Express 5 leaves req.body undefined without a body; the routes destructure it.
 app.use((req, res, next) => { req.body ??= {}; next(); });
