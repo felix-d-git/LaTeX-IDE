@@ -1,3 +1,5 @@
+; SPDX-License-Identifier: AGPL-3.0-only
+; SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 ; Inno Setup 6 Skript fuer LaTeX-IDE Desktop.
 ; Per-User-Installation ohne Admin-Rechte unter {localappdata}\Programs\LatexIDE.
 ; Baut auf dem Staging-Ordner installer\out\staging auf (siehe build-release.ps1).
