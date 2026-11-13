@@ -7,7 +7,8 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { startServer, client, adminAndUser } = require('./_server');
+// ADMIN_PASSWORD: the throwaway servers' admin login once #116 is merged, until then the old fallback.
+const { startServer, client, adminAndUser, ADMIN_PASSWORD = 'bitte-sofort-aendern' } = require('./_server');
 
 const EVIL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><script>
 fetch('/api/admin/invites',{method:'POST',headers:{'X-CSRF-Token':document.cookie.match(/csrfToken=([^;]+)/)[1],'Content-Type':'application/json'},body:'{}'})
@@ -130,7 +131,7 @@ process.stdin.on('end', () => process.stdout.write(a[a.indexOf('-t') + 1] === 'j
   const own = await startServer({ PANDOC: fake });
   try {
     const admin = client(own.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     const { root } = (await admin.call('POST', '/api/projects/create', { name: 'Export' })).body;
     const projectId = (await admin.call('POST', '/api/projects/open', { root })).body.projectId;
     const r = await get(own, admin, `/api/export?format=html&pid=${encodeURIComponent(projectId)}`);
