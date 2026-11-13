@@ -88,7 +88,9 @@ function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
 }
 
-async function createUser({ email, password, isAdmin, username, emailVerified = true }) {
+// mustChangePassword: first-boot admin with a generated one-time password; until it is changed the
+// account can only change the password (enforced by authMiddleware, cleared by setPassword).
+async function createUser({ email, password, isAdmin, username, emailVerified = true, mustChangePassword = false }) {
   const norm = (email || '').trim().toLowerCase();
   if (!norm || !/^\S+@\S+\.\S+$/.test(norm)) throw new Error('Ungültige E-Mail-Adresse.');
   validatePassword(password);
@@ -110,6 +112,7 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
     passwordHash,
     isAdmin: !!isAdmin,
     emailVerified: !!emailVerified,
+    ...(mustChangePassword ? { mustChangePassword: true } : {}),
     createdAt: new Date().toISOString(),
   };
   data.users.push(user);
@@ -131,6 +134,16 @@ async function setPassword(user, newPassword) {
   validatePassword(newPassword);
   user.passwordHash = await bcrypt.hash(newPassword, 12);
   user.passwordChangedAt = new Date().toISOString();
+  delete user.mustChangePassword;
+  save(data);
+}
+
+// New one-time password for an account that still has to change it (its file went missing).
+async function resetInitialPassword(user, password) {
+  validatePassword(password);
+  user.passwordHash = await bcrypt.hash(password, 12);
+  user.passwordChangedAt = new Date().toISOString();
+  user.mustChangePassword = true;
   save(data);
 }
 
@@ -399,6 +412,7 @@ module.exports = {
   createUser,
   verifyPassword,
   setPassword,
+  resetInitialPassword,
   validatePassword,
   createInvite,
   listInvites,

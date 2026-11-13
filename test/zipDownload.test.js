@@ -5,13 +5,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { startServer, client } = require('./_server');
+const { startServer, client, ADMIN_PASSWORD } = require('./_server');
 
 test('ZIP-Download enthält Projektdateien, aber keine Build-Dateien', async () => {
   const srv = await startServer();
   test.after(() => srv.stop());
   const admin = client(srv.base);
-  await admin.login('admin', 'bitte-sofort-aendern');
+  await admin.login('admin', ADMIN_PASSWORD);
   const { root } = (await admin.call('POST', '/api/projects/create', { name: 'Zip' })).body;
   fs.mkdirSync(path.join(root, 'kap'));
   fs.writeFileSync(path.join(root, 'kap', 'eins.tex'), 'inhalt');

@@ -88,6 +88,9 @@ function activeMainPdfAbs(root, userId) {
 
 const PORT = process.env.PORT || 3077;
 const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
+// Files the host admin has to see (update request, one-time admin password). With the vault DATA_DIR is
+// tmpfs in the container -> VAULT_DIR, which the host sees (vault.js ignores files there that aren't entries).
+const HOST_DIR = process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..');
 
 const app = express();
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
@@ -476,7 +479,8 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = authMw.currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
-  res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE }, features: { pandoc: exporter.pandocAvailable() } });
+  const flags = { localMode: authMw.LOCAL_MODE, mustChangePassword: authMw.mustChangePassword(user) };
+  res.json({ user: { ...auth.toPublicUser(user), ...flags }, features: { pandoc: exporter.pandocAvailable() } });
 });
 
 app.post('/api/auth/forgot-password', notLocal, limitMail, ah(async (req, res) => {
@@ -506,6 +510,7 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
     // Clicking the mailed link proves the mailbox, so this also verifies the address.
     user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
+    initialPasswordDone();
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -608,9 +613,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
 // scripts/server-update.sh on the host; "button" only drops a request file it picks up.
 const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
 const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/LaTeX-IDE
-// Mit Vault ist DATA_DIR tmpfs im Container → Marker in VAULT_DIR, das der Host sieht
-// (vault.js ignoriert dort Dateien, die kein Eintrag sind).
-const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
+const UPDATE_REQUEST = path.join(HOST_DIR, '.update-request');
 const APP_VERSION = require('../package.json').version;
 // INSTALL_KIND=windows (set by the Windows installer): no cron/server-update.sh, update = run the new Setup.
 const INSTALL_KIND = process.env.INSTALL_KIND || '';
@@ -666,7 +669,7 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
+app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -717,6 +720,7 @@ app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    initialPasswordDone();
     // Every other session is now invalid; keep this one.
     if (req.session && req.session.userId) req.session.loginAt = Date.now();
     res.json({ ok: true });
@@ -2250,33 +2254,89 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Without ADMIN_PASSWORD the first admin gets a random one-time password. It only goes into this file
+// (0600, for whoever runs the host), never into the log (docker logs keep it); with the vault it lies in
+// VAULT_DIR next to the encrypted data, because DATA_DIR is tmpfs inside the container there.
+const INITIAL_PASSWORD_FILE = path.join(HOST_DIR, 'initial-admin-password.txt');
+// The former hard-coded fallback and the old .env.example value are public -> treated as "not set".
+const PUBLIC_PASSWORDS = new Set(['bitte-sofort-aendern', 'bitte-ein-echtes-passwort-setzen']);
+
+function writeInitialPassword() {
+  const password = crypto.randomBytes(12).toString('base64url');
+  fs.mkdirSync(HOST_DIR, { recursive: true });
+  fs.rmSync(INITIAL_PASSWORD_FILE, { force: true }); // mode only applies to a newly created file
+  fs.writeFileSync(INITIAL_PASSWORD_FILE, password + '\n', { mode: 0o600 });
+  return password;
+}
+
+function initialPasswordHint(user) {
+  console.warn(
+    `[auth] Admin "${user.username}" (${user.email}) hat ein zufälliges Einmal-Passwort, es steht in ${INITIAL_PASSWORD_FILE} ` +
+      '(Docker: im eingebundenen Datenordner auf dem Host). Bis es nach dem ersten Login geändert ist, ist das Konto gesperrt; ' +
+      'danach wird die Datei gelöscht. Eigenes Passwort stattdessen: ADMIN_PASSWORD in .env (wirkt nur beim allerersten Start).'
+  );
+}
+
+// Called after every password change: once no account has to change its one-time password, the file goes.
+function initialPasswordDone() {
+  if (auth.users.some((u) => u.mustChangePassword)) return;
+  try {
+    fs.rmSync(INITIAL_PASSWORD_FILE, { force: true });
+  } catch (e) {
+    console.error(`[auth] ${INITIAL_PASSWORD_FILE} nicht löschbar, bitte von Hand entfernen:`, e.message);
+  }
+}
+
+// Later starts: an admin still on a public password (installs from before #116 that never changed the
+// fallback) gets a one-time password instead. A pending one-time password is pointed to again, or
+// replaced if its file is gone (otherwise the account could never be unlocked).
+async function checkInitialPassword() {
+  if (authMw.LOCAL_MODE) return;
+  for (const u of auth.users) {
+    if (!u.isAdmin || u.passwordChangedAt || u.mustChangePassword) continue; // only never-changed admins
+    for (const pw of PUBLIC_PASSWORDS) {
+      if (!(await auth.verifyPassword(u, pw))) continue;
+      console.warn(`[auth] Admin "${u.username}" hatte noch ein öffentlich bekanntes Passwort - durch ein Einmal-Passwort ersetzt.`);
+      await auth.resetInitialPassword(u, writeInitialPassword());
+      break;
+    }
+  }
+  const pending = auth.users.find((u) => u.mustChangePassword);
+  if (!pending) return initialPasswordDone();
+  if (!fs.existsSync(INITIAL_PASSWORD_FILE)) await auth.resetInitialPassword(pending, writeInitialPassword());
+  initialPasswordHint(pending);
+}
+
 // Creates the admin account on first boot (no users.json yet) from
 // ADMIN_EMAIL/ADMIN_PASSWORD, and migrates the old single-user
 // activeRoot/recentRoots from workspace.json onto that admin so they keep
 // their previously open project instead of starting from an empty dashboard.
 async function bootstrapAdmin() {
-  if (auth.users.length > 0) return;
+  if (auth.users.length > 0) return checkInitialPassword();
   const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
+  let password = process.env.ADMIN_PASSWORD;
+  if (password && PUBLIC_PASSWORDS.has(password)) {
+    console.warn('[auth] ADMIN_PASSWORD ist ein öffentlich bekannter Beispielwert und wird ignoriert.');
+    password = '';
+  }
   if (authMw.LOCAL_MODE && !password) {
     // Lokal meldet sich niemand an → zufälliges Passwort statt des bekannten Fallbacks.
     await auth.createUser({ email: 'lokal@local.host', password: crypto.randomBytes(24).toString('hex'), username: 'lokal', isAdmin: true });
     return;
   }
-  if (!email || !password) {
-    console.warn(
-      '[auth] ADMIN_EMAIL/ADMIN_PASSWORD nicht gesetzt - lege Fallback-Admin admin@local.host / bitte-sofort-aendern an. ' +
-        'UNBEDINGT direkt nach dem ersten Login das Passwort im Profil ändern. ADMIN_* wirken nur beim allerersten Start (leerer Datenordner).'
-    );
-  }
+  const generated = !password;
+  if (generated) password = writeInitialPassword();
+  if (!email) console.warn('[auth] ADMIN_EMAIL nicht gesetzt - der Admin bekommt die Adresse admin@local.host.');
   const adminUser = await auth.createUser({
     email: email || 'admin@local.host',
-    password: password || 'bitte-sofort-aendern',
+    password,
     username: process.env.ADMIN_USERNAME || 'admin',
     isAdmin: true,
+    mustChangePassword: generated,
   });
   state.migrateLegacyGlobalState(adminUser.id);
   console.log(`[auth] Admin-Konto angelegt: ${adminUser.email}`);
+  if (generated) initialPasswordHint(adminUser);
 }
 
 // Re-arm a watcher for every user's project that was still open before a

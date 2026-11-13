@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { startServer, client } = require('./_server');
+const { startServer, client, ADMIN_PASSWORD } = require('./_server');
 
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
@@ -13,7 +13,7 @@ test('/api/auth/me meldet features.pandoc als boolean; tote Endpunkte sind weg',
   const srv = await startServer();
   try {
     const c = client(srv.base);
-    await c.login('admin', 'bitte-sofort-aendern');
+    await c.login('admin', ADMIN_PASSWORD);
     const me = await c.call('GET', '/api/auth/me');
     assert.strictEqual(typeof me.body.features.pandoc, 'boolean');
     assert.strictEqual((await c.call('PUT', '/api/file', { path: 'a.tex', content: 'x' })).status, 404);

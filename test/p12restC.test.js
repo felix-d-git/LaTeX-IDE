@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { startServer, client, adminAndUser } = require('./_server');
+const { startServer, client, adminAndUser, ADMIN_PASSWORD } = require('./_server');
 
 // Minimal SMTP sink: collects the DATA of every mail.
 function dummySmtp() {
@@ -60,7 +60,7 @@ test('Standard ohne SMTP: Modus auto; "mail" ohne SMTP abgelehnt, Passwort nie i
   const smtp = await dummySmtp();
   try {
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     let r = await admin.call('GET', '/api/admin/mail');
     assert.equal(r.body.verifyMode, 'auto');
     assert.equal(r.body.smtpConfigured, false);
@@ -95,7 +95,7 @@ test('Modus admin: Konto unbestätigt, Login 403, Knopf-Endpunkt bestätigt, dan
   const srv = await startServer();
   try {
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     assert.equal((await admin.call('PUT', '/api/admin/mail', { verifyMode: 'admin' })).status, 200);
     const { c, reg } = await register(srv, admin, 'carol');
     assert.equal(reg.status, 200);
@@ -118,7 +118,7 @@ test('Standard ohne SMTP = auto: Login direkt nach Registrierung', async () => {
   const srv = await startServer();
   try {
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     const { c, reg } = await register(srv, admin, 'erin');
     assert.equal(reg.body.needsVerification, false);
     assert.equal((await login(c, 'erin')).status, 200);
