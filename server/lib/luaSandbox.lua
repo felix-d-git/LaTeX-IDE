@@ -1,0 +1,441 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+--
+-- LuaTeX startup script of the compile sandbox (#119), run as `lualatex --lua=<this file>`.
+--
+-- TeX runs with openin_any=p: no \input of absolute paths or ../ (other projects,
+-- auth-data.json). Since TeX Live 2023 LuaTeX applies that kpathsea check to Lua's io.open
+-- as well, so luaotfload cannot read its own files from texmf-dist (ScriptExtensions.txt,
+-- the fonts) and every lualatex run aborts. TeX Live 2022 and older check nothing in Lua,
+-- and even 2023+ leaves loadfile, io.output, zip, gzip, pdfe, pdf.obj, luaharfbuzz, mplib,
+-- image/map/data file lookups and Lua bytecode open.
+--
+-- This script runs before LuaTeX's own luatex-core.lua and before the format. It sets the
+-- policy below for everything Lua can open, so lualatex works with openin_any=p and Lua
+-- reaches no more than TeX. TeX's own \input/\openin keep the kpathsea check; \write18,
+-- io.popen and os.execute stay restricted by LuaTeX (same command list as for pdflatex).
+--
+-- Policy (paths normalised to "/", a ".." segment is never allowed):
+--   read:  relative paths (the project), absolute paths in the project or TEXMFOUTPUT,
+--          and the TeX trees ($TEXMF, TEXMFVAR, TEXMFCACHE …) and system font folders,
+--          read-only. Like kpathsea, names starting with "." (except ".tex") are refused.
+--   write: only in the project or TEXMFOUTPUT (openout_any=p). The font cache shared by
+--          all projects stays read-only; compile.js points luaotfload to one per output
+--          folder (TEXMFCACHE).
+-- A TeX or font folder that contains the project (e.g. TEXMFHOME = home folder with the
+-- projects below it) is dropped, otherwise neighbouring projects would become readable.
+
+local type, tostring, ipairs, pairs, next, error, select = type, tostring, ipairs, pairs, next, error, select
+local find, gsub, sub, lower, match, gmatch = string.find, string.gsub, string.sub, string.lower, string.match, string.gmatch
+
+local EPERM = "LaTeX-IDE: Zugriff außerhalb des Projekts nicht erlaubt"
+local is_windows, is_mac = os.type == "windows", os.name == "macosx"
+local list_sep = is_windows and ";" or ":"
+-- Taken now: document code could replace the globals before the first check.
+local getenv, expand_braces, status_of = os.getenv, kpse.expand_braces, status
+
+---------------------------------------------------------------------------------------------
+-- Paths
+
+-- Form used for all comparisons: forward slashes, no doubled slashes (a leading // of a
+-- UNC path stays), lower case on Windows.
+local function norm(p)
+  p = gsub(p, "\\", "/")
+  local unc = sub(p, 1, 2) == "//"
+  p = gsub(p, "/+", "/")
+  if unc then p = "/" .. p end
+  if is_windows then p = lower(p) end
+  return p
+end
+
+-- "C:x" (relative to the current folder of drive C) counts as absolute: never allowed
+-- outside the known folders.
+local function is_abs(p)
+  return sub(p, 1, 1) == "/" or find(p, "^%a:") ~= nil
+end
+
+local function has_dotdot(p)
+  return find("/" .. p .. "/", "/%.%./") ~= nil
+end
+
+local function strip_slash(p)
+  while #p > 1 and sub(p, -1) == "/" and not find(p, "^%a:/$") do p = sub(p, 1, -2) end
+  return p
+end
+
+-- kpathsea (openin_any/openout_any = p) refuses ".rhosts" & Co.: base name empty or
+-- starting with "." - except ".tex". A trailing slash (folder) does not count.
+local function base_ok(p)
+  local base = match(strip_slash(p), "[^/]*$")
+  return base ~= "" and (sub(base, 1, 1) ~= "." or base == ".tex")
+end
+
+local function under(p, dir)
+  return dir ~= nil and (p == dir or sub(p, 1, #dir + 1) == dir .. "/")
+end
+
+local function abs_dir(d)
+  if type(d) ~= "string" or d == "" then return nil end
+  d = norm(d)
+  if not is_abs(d) or has_dotdot(d) then return nil end
+  return strip_slash(d)
+end
+
+local project = abs_dir(lfs.currentdir())
+local outdir = abs_dir(getenv("TEXMFOUTPUT"))
+local home = abs_dir(getenv("HOME") or getenv("USERPROFILE"))
+
+-- TeX trees and font folders (read-only). Computed on first use: kpathsea is initialised
+-- only after this script.
+local ro_roots
+local function roots()
+  if ro_roots then return ro_roots end
+  if status_of.kpse_used ~= 1 then return {} end
+  local list = {}
+  local function add(d)
+    d = abs_dir(d)
+    if not d or under(project or "", d) or under(outdir or "", d) then return end
+    list[#list + 1] = d
+  end
+  for _, v in ipairs({ "TEXMF", "TEXMFDIST", "TEXMFMAIN", "TEXMFLOCAL", "TEXMFSYSVAR", "TEXMFSYSCONFIG",
+                       "TEXMFVAR", "TEXMFCONFIG", "TEXMFHOME", "TEXMFCACHE", "OSFONTDIR" }) do
+    for d in gmatch(expand_braces("$" .. v) or "", "[^" .. list_sep .. "]+") do
+      add((gsub(d, "^!!", "")))
+    end
+  end
+  -- What luaotfload indexes besides the TeX trees.
+  if is_windows then
+    local windir = getenv("WINDIR") or getenv("SystemRoot")
+    if windir then add(windir .. "/Fonts") end
+    local lad = getenv("LOCALAPPDATA")
+    if lad then add(lad .. "/Microsoft/Windows/Fonts") end
+  elseif is_mac then
+    for _, d in ipairs({ "/Library/Fonts", "/System/Library/Fonts", "/Network/Library/Fonts" }) do add(d) end
+    if home then add(home .. "/Library/Fonts") end
+  else
+    for _, d in ipairs({ "/usr/share/fonts", "/usr/local/share/fonts", "/usr/share/X11/fonts", "/etc/fonts" }) do add(d) end
+    if home then
+      add(home .. "/.fonts")
+      add(home .. "/.local/share/fonts")
+    end
+  end
+  ro_roots = list
+  return list
+end
+
+local function in_project(p)
+  return under(p, project) or under(p, outdir)
+end
+
+local function read_ok(name)
+  if type(name) ~= "string" or find(name, "%z") then return false end
+  local p = norm(name)
+  if has_dotdot(p) then return false end
+  if not is_abs(p) or in_project(p) then return base_ok(p) end
+  for _, d in ipairs(roots()) do
+    if under(p, d) then return true end
+  end
+  return false
+end
+
+-- File type and symlink queries also for the folders above the allowed ones: luaotfload
+-- resolves symlinks component by component from "/" (luaotfload-realpath.lua). No listings.
+local function meta_ok(name)
+  if read_ok(name) then return true end
+  if type(name) ~= "string" or find(name, "%z") then return false end
+  local p = strip_slash(norm(name))
+  if not is_abs(p) or has_dotdot(p) then return false end
+  local prefix = sub(p, -1) == "/" and p or p .. "/"
+  local function above(d) return d ~= nil and (p == d or sub(d, 1, #prefix) == prefix) end
+  if above(project) or above(outdir) then return true end
+  for _, d in ipairs(roots()) do
+    if above(d) then return true end
+  end
+  return false
+end
+
+local function write_ok(name)
+  if type(name) ~= "string" or find(name, "%z") then return false end
+  local p = norm(name)
+  if has_dotdot(p) or (is_abs(p) and not in_project(p)) then return false end
+  return base_ok(p)
+end
+
+-- luatex-core.lua (TeX Live 2023+) builds its io/os/lfs wrappers on these two functions
+-- and takes them from kpse when it runs, after this script. Its wrappers call the ones
+-- below, so both checks apply: the loosest (meta_ok) there, the exact one here. Otherwise
+-- kpathsea's "extended" check would also let Lua write to TEXMFVAR/TEXMFSYSVAR, the font
+-- cache of all projects.
+if kpse.in_name_ok_silent_extended then kpse.in_name_ok_silent_extended = meta_ok end
+if kpse.out_name_ok_silent_extended then kpse.out_name_ok_silent_extended = write_ok end
+
+---------------------------------------------------------------------------------------------
+-- Wrappers
+
+local function raise() error(EPERM, 2) end
+
+local function guard(fn, check, fail)
+  if type(fn) ~= "function" then return fn end
+  return function(name, ...)
+    if not check(name) then
+      if fail then return fail(name) end
+      return nil, EPERM
+    end
+    return fn(name, ...)
+  end
+end
+
+local function is_read_mode(mode)
+  return mode == nil or mode == "r" or mode == "rb" or mode == ""
+end
+
+local io_open = io.open
+io.open = function(name, mode)
+  if not (read_ok(name) and (is_read_mode(mode) or write_ok(name))) then return nil, EPERM end
+  return io_open(name, mode)
+end
+
+local io_lines, io_input, io_output = io.lines, io.input, io.output
+io.lines = function(name, ...)
+  if name ~= nil and not read_ok(name) then raise() end
+  return io_lines(name, ...)
+end
+io.input = function(f, ...)
+  if type(f) == "string" and not read_ok(f) then raise() end
+  return io_input(f, ...)
+end
+io.output = function(f, ...)
+  if type(f) == "string" and not write_ok(f) then raise() end
+  return io_output(f, ...)
+end
+
+-- Lua 5.3 does not verify bytecode: a crafted binary chunk reads and writes memory and gets
+-- around every check here. So only source code is loaded, plus bytecode that string.dump
+-- produced in this run (lualibs compiles its formatters that way, luaotfload and the
+-- fontloader their caches). .luc files from earlier runs are refused; luaotfload and the
+-- fontloader then read the .lua variant. The env argument keeps its arity (an explicit
+-- nil would replace _ENV).
+local lua_load, lua_loadfile, string_dump = load, loadfile, string.dump
+local digest = sha2 and sha2.digest256
+local dumped = {}
+local function dump_key(s) return digest and digest(s) or s end
+string.dump = function(f, ...)
+  local s = string_dump(f, ...)
+  dumped[dump_key(s)] = true
+  return s
+end
+local function own_bytecode(s)
+  return type(s) == "string" and sub(s, 1, 1) == "\27" and dumped[dump_key(s)] == true
+end
+
+load = function(chunk, chunkname, mode, ...)
+  local m = own_bytecode(chunk) and "b" or "t"
+  if select("#", ...) > 0 then return lua_load(chunk, chunkname, m, ...) end
+  return lua_load(chunk, chunkname, m)
+end
+loadfile = function(name, mode, ...)
+  if name ~= nil and not read_ok(name) then return nil, EPERM end
+  local n = select("#", ...)
+  local f, err
+  if n > 0 then f, err = lua_loadfile(name, "t", ...) else f, err = lua_loadfile(name, "t") end
+  if f or name == nil or not find(tostring(err), "binary chunk", 1, true) then return f, err end
+  local h = io_open(name, "rb")
+  if not h then return f, err end
+  local data = h:read("a")
+  h:close()
+  if not own_bytecode(data) then return f, err end
+  if n > 0 then return lua_load(data, "=" .. name, "b", ...) end
+  return lua_load(data, "=" .. name, "b")
+end
+dofile = function(name)
+  local f, err = loadfile(name)
+  if not f then error(err, 2) end
+  return f()
+end
+if loadstring then loadstring = load end
+
+-- require: LuaTeX's kpse searchers load any file (also bytecode, also C libraries). One
+-- searcher for Lua source found by kpathsea instead ("a.b" -> a/b.lua as before).
+if package then
+  local searchers = package.searchers or package.loaders
+  if searchers then
+    local preload = searchers[1]
+    for i = #searchers, 1, -1 do searchers[i] = nil end
+    searchers[1] = preload
+    searchers[2] = function(name)
+      local file = type(name) == "string" and (kpse.find_file((gsub(name, "%.", "/")), "lua") or kpse.find_file(name, "lua"))
+      if not file then return "\n\tno file '" .. tostring(name) .. "' (kpse)" end
+      local f, err = loadfile(file)
+      if not f then error("error loading module '" .. tostring(name) .. "' from file '" .. file .. "':\n\t" .. tostring(err), 2) end
+      return f, file
+    end
+  end
+  package.loadlib = function() return nil, EPERM end
+end
+-- luatex-core does the same with restricted shell escape, older versions do not.
+if package and package.loaded and package.loaded.ffi then
+  local ffi = package.loaded.ffi
+  for k in next, ffi do if k ~= "gc" then ffi[k] = nil end end
+end
+ffi = nil
+if package and package.preload then package.preload.ffi = function() error(EPERM, 2) end end
+
+local os_rename = os.rename
+os.rename = function(a, b)
+  if not (write_ok(a) and write_ok(b)) then return nil, EPERM end
+  return os_rename(a, b)
+end
+os.remove = guard(os.remove, write_ok)
+-- kpathsea reads openin_any/openout_any/TEXMFOUTPUT from the environment on every check.
+os.setenv = function() end
+
+-- lfs: listings like reading, metadata also above the allowed folders, changes like writing.
+lfs.attributes = guard(lfs.attributes, meta_ok)
+lfs.symlinkattributes = guard(lfs.symlinkattributes, meta_ok)
+lfs.readlink = guard(lfs.readlink, meta_ok)
+lfs.shortname = guard(lfs.shortname, meta_ok)
+lfs.isdir = guard(lfs.isdir, meta_ok, function() return false end)
+lfs.isfile = guard(lfs.isfile, read_ok, function() return false end)
+lfs.dir = guard(lfs.dir, read_ok, raise)
+for _, f in ipairs({ "chdir", "mkdir", "mkdirp", "rmdir", "touch", "lock_dir" }) do
+  lfs[f] = guard(lfs[f], write_ok)
+end
+if lfs.link then
+  local lfs_link = lfs.link
+  lfs.link = function(old, new, ...)
+    if not (write_ok(old) and write_ok(new)) then return nil, EPERM end
+    return lfs_link(old, new, ...)
+  end
+end
+
+-- Libraries that open files by name on the C side.
+if zip then
+  zip.open = guard(zip.open, read_ok)
+  zip.openfile = guard(zip.openfile, read_ok)
+end
+if gzip and gzip.open then
+  local gzip_open = gzip.open
+  gzip.open = function(name, mode, ...)
+    if not (read_ok(name) and (mode == nil or not find(mode, "[wa+]") or write_ok(name))) then return nil, EPERM end
+    return gzip_open(name, mode, ...)
+  end
+end
+if pdfe then pdfe.open = guard(pdfe.open, read_ok) end
+-- pdf.obj/pdf.immediateobj with type "file"/"streamfile" (or { file = … }) copy a file into
+-- the PDF.
+if pdf then
+  local function obj_guard(fn)
+    if type(fn) ~= "function" then return fn end
+    return function(...)
+      local a = { ... }
+      if type(a[1]) == "table" then
+        if a[1].file ~= nil and not read_ok(a[1].file) then raise() end
+      else
+        local i = type(a[1]) == "number" and 2 or 1
+        if (a[i] == "file" or a[i] == "streamfile") and not read_ok(a[i + 1]) then raise() end
+      end
+      return fn(...)
+    end
+  end
+  pdf.obj = obj_guard(pdf.obj)
+  pdf.immediateobj = obj_guard(pdf.immediateobj)
+end
+local hb = package and package.loaded and package.loaded.luaharfbuzz
+if type(hb) == "table" then
+  if type(hb.Blob) == "table" then hb.Blob.new_from_file = guard(hb.Blob.new_from_file, read_ok) end
+  if type(hb.Face) == "table" then hb.Face.new = guard(hb.Face.new, read_ok) end
+end
+if fontloader then
+  fontloader.open = guard(fontloader.open, read_ok)
+  fontloader.info = guard(fontloader.info, read_ok)
+end
+-- MetaPost opens what find_file returns (without find_file: the name as given).
+if mplib and mplib.new then
+  local mplib_new = mplib.new
+  mplib.new = function(cfg, ...)
+    local c = {}
+    if type(cfg) == "table" then for k, v in pairs(cfg) do c[k] = v end end
+    local find_file = c.find_file
+    c.find_file = function(name, mode, kind)
+      local found = name
+      if type(find_file) == "function" then found = find_file(name, mode, kind) end
+      if type(found) ~= "string" then return found end
+      if mode == "w" then return write_ok(found) and found or nil end
+      return read_ok(found) and found or nil
+    end
+    return mplib_new(c, ...)
+  end
+end
+
+-- kpathsea lookups of absolute names would tell which files exist outside.
+for _, f in ipairs({ "find_file", "readable_file", "lookup" }) do
+  local orig = kpse[f]
+  if type(orig) == "function" then
+    kpse[f] = function(name, ...)
+      if type(name) == "string" then
+        local p = norm(name)
+        if (is_abs(p) or has_dotdot(p)) and not read_ok(name) then return nil end
+      end
+      return orig(name, ...)
+    end
+  end
+end
+
+---------------------------------------------------------------------------------------------
+-- Callbacks
+
+-- find_*_file callbacks hand LuaTeX a file name that it opens on the C side. LuaTeX's own
+-- lookup for images (\includegraphics, img.scan), \pdfextension obj file (embeds any file
+-- into the PDF), map/enc files and font files does not check openin_any, so they get a
+-- checked default. A refused name becomes DENIED, a path that cannot exist: for nil
+-- LuaTeX falls back to the name as given (\pdfextension obj file). ltluatex keeps a copy
+-- of callback.register, so the wrapper below also covers luatexbase.add_to_callback;
+-- unregistering brings back the checked default.
+local DENIED = "/latex-ide-sandbox/nicht-erlaubt"
+local callback_register = callback.register
+local kpse_find_file = kpse.find_file
+local defaults = {}
+local function checked_lookup(format, must_exist)
+  return function(name)
+    if not read_ok(name) then return DENIED end
+    local found = kpse_find_file(name, format, must_exist)
+    if found == nil then return nil end
+    return read_ok(found) and found or DENIED
+  end
+end
+defaults.find_image_file = checked_lookup("tex", true)
+defaults.find_data_file = checked_lookup("tex", true)
+defaults.find_map_file = checked_lookup("map")
+defaults.find_enc_file = checked_lookup("enc files")
+defaults.find_type1_file = checked_lookup("type1 fonts")
+defaults.find_truetype_file = checked_lookup("truetype fonts")
+defaults.find_opentype_file = checked_lookup("opentype fonts")
+
+callback.register = function(name, fn, ...)
+  if type(name) == "string" and find(name, "^find_.*_file$") then
+    local default = defaults[name]
+    if type(fn) == "function" then
+      local check = (name == "find_write_file" or name == "find_output_file") and write_ok or read_ok
+      local inner = fn
+      fn = function(...)
+        local found = inner(...)
+        if type(found) == "string" then return check(found) and found or DENIED end
+        -- nil: LuaTeX would take the name as given.
+        if default then return default(...) end
+        return found
+      end
+    elseif default then
+      fn = default
+    end
+  end
+  return callback_register(name, fn, ...)
+end
+for name, fn in pairs(defaults) do callback_register(name, fn) end
+
+-- debug.getupvalue would hand out the unwrapped functions. TeX Live 2023+ removes the
+-- debug library anyway (unless --luadebug), older versions do not.
+if debug then
+  for k in pairs(debug) do
+    if k ~= "traceback" then debug[k] = nil end
+  end
+end
