@@ -10,7 +10,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { compile, findMainCandidate, mainPathError } = require('../server/lib/compile');
 const { childEnv } = require('../server/lib/childEnv');
-const { startServer, client } = require('./_server');
+// ADMIN_PASSWORD: the throwaway servers' admin login once #116 is merged, until then the old fallback.
+const { startServer, client, ADMIN_PASSWORD = 'bitte-sofort-aendern' } = require('./_server');
 
 const hasTex = spawnSync('latexmk', ['-v'], { windowsHide: true }).status === 0;
 const DOC = '\\documentclass{article}\n\\begin{document}\nHallo\n\\end{document}\n';
@@ -94,7 +95,7 @@ test('POST /api/main-file prüft den Namen der Hauptdatei (#112)', async () => {
   const srv = await startServer();
   try {
     const c = client(srv.base);
-    await c.login('admin', 'bitte-sofort-aendern');
+    await c.login('admin', ADMIN_PASSWORD);
     const root = (await c.call('POST', '/api/projects/create', { name: 'Sandbox' })).body.root;
     const h = { 'X-Project-Id': (await c.call('POST', '/api/projects/open', { root })).body.projectId };
     for (const name of ['-pdflatex=touch PWNED;.tex', '`touch PWNED`.tex', 'ok.tex']) {
