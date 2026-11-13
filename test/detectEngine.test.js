@@ -102,6 +102,12 @@ test('#122 fontspec nur in verbatim/lstlisting/\\iffalse … \\fi schaltet nicht
   assert.strictEqual(eng('\\newif\\ifentwurf\n\\let\\ifalt\\iftrue\n\\iffalse\n\\fi\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
   assert.strictEqual(eng('\\iffalse\n\\usepackage{amsmath}\n\\else\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'xelatex');
   assert.strictEqual(eng('\\iftrue\n\\usepackage{amsmath}\n\\else\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'pdflatex');
+  // Ein \if… ohne \fi bis zum Dateiende steht in einer Definition: zählt als unbekannt,
+  // der Rest der Datei fällt nicht weg. Geschlossene \iffalse danach gelten weiter.
+  assert.strictEqual(eng('\\newcommand{\\hide}{\\iffalse}\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\expandafter\\let\\csname ifentwurf\\endcsname\\iffalse\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\documentclass{hs}', 'pdflatex', { 'hs.cls': '\\def\\hs@xe{\\ifXeTeX}\n\\RequirePackage{fontspec}' }), 'xelatex');
+  assert.strictEqual(eng('\\newcommand{\\hide}{\\iffalse}\n\\iffalse\\usepackage{fontspec}\\fi', 'pdflatex'), 'pdflatex');
   // Was danach kommt, zählt wieder; % im verbatim ist kein Kommentar.
   assert.strictEqual(eng('\\begin{verbatim}\n50% \\end{verbatim}\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
   assert.strictEqual(eng('\\iffalse x \\fi\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
@@ -212,6 +218,41 @@ test('#122 detectProjectEngine: liest nur Dateien im Projekt, wie TeX sie findet
     main('\\input{pipe}');
     assert.strictEqual(run().engine, 'pdflatex');
   }
+});
+
+test('#122 Obergrenzen: ein präpariertes Projekt hält den Server nicht auf', () => {
+  // Die Erkennung läuft synchron im Event-Loop: Viel Leerraum nach \def/\let\x/\newcommand
+  // darf keine Regex quadratisch backtracken lassen (vorher 13 s bei 156 KiB, jetzt wenige ms).
+  const ws = ' \n'.repeat(128 * 1024);
+  for (const head of ['\\def', '\\let\\x', '\\let\\x =', '\\newif', '\\newcommand', '\\newcommand{', '\\usepackage', '\\begin', '\\unless']) {
+    const t0 = process.hrtime.bigint();
+    assert.strictEqual(eng(`${head}${ws}x`, 'pdflatex', {}), 'pdflatex');
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 1000, `${head} + 256 KiB Leerraum: ${ms} ms`);
+  }
+
+  // Nachschlagen: höchstens 256 Dateinamen, gefunden oder nicht (je ein realpath + open).
+  const calls = [];
+  const counting = (files) => (name) => (calls.push(name), Object.hasOwn(files, name) ? files[name] : null);
+  const pkgs = Array.from({ length: 50 }, (_, j) => `\\usepackage{${Array.from({ length: 100 }, (_, i) => `p${j}x${i}`)}}`).join('\n');
+  const cls = { 'hsthesis.cls': '\\RequirePackage{fontspec}' };
+  assert.strictEqual(detectEngine(`\\documentclass{hsthesis}\n${pkgs}`, 'pdflatex', counting(cls)).engine, 'xelatex');
+  assert.strictEqual(calls.length, 256);
+
+  // Reihenfolge wie im Dokument: Die Präambel kommt vor 40 Abbildungen im Text, obwohl
+  // nach 32 gelesenen Dateien Schluss ist.
+  const figs = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`abb${i}.tex`, '\\begin{tikzpicture}\\end{tikzpicture}']));
+  const body = Object.keys(figs).map((f) => `\\input{${f}}`).join('\n');
+  const stil = { ...figs, 'meinstil.sty': '\\RequirePackage{fontspec}' };
+  assert.strictEqual(eng(`\\usepackage{meinstil}\n\\begin{document}\n${body}\n\\end{document}`, 'pdflatex', stil), 'xelatex');
+
+  // Höchstens 4 MiB Text über alle Dateien: Danach wird nichts mehr gelesen.
+  const big = '%'.repeat(1024 * 1024);
+  const many = { 'k0.tex': big, 'k1.tex': big, 'k2.tex': big, 'k3.tex': big, 'k4.tex': '\\usepackage{fontspec}' };
+  const inputs = Object.keys(many).map((f) => `\\input{${f}}`).join('\n');
+  assert.strictEqual(eng(inputs, 'pdflatex', many), 'pdflatex');
+  delete many['k3.tex'];
+  assert.strictEqual(eng(inputs, 'pdflatex', many), 'xelatex');
 });
 
 // Ende-zu-Ende mit TeX: compile() schaltet anhand der eingebundenen Präambel um.

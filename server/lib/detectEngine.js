@@ -22,15 +22,19 @@
 // with both branches.
 // Besides the main file, the project files it pulls in directly are read - one level,
 // not recursive: \input/\include/\subfile/\import targets and its own .cls/.sty
-// (\documentclass{hsthesis} -> hsthesis.cls). Classes and packages installed in the
-// TeX tree are not read.
+// (\documentclass{hsthesis} -> hsthesis.cls), in document order up to the bounds below.
+// Classes and packages installed in the TeX tree are not read.
 const fs = require('fs');
 const path = require('path');
 
 const ENGINES = ['pdflatex', 'xelatex', 'lualatex'];
-// Bounds, so a huge or hostile project cannot stall the server (detection runs in its event loop).
+// Bounds, so a huge or hostile project cannot stall the server: detection runs synchronously
+// in its event loop. All of it stays linear in the text read (no regex backtracking over
+// unbounded input).
 const MAX_FILES = 32; // project files read besides the main file
 const MAX_BYTES = 1024 * 1024; // per file; preambles are at the top anyway
+const MAX_TOTAL = 4 * 1024 * 1024; // all files together, main file included
+const MAX_LOOKUPS = 256; // file names tried besides the main file, found or not (each a realpath + open)
 const MAX_COMMANDS = 1000; // \usepackage/\input/… looked at per file
 const MAX_ARG = 2048; // characters of one […] or {…} argument
 
@@ -146,16 +150,27 @@ const PRIMITIVE_TESTS = {
 // Macros named \if… that are no TeX conditionals (etoolbox, ifthen): no matching \fi.
 const NOT_CONDITIONAL = /^if(?:thenelse|toggle|bool(?:expr|expe)?|(?:cs)?(?:un)?def(?!ined$)[a-z]*|cs(?:macro|param|prefix|protected|empty|void|equal|string|strequal|counter|length|dimen)|blank|str[a-z]+|num[a-z]+|dim[a-z]+|inlist(?:cs)?|rmnum|ltxcounter|patchable)$/;
 // \newif\ifdraft, \let\ifA\iftrue, \def\ifB …: the \if… there is a name, not a conditional.
+// No two \s* in a row (\s*=?\s*): without the = they would backtrack quadratically on long whitespace.
 const DEFINED_IFS = [
-  /(\\let\s*\\[A-Za-z@]+\s*=?\s*)\\(?=if)/g,
-  /(\\(?:newif|let|[gex]?def|(?:re)?newcommand\*?|providecommand\*?|DeclareRobustCommand\*?)\s*\{?\s*)\\(?=if)/g,
+  /(\\let\s*\\[A-Za-z@]+\s*(?:=\s*)?)\\(?=if)/g,
+  /(\\(?:newif|let|[gex]?def|(?:re)?newcommand\*?|providecommand\*?|DeclareRobustCommand\*?)\s*(?:\{\s*)?)\\(?=if)/g,
 ];
 
 // Drops the branches the given engine does not take. Unknown conditionals keep both.
+// A known \if… that no \fi closes up to the end of the file is part of a definition
+// (\newcommand{\hide}{\iffalse}, \expandafter\let\csname ifX\endcsname\iffalse), not a
+// branch: a second pass counts it as unknown instead of dropping the rest of the file.
 function evalConditionals(src, engine) {
   for (const re of DEFINED_IFS) src = src.replace(re, '$1\\_');
+  const first = evalBranches(src, engine, null);
+  return first.open.size ? evalBranches(src, engine, first.open).out : first.out;
+}
+
+// unknown: indexes of \if… to treat as unknown. Returns the kept text and the indexes of
+// known \if… still open at the end (the nesting does not depend on the truth values).
+function evalBranches(src, engine, unknown) {
   const re = /\\(unless\s*\\)?(if[A-Za-z@]*)|\\(else|fi)(?![A-Za-z@])/g;
-  const stack = []; // { parent: live outside, truth: true | false | null (unknown), inElse }
+  const stack = []; // { parent: live outside, truth: true | false | null (unknown), inElse, at }
   const live = () => {
     const f = stack[stack.length - 1];
     return !f || (f.parent && (f.truth === null || f.truth !== f.inElse));
@@ -180,6 +195,7 @@ function evalConditionals(src, engine) {
         }
       }
       if (truth !== null && unless) truth = !truth;
+      if (unknown && unknown.has(m.index)) truth = null;
     }
     if (live()) out += src.slice(last, m.index) + ' ';
     if (word === 'else') {
@@ -187,12 +203,12 @@ function evalConditionals(src, engine) {
     } else if (word === 'fi') {
       stack.pop();
     } else {
-      stack.push({ parent: live(), truth, inElse: false });
+      stack.push({ parent: live(), truth, inElse: false, at: m.index });
     }
     last = re.lastIndex = end;
   }
   if (live()) out += src.slice(last);
-  return out;
+  return { out, open: new Set(stack.filter((f) => f.truth !== null).map((f) => f.at)) };
 }
 
 const CMD = /\\(usepackage|RequirePackage(?:WithOptions)?|documentclass|LoadClass(?:WithOptions)?|PassOptionsToPackage|babelprovide|input|include|subfile|subfileinclude|import|subimport|inputfrom|subinputfrom|includefrom|subincludefrom)(?![A-Za-z@])/g;
@@ -200,8 +216,11 @@ const IMPORTS = ['import', 'subimport', 'inputfrom', 'subinputfrom', 'includefro
 const names = (list) => list.split(',').map((s) => s.trim()).filter(Boolean);
 
 // Packages, classes, babel options and \input-like targets of one (stripped) file.
+// refs: the project files this file may pull in, in document order ({ name, ext }; ext
+// null = \input-like), so the preamble comes before chapters and figures when a limit hits.
 function analyse(src) {
-  const info = { packages: [], classes: [], babelOpts: [], provideOpts: [], files: [] };
+  const info = { packages: [], classes: [], babelOpts: [], provideOpts: [], refs: [] };
+  const file = (name) => info.refs.push({ name, ext: null });
   let count = 0;
   for (const m of src.matchAll(CMD)) {
     if (++count > MAX_COMMANDS) break;
@@ -211,25 +230,27 @@ function analyse(src) {
     const a = arg(src, opt ? opt.end : at, '{');
     if (!a) {
       const bare = cmd === 'input' && /^\s*([^\s{}\\%]+)/.exec(src.slice(at, at + 256)); // \input praeambel
-      if (bare) info.files.push(bare[1]);
+      if (bare) file(bare[1]);
       continue;
     }
     if (/^(?:usepackage|RequirePackage)/.test(cmd)) {
       const list = names(a.body);
       info.packages.push(...list);
+      info.refs.push(...list.map((name) => ({ name, ext: '.sty' })));
       if (opt && list.some((p) => p.toLowerCase() === 'babel')) info.babelOpts.push(opt.body);
     } else if (/^(?:documentclass|LoadClass)/.test(cmd)) {
       info.classes.push(a.body.trim());
+      info.refs.push({ name: a.body.trim(), ext: '.cls' });
     } else if (cmd === 'PassOptionsToPackage') {
       const to = arg(src, a.end, '{');
       if (to && names(to.body).some((p) => p.toLowerCase() === 'babel')) info.babelOpts.push(a.body);
     } else if (cmd === 'babelprovide') {
       if (opt) info.provideOpts.push(opt.body);
     } else if (IMPORTS.includes(cmd)) {
-      const file = arg(src, a.end, '{');
-      if (file) info.files.push(path.posix.join(a.body.trim() || '.', file.body.trim()));
+      const f = arg(src, a.end, '{');
+      if (f) file(path.posix.join(a.body.trim() || '.', f.body.trim()));
     } else {
-      info.files.push(a.body.trim());
+      file(a.body.trim());
     }
   }
   const font = FONT_COMMAND.exec(src);
@@ -252,23 +273,24 @@ function needs(info) {
   };
 }
 
-// File names TeX would try for a reference of the main file, in order.
+// File names TeX would try for each reference of the main file (document order).
 function candidates(info) {
-  const clean = (n) => n.replace(/^"(.*)"$/, '$1');
-  const ok = (n) => n && !/[\\#]/.test(n);
-  return [
-    ...info.files.map(clean).filter(ok).map((n) => (/\.tex$/i.test(n) ? [n] : [`${n}.tex`, n])),
-    ...info.classes.filter(ok).map((c) => [`${c}.cls`]),
-    ...info.packages.filter(ok).map((p) => [`${p}.sty`]),
-  ];
+  const out = [];
+  for (const { name, ext } of info.refs) {
+    const n = ext ? name : name.replace(/^"(.*)"$/, '$1');
+    if (!n || /[\\#]/.test(n)) continue;
+    out.push(ext ? [n + ext] : /\.tex$/i.test(n) ? [n] : [`${n}.tex`, n]);
+  }
+  return out;
 }
 
-// source: main file text. read(name) -> text or null for a project file (see projectReader);
-// without it only the main file is looked at.
+// source: main file text. read(name, maxBytes) -> text or null for a project file (see
+// projectReader); without it only the main file is looked at.
 function detectEngine(source, selected, read) {
   const sel = ENGINES.includes(selected) ? selected : 'pdflatex';
   const result = (engine, reason, warning = null) => ({ engine, reason, warning, changed: engine !== sel });
-  const main = strip(String(source || ''));
+  source = String(source || '');
+  const main = strip(source);
 
   // The first "program" magic comment decides; an unsupported value is ignored.
   let warning = null;
@@ -286,14 +308,19 @@ function detectEngine(source, selected, read) {
   const files = [{ name: null, info: mainInfo }];
   if (typeof read === 'function') {
     const seen = new Set();
+    let lookups = 0;
+    let budget = MAX_TOTAL - source.length;
     for (const tries of candidates(mainInfo)) {
-      if (files.length > MAX_FILES) break;
+      if (files.length > MAX_FILES || lookups >= MAX_LOOKUPS || budget <= 0) break;
       if (seen.has(tries[0])) continue;
       seen.add(tries[0]);
       for (const name of tries) {
-        const text = read(name);
+        if (++lookups > MAX_LOOKUPS) break;
+        const text = read(name, Math.min(budget, MAX_BYTES));
         if (typeof text !== 'string') continue;
-        files.push({ name, info: analyse(evalConditionals(strip(text).text, sel)) });
+        const part = text.slice(0, budget);
+        budget -= part.length;
+        files.push({ name, info: analyse(evalConditionals(strip(part).text, sel)) });
         break;
       }
     }
@@ -312,8 +339,8 @@ function detectEngine(source, selected, read) {
 }
 
 // A project file as text, or null: only regular files whose real path is inside base
-// (no symlink out of the project, no FIFO/device that would block), at most MAX_BYTES.
-function readProjectFile(base, abs) {
+// (no symlink out of the project, no FIFO/device that would block), at most maxBytes.
+function readProjectFile(base, abs, maxBytes = MAX_BYTES) {
   let fd;
   try {
     const rel = path.relative(base, fs.realpathSync(abs));
@@ -322,7 +349,7 @@ function readProjectFile(base, abs) {
     fd = fs.openSync(path.join(base, rel), O_RDONLY | O_NONBLOCK | O_NOFOLLOW);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) return null;
-    const buf = Buffer.alloc(Math.min(st.size, MAX_BYTES));
+    const buf = Buffer.alloc(Math.max(0, Math.min(st.size, maxBytes, MAX_BYTES)));
     return buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
   } catch {
     return null;
@@ -335,11 +362,11 @@ function readProjectFile(base, abs) {
 // TEXINPUTS = main file's folder first): main folder, then root; ./ and ../ from the root only.
 function projectReader(base, mainRelPath) {
   const mainDir = path.dirname(String(mainRelPath || ''));
-  return (name) => {
+  return (name, maxBytes) => {
     if (!name || path.isAbsolute(name) || /^[A-Za-z]:|^~/.test(name)) return null;
     const dirs = mainDir === '.' || /^\.\.?[\\/]/.test(name) ? [''] : [mainDir, ''];
     for (const dir of dirs) {
-      const text = readProjectFile(base, path.join(base, dir, name));
+      const text = readProjectFile(base, path.join(base, dir, name), maxBytes);
       if (text !== null) return text;
     }
     return null;
