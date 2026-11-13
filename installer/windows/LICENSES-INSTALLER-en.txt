@@ -23,8 +23,9 @@ found via PATH (default: latexmk); TEX_BACKEND=tectonic selects Tectonic
 instead (desktop app only, install it separately). If no TeX system is
 found, the setup downloads TeX Live 2025 from a TUG mirror
 (ftp.tu-chemnitz.de) and installs it locally. TeX Live consists of
-packages under free licenses (mostly LPPL); see
-https://www.tug.org/texlive/LICENSE.TL and the license files in the
+packages under free licenses (mostly LPPL, some under GPL or AGPL, e.g.
+the bundled Perl (GPL or Artistic License) and Ghostscript (AGPL-3.0));
+see https://www.tug.org/texlive/LICENSE.TL and the license files in the
 TeX Live installation.
 
 Third-party npm packages

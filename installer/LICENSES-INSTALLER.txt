@@ -29,8 +29,11 @@ Fehlt ein TeX-System, laedt der Installer TeX Live (Windows) bzw. MacTeX
 CTAN-/TUG-Spiegelserver (ftp.tu-chemnitz.de, historisches TeX Live 2025)
 herunter und installiert es lokal. TeX Live/MacTeX stehen unter freien
 Lizenzen der jeweiligen Pakete (ueberwiegend LPPL, teils andere freie
-Lizenzen); Details siehe https://www.tug.org/texlive/LICENSE.TL bzw.
-die Lizenzdateien innerhalb der TeX-Live-Installation.
+Lizenzen, darunter GPL und AGPL: z. B. Perl (GPL oder Artistic License,
+unter Windows in TeX Live enthalten) und Ghostscript (AGPL-3.0, in TeX Live
+fuer Windows und in MacTeX)); Details siehe
+https://www.tug.org/texlive/LICENSE.TL bzw. die Lizenzdateien innerhalb
+der TeX-Live-Installation.
 
 App-Abhaengigkeiten
 --------------------

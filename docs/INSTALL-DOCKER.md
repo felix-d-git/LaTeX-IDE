@@ -189,13 +189,20 @@ Lizenzen, u. a. unter GPL, LGPL und AGPL:
 - Debian-Basissystem (`node:26-bookworm-slim`), z. B. bash und coreutils
   (GPL-3.0+), mawk (GPL-2.0), glibc und GMP (LGPL)
 - `perl` (GPL-1.0+ oder Artistic)
-- aus dem Node-Basisimage außerdem Node.js mit npm (MIT u. a., Lizenz unter
-  `/usr/local/LICENSE`) und Yarn 1 (BSD-2-Clause, unter `/opt/yarn-*`)
+- aus dem Node-Basisimage außerdem Node.js (MIT, eingebaute Komponenten unter
+  weiteren Lizenzen; alle Texte unter `/usr/local/LICENSE`) und npm
+  (Artistic-2.0, `/usr/local/lib/node_modules/npm/LICENSE`); Yarn enthält das
+  Node-26-Basisimage nicht
 - beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL,
   LPPL) mit ihren Abhängigkeiten, darunter Ghostscript/libgs (AGPL-3.0+),
-  ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL)
-- `pandoc` (GPL-2.0+) mit statisch gelinkten Haskell-Bibliotheken (fehlt bei
-  `PANDOC=0`)
+  ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL),
+  Python 3 (PSF-2.0), Ruby (Ruby-Lizenz oder BSD-2-Clause), Asymptote (LGPL/GPL),
+  biber (Artistic-2.0), ConTeXt/LuaTeX (u. a. GPL) und zahlreiche Schriften
+  (u. a. OFL-1.1, GPL mit Font-Ausnahme, LPPL); die genaue Lizenz jedes Pakets
+  steht in dessen `copyright`-Datei
+- `pandoc` (GPL-2.0-or-later, einzelne Teile GPL-2.0-only, z. B. der
+  TikiWiki-Reader) mit statisch gelinkten Haskell-Bibliotheken (überwiegend
+  BSD-3-Clause, MIT/Expat und ISC) und der GHC-Runtime (fehlt bei `PANDOC=0`)
 
 Copyright-Vermerke und Lizenzen der Pakete liegen im Image unter
 `/usr/share/doc/<paket>/copyright`, die der statisch in pandoc gelinkten
