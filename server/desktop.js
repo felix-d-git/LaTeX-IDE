@@ -13,6 +13,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const httpProxy = require('http-proxy');
+// Shared projects bring other people's files: latexmkrc stays off here, whatever the environment says (#111).
+delete process.env.LATEXMK_ALLOW_RC;
 const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
