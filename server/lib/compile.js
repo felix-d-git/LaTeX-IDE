@@ -92,12 +92,12 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     if (BACKEND === 'latexmk') {
       let source = '';
       try { source = fs.readFileSync(path.join(root, mainRelPath), 'utf8'); } catch {}
-      const { engine, reason } = detectEngine(source, settings.compiler);
-      if (engine !== (settings.compiler || 'pdflatex')) {
+      const { engine, reason, warning, changed } = detectEngine(source, settings.compiler);
+      if (changed) {
         settings = { ...settings, compiler: engine };
-        note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})
-`;
+        note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})\n`;
       }
+      if (warning) note += `[LaTeX-IDE] ${warning}\n`;
     }
     const [cmd, args] = texCommand(mainRelPath, settings, outRel.split(path.sep).join('/'));
 

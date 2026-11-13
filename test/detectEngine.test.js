@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const { detectEngine } = require('../server/lib/detectEngine');
 
 const eng = (src, sel) => detectEngine(src, sel).engine;
+const why = (src, sel) => detectEngine(src, sel).reason;
 
 test('detectEngine', () => {
   assert.strictEqual(eng('% !TEX program = xelatex\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
@@ -17,4 +18,107 @@ test('detectEngine', () => {
   assert.strictEqual(eng('\\usepackage{xeCJK}', 'pdflatex'), 'xelatex');
   assert.strictEqual(eng('% \\usepackage{fontspec}\n50\\% Rabatt', 'pdflatex'), 'pdflatex');
   assert.strictEqual(eng('', undefined), 'pdflatex');
+});
+
+// #122: Grenzfälle, je Punkt aus dem Issue mindestens eine Zeile.
+
+test('#122 Klassen, die eine Engine erzwingen (ctex, LuaTeX-ja, jlreq)', () => {
+  assert.strictEqual(eng('\\documentclass[UTF8]{ctexart}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\documentclass{ctexbook}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\documentclass{ctexart}', 'xelatex'), 'xelatex');
+  assert.strictEqual(eng('\\documentclass{ctexart}', 'lualatex'), 'lualatex'); // ctex läuft mit beiden
+  assert.strictEqual(eng('\\documentclass{article}\\usepackage{ctex}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\documentclass{ltjsarticle}', 'pdflatex'), 'lualatex');
+  assert.strictEqual(eng('\\documentclass{ltjsarticle}', 'xelatex'), 'lualatex');
+  assert.strictEqual(eng('\\documentclass{ltjarticle}', 'pdflatex'), 'lualatex');
+  assert.strictEqual(eng('\\documentclass[paper=a4]{jlreq}', 'pdflatex'), 'lualatex');
+  assert.strictEqual(eng('\\usepackage{luatexja-preset}', 'pdflatex'), 'lualatex');
+  assert.strictEqual(eng('\\usepackage{mathspec}', 'lualatex'), 'xelatex'); // mathspec gibt es nur für XeTeX
+});
+
+test('#122 fontspec nur in verbatim/lstlisting/\\iffalse … \\fi schaltet nicht um', () => {
+  const after = '\n\\usepackage{amsmath}';
+  assert.strictEqual(eng(`\\begin{verbatim}\n\\usepackage{fontspec}\n\\end{verbatim}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng(`\\begin{verbatim*}\n\\usepackage{fontspec}\n\\end{verbatim*}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng(`\\begin{Verbatim}[frame=single]\n\\usepackage{fontspec}\n\\end{Verbatim}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng(`\\begin{lstlisting}[language={[LaTeX]TeX}]\n\\usepackage{fontspec}\n\\end{lstlisting}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng(`\\begin{minted}{latex}\n\\setmainfont{Arial}\n\\end{minted}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng(`\\begin{comment}\n\\usepackage{fontspec}\n\\end{comment}${after}`, 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\verb|\\usepackage{fontspec}| und \\verb*!\\directlua{}!', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\lstinline[language=TeX]{\\usepackage{fontspec}} \\lstinline|\\usepackage{xeCJK}|', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\mintinline{latex}{\\usepackage{fontspec}}', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\iffalse\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\iffalse\n\\ifx\\a\\b \\usepackage{fontspec}\\fi\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'pdflatex'); // verschachtelt
+  assert.strictEqual(eng('\\iffalse\n\\iftoggle{a}{x}{y}\n\\ifthenelse{1=1}{x}{y}\n\\fi\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex'); // keine echten \if
+  assert.strictEqual(eng('\\newif\\ifentwurf\n\\let\\ifalt\\iftrue\n\\iffalse\n\\fi\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\iffalse\n\\usepackage{amsmath}\n\\else\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\iftrue\n\\usepackage{amsmath}\n\\else\n\\usepackage{fontspec}\n\\fi', 'pdflatex'), 'pdflatex');
+  // Was danach kommt, zählt wieder; % im verbatim ist kein Kommentar.
+  assert.strictEqual(eng('\\begin{verbatim}\n50% \\end{verbatim}\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\iffalse x \\fi\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  // Auskommentiertes \begin{verbatim} versteckt nichts; \\% ist ein Kommentar, \% nicht.
+  assert.strictEqual(eng('% \\begin{verbatim}\n\\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('Zeile\\\\% \\usepackage{fontspec}', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('50\\% \\usepackage{fontspec}', 'pdflatex'), 'xelatex');
+  // babel-Option nur im Fließtext/Code-Beispiel ist keine Option
+  assert.strictEqual(eng('\\usepackage{babel}\nMit \\texttt{bidi=basic} oder \\texttt{onchar=ids}.', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\ifx\\directlua\\undefined Kein LuaTeX.\\fi', 'pdflatex'), 'pdflatex');
+});
+
+test('#122 \\usepackage über mehrere Zeilen, ] in geschweiften Klammern, \\RequirePackage', () => {
+  assert.strictEqual(eng('\\usepackage[\n  ngerman,\n]{%\n  amsmath, % Mathe\n  fontspec\n}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\usepackage\n  [Scale=MatchLowercase]\n  {fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\usepackage[Path={./fonts/[alt]/}]{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\usepackage[ngerman, foo={a]b}, bidi=basic]{babel}', 'xelatex'), 'lualatex');
+  assert.strictEqual(eng('\\RequirePackage{fontspec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\RequirePackage[no-math]{fontspec}[2020/02/01]', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\usepackage{FontSpec}', 'pdflatex'), 'xelatex');
+  assert.strictEqual(why('\\usepackage{xeCJK}', 'pdflatex'), 'xeCJK');
+});
+
+test('#122 Magic Comment: Position, Groß-/Kleinschreibung, ungültiger Wert', () => {
+  const lua = (head) => eng(`${head}\n\\usepackage{fontspec}`, 'pdflatex');
+  assert.strictEqual(lua('% Arbeit von X\n%\n% !TEX program = lualatex'), 'lualatex'); // nicht erste Zeile
+  assert.strictEqual(lua('\\documentclass{article}\n  % !TEX program = lualatex'), 'lualatex'); // nach \documentclass
+  assert.strictEqual(lua('% !tex ts-program = LuaLaTeX'), 'lualatex');
+  assert.strictEqual(lua('%!TeX Program=XELATEX'), 'xelatex');
+  assert.strictEqual(lua('% !TEX TS-program = lualatexmk'), 'lualatex'); // TeXShop-Engine
+  assert.strictEqual(lua('% !TEX program = lualatex\n% !TEX program = pdflatex'), 'lualatex'); // der erste gilt
+  // Ungültiger Wert: ignoriert, Erkennung läuft weiter, Hinweis fürs Log.
+  const ctx = detectEngine('% !TEX program = context\n\\usepackage{fontspec}', 'pdflatex');
+  assert.deepStrictEqual([ctx.engine, ctx.reason], ['xelatex', 'fontspec']);
+  assert.match(ctx.warning, /context.*ignoriert/);
+  assert.strictEqual(eng('% !TEX program = platex\n\\documentclass{article}', 'lualatex'), 'lualatex');
+  assert.strictEqual(detectEngine('% !TEX program = xelatex', 'pdflatex').warning, null);
+  // Zählt nicht: nach \begin{document}, hinter Code, in verbatim, als TEX root/spellcheck.
+  assert.strictEqual(eng('\\begin{document}\n% !TEX program = lualatex\n\\end{document}', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\documentclass{article} % !TEX program = lualatex', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\begin{verbatim}\n% !TEX program = lualatex\n\\end{verbatim}', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('% !TEX root = main.tex\n% !TEX spellcheck = de_DE', 'xelatex'), 'xelatex');
+});
+
+test('#122 iftex-Weichen: nur der Zweig des eingestellten Compilers zählt', () => {
+  const weiche = '\\usepackage{iftex}\n\\ifPDFTeX\n  \\usepackage[T1]{fontenc}\n\\else\n  \\usepackage{fontspec}\n\\fi\n';
+  assert.strictEqual(eng(weiche, 'pdflatex'), 'pdflatex'); // läuft mit pdflatex, bleibt
+  assert.strictEqual(eng(weiche, 'xelatex'), 'xelatex');
+  assert.strictEqual(eng(weiche, 'lualatex'), 'lualatex');
+  assert.strictEqual(eng('\\iftutex\\usepackage{fontspec}\\else\\usepackage[T1]{fontenc}\\fi', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\ifxetex\\usepackage{fontspec}\\fi\n\\ifluatex\\usepackage{luacode}\\fi', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\unless\\ifPDFTeX\\usepackage{fontspec}\\fi', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\ifdefined\\directlua\\directlua{tex.print("x")}\\fi', 'pdflatex'), 'pdflatex');
+  assert.strictEqual(eng('\\ifx\\directlua\\undefined\\else\\directlua{tex.print("x")}\\fi', 'xelatex'), 'xelatex');
+  assert.strictEqual(eng('\\ifcsname XeTeXrevision\\endcsname\\usepackage{xeCJK}\\fi', 'pdflatex'), 'pdflatex');
+  // Der Zweig des eingestellten Compilers braucht etwas anderes -> umschalten.
+  assert.strictEqual(eng('\\ifPDFTeX\\usepackage{fontspec}\\fi', 'pdflatex'), 'xelatex');
+  assert.strictEqual(eng('\\ifPDFTeX\\usepackage[T1]{fontenc}\\else\\usepackage{xeCJK}\\fi', 'lualatex'), 'xelatex');
+  assert.strictEqual(eng('\\ifx\\directlua\\undefined\\usepackage{fontspec}\\fi', 'pdflatex'), 'xelatex');
+  // Unbekannte Bedingung: beide Zweige zählen (wie bisher).
+  assert.strictEqual(eng('\\newif\\ifentwurf\n\\ifentwurf\\else\\usepackage{fontspec}\\fi', 'pdflatex'), 'xelatex');
+});
+
+test('#122 Projekteinstellung xelatex + bidi=basic -> lualatex (scheitert, solange #119 offen ist)', () => {
+  assert.strictEqual(eng('\\usepackage[bidi=basic]{babel}', 'xelatex'), 'lualatex');
+  assert.strictEqual(eng('\\PassOptionsToPackage{bidi=basic-r}{babel}\n\\usepackage[arabic]{babel}', 'xelatex'), 'lualatex');
+  assert.strictEqual(why('\\usepackage[bidi=basic]{babel}', 'xelatex'), 'babel bidi=basic');
+  assert.strictEqual(eng('\\usepackage[bidi=bidi-r]{babel}', 'xelatex'), 'xelatex'); // XeTeX-Variante bleibt
 });
