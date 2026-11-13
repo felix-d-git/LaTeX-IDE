@@ -18,11 +18,15 @@ COPY . .
 # (@napi-rs/canvas: only pdf.js under Node needs it, the app runs pdf.js in the browser).
 # npm prune leaves the emptied scope folders (@esbuild, @napi-rs) behind.
 # pdfjs-dist: the client is bundled and build.js copies only the worker and three wasm files to client/dist,
-# the rest (cmaps, fonts, legacy build, QuickJS sandbox ...) is never served.
+# the rest (cmaps, fonts, legacy build, QuickJS sandbox ...) is never served. katex: the bundle uses
+# dist/katex.mjs, /katex serves dist/; src/ (own licenses, e.g. AMS METAFONT, MathJax) and the CLI go.
+# Both lists = STRIPPED in scripts/licenses.js (test/licenses.test.js).
 RUN node build.js \
     && npm prune --omit=dev --omit=optional \
     && find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete \
-    && cd node_modules/pdfjs-dist \
+    && cd /app/node_modules/katex \
+    && rm -rf src cli.js \
+    && cd /app/node_modules/pdfjs-dist \
     && rm -rf cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*
 
 FROM node:26-bookworm-slim

@@ -15,25 +15,45 @@ const { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle } = require('
 const ROOT = path.join(__dirname, '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 const sorted = (a) => [...a].sort();
-const want = sorted(STRIPPED['pdfjs-dist']);
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&');
+// Variable with the delete list per package in build-release.ps1
+const PS_VAR = { 'pdfjs-dist': 'PdfjsUnused', katex: 'KatexUnused' };
 
-test('Lizenzen: Dockerfile löscht genau die pdfjs-dist-Teile aus STRIPPED', () => {
-  const m = /cd node_modules\/pdfjs-dist \\\n\s*&& rm -rf ([^\n]+)/.exec(read('Dockerfile'));
-  assert.ok(m, 'rm -rf für pdfjs-dist fehlt im Dockerfile');
-  assert.deepStrictEqual(sorted(m[1].trim().split(/\s+/)), want);
+test('Lizenzen: STRIPPED nennt pdfjs-dist und katex (katex/src, cli.js seit #109)', () => {
+  assert.deepStrictEqual(sorted(Object.keys(STRIPPED)), ['katex', 'pdfjs-dist']);
+  assert.deepStrictEqual(sorted(STRIPPED.katex), ['cli.js', 'src']);
 });
 
-test('Lizenzen: Installer-Build löscht genau die pdfjs-dist-Teile aus STRIPPED', () => {
-  const m = /\$PdfjsUnused = @\(([^)]*)\)/.exec(read('installer/build-release.ps1'));
-  assert.ok(m, '$PdfjsUnused fehlt in build-release.ps1');
-  const parts = m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '').replace(/\\/g, '/'));
-  assert.deepStrictEqual(sorted(parts), want);
+test('Lizenzen: Dockerfile löscht genau die Teile aus STRIPPED', () => {
+  const df = read('Dockerfile');
+  for (const [name, parts] of Object.entries(STRIPPED)) {
+    const m = new RegExp(`cd /app/node_modules/${esc(name)} \\\\\\n\\s*&& rm -rf ([^\\n\\\\]+)`).exec(df);
+    assert.ok(m, `rm -rf für ${name} fehlt im Dockerfile`);
+    assert.deepStrictEqual(sorted(m[1].trim().split(/\s+/)), sorted(parts), name);
+  }
 });
 
-test('Lizenzen: Container-Workflow prüft die pdfjs-dist-Teile aus STRIPPED', () => {
-  const m = /for p in ([^;]+); do\n\s*! ls -d \/app\/node_modules\/pdfjs-dist\//.exec(read('.github/workflows/container-image.yml'));
-  assert.ok(m, 'Prüfung der pdfjs-dist-Teile fehlt in container-image.yml');
-  assert.deepStrictEqual(sorted(m[1].trim().split(/\s+/)), want);
+test('Lizenzen: Installer-Build löscht genau die Teile aus STRIPPED', () => {
+  const ps = read('installer/build-release.ps1');
+  for (const [name, parts] of Object.entries(STRIPPED)) {
+    assert.ok(PS_VAR[name], `${name}: keine Löschliste für build-release.ps1 bekannt`);
+    const m = new RegExp(`\\$${PS_VAR[name]} = @\\(([^)]*)\\)`).exec(ps);
+    assert.ok(m, `$${PS_VAR[name]} fehlt in build-release.ps1`);
+    const list = m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '').replace(/\\/g, '/'));
+    assert.deepStrictEqual(sorted(list), sorted(parts), name);
+    // Danach wird gelöscht und geprüft, dass nichts übrig ist
+    assert.match(ps, new RegExp(`Get-Item -Path \\$${PS_VAR[name]} -ErrorAction SilentlyContinue \\| Remove-Item -Recurse -Force`));
+    assert.match(ps, new RegExp(`Get-Item -Path \\$${PS_VAR[name]} -ErrorAction SilentlyContinue\\n\\s*if \\(`));
+  }
+});
+
+test('Lizenzen: Container-Workflow prüft die Teile aus STRIPPED', () => {
+  const yml = read('.github/workflows/container-image.yml');
+  for (const [name, parts] of Object.entries(STRIPPED)) {
+    const m = new RegExp(`for p in ([^;]+); do\\n\\s*! ls -d /app/node_modules/${esc(name)}/`).exec(yml);
+    assert.ok(m, `Prüfung der ${name}-Teile fehlt in container-image.yml`);
+    assert.deepStrictEqual(sorted(m[1].trim().split(/\s+/)), sorted(parts), name);
+  }
 });
 
 // --- Client bundle (client/dist) against package-lock.json and the notices ---
@@ -215,3 +235,51 @@ test('Lizenzen: SHIPPED_FROM_STRIPPED liegt in STRIPPED-Teilen mit Embedded-Hinw
     assert.match(section || '', /^### Embedded: /m, `${name} ohne Embedded-Hinweise`);
   }
 });
+
+// --- Third-party code inside the shipped pdf.js and KaTeX files (#109) ---
+
+const section = (name) => read('THIRD_PARTY_NOTICES.md').split(/^## /m).find((s) => s.startsWith(`${name}@`)) || '';
+const nm = (f) => fs.readFileSync(path.join(ROOT, 'node_modules', f));
+
+test('Lizenzen: Brotli, webpack-Runtime und Rust-Teile aus den pdf.js-Dateien stehen in den Notices', () => {
+  // Was in den ausgelieferten Dateien steckt (Quelle der Hinweise) ...
+  const worker = nm('pdfjs-dist/legacy/build/pdf.worker.min.mjs').toString('utf8');
+  assert.match(nm('pdfjs-dist/legacy/build/pdf.worker.mjs').toString('utf8'), /\/\/ \.\/external\/brotli\/decode\.js\n/, 'Brotli-Decoder nicht mehr im pdf.js-Worker');
+  assert.match(worker, /Brotli error code/);
+  assert.match(nm('pdfjs-dist/legacy/build/pdf.mjs').toString('utf8'), /__webpack_require__/);
+  assert.match(worker, /webpack/);
+  const qcms = nm('pdfjs-dist/wasm/qcms_bg.wasm').toString('latin1');
+  assert.match(qcms, /\/rustc\/[0-9a-f]{40}\/library\/std\//);
+  assert.match(qcms, /dlmalloc-0\.2\.13/);
+  assert.match(qcms, /__wbindgen_malloc/);
+  // ... und die Hinweise dazu
+  const pdfjs = section('pdfjs-dist');
+  for (const t of ['Brotli decoder (MIT)', 'webpack runtime (MIT)', 'Rust standard library, dlmalloc, wasm-bindgen (MIT)']) {
+    assert.match(pdfjs, new RegExp(`^### Embedded: ${esc(t)}$`, 'm'), t);
+  }
+  assert.match(pdfjs, /^Copyright 2017 Google Inc\. All Rights Reserved\.$/m);
+  assert.match(pdfjs, /^Copyright \(c\) 2009, 2010, 2013-2016 by the Brotli Authors\.$/m);
+  assert.match(pdfjs, /^Copyright JS Foundation and other contributors$/m);
+  assert.match(pdfjs, /^Rust standard library: Copyright \(c\) The Rust Project Contributors$/m);
+  assert.match(pdfjs, /^dlmalloc-rs, wasm-bindgen: Copyright \(c\) 2014 Alex Crichton$/m);
+  assert.match(pdfjs, /^License: .*MIT \(qcms, Brotli decoder, .*webpack runtime, Rust standard library, dlmalloc, wasm-bindgen\)$/m);
+});
+
+test('Lizenzen: KaTeX-Hinweis deckt die aus den Fonts abgeleiteten SVG-Glyphen ab', () => {
+  // svgGeometry: Pfade der dehnbaren Symbole, Wurzeln und großen Klammern, gebündelt über dist/katex.mjs
+  assert.match(nm('katex/dist/katex.mjs').toString('utf8'), /sqrtMain/);
+  const katex = section('katex');
+  assert.match(katex, /^### Fonts: dist\/fonts\/KaTeX_\* and SVG glyphs derived from them \(OFL-1\.1\)$/m);
+  assert.match(katex, /src\/svgGeometry\.ts, compiled into dist\/katex\.mjs and so into client\/dist\/bundle\.js/);
+  assert.match(katex, /^License: MIT \(code\); OFL-1\.1 \(fonts and SVG glyphs derived from them\)/m);
+});
+
+test('Lizenzen: Scope-Text nennt die aus gelöschten Teilen ausgelieferten Dateien', () => {
+  const head = read('THIRD_PARTY_NOTICES.md').split('\n| Package |')[0];
+  assert.doesNotMatch(head, /Not shipped/);
+  const list = (a) => a.map((x) => `\`${x}\``).join(', ');
+  for (const [name, parts] of Object.entries(STRIPPED)) assert.ok(head.includes(`- ${name}: ${list(parts)}\n`), name);
+  for (const [name, files] of Object.entries(SHIPPED_FROM_STRIPPED)) assert.ok(head.includes(`- ${name}: ${list(files)}\n`), name);
+  assert.match(head, /covered by the "Embedded:" notices/);
+});
+

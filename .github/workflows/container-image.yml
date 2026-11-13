@@ -98,6 +98,9 @@ jobs:
             for p in cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*; do
               ! ls -d /app/node_modules/pdfjs-dist/$p >/dev/null 2>&1 || fail "node_modules/pdfjs-dist/$p im Image"
             done
+            for p in src cli.js; do
+              ! ls -d /app/node_modules/katex/$p >/dev/null 2>&1 || fail "node_modules/katex/$p im Image"
+            done
             test ! -e /root/.npm || fail "/root/.npm im Image"
             command -v pandoc >/dev/null || fail "pandoc fehlt"
             echo "Selbstpruefung ok"
