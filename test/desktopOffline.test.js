@@ -25,6 +25,8 @@ function freePort() {
 
 // Fake remote: `state.down` = tunnel answers 502 without the app header (Funnel up, Pi off).
 // `state.active` = the user's active project on the server.
+const EVIL_SVG = '<svg xmlns="http://www.w3.org/2000/svg"><script>parent.alert(document.cookie)</script></svg>';
+
 async function startRemote(state) {
   const srv = http.createServer((req, res) => {
     const send = (status, body) => {
@@ -48,6 +50,12 @@ async function startRemote(state) {
       });
     }
     if (u.pathname === '/api/comments') return send(200, { project: state.active });
+    if (u.pathname === '/api/raw') {
+      // Older server: raw files without sandbox headers.
+      const pdf = u.searchParams.get('path').endsWith('.pdf');
+      res.writeHead(200, { 'content-type': pdf ? 'application/pdf' : 'image/svg+xml', 'x-latex-ide': '1' });
+      return res.end(pdf ? '%PDF-1.4\n%%EOF\n' : EVIL_SVG);
+    }
     if (u.pathname === '/api/languagetool') return send(502, { error: 'LanguageTool nicht erreichbar' });
     send(404, { error: 'unbekannt' }); // manifest etc.: background sync just fails
   });
@@ -63,6 +71,8 @@ async function startDesktop(remoteUrl) {
   fs.mkdirSync(data);
   fs.mkdirSync(path.join(local, 'Thesis'), { recursive: true });
   fs.writeFileSync(path.join(local, 'Thesis', 'main.tex'), 'THESIS');
+  fs.writeFileSync(path.join(local, 'Thesis', 'abb.svg'), EVIL_SVG);
+  fs.writeFileSync(path.join(local, 'Thesis', 'seite.html'), '<script>alert(1)</script>');
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ token: 'lide_test' }));
   const port = await freePort();
   const env = { ...process.env, PORT: String(port), LATEX_IDE_DATA: data, LATEX_IDE_LOCAL: local, REMOTE_URL: remoteUrl };
@@ -92,7 +102,7 @@ async function startDesktop(remoteUrl) {
     try {
       json = JSON.parse(text);
     } catch {}
-    return { status: r.status, json, offline: r.headers.get('x-offline') === '1' };
+    return { status: r.status, json, text, headers: r.headers, offline: r.headers.get('x-offline') === '1' };
   };
   const stop = async () => {
     if (child.exitCode === null) {
@@ -169,6 +179,49 @@ test('#49: offline nach Wechsel in ein geteiltes Projekt - Baum, Cache und Kompi
     // The own project still works offline from its copy.
     const own = await d.call('GET', '/api/file?path=main.tex', { pid: 'Thesis' });
     assert.strictEqual(own.json.content, 'THESIS');
+  } finally {
+    await d.stop();
+    await remote.close();
+  }
+});
+
+test('#113: Rohdateien der Desktop-App (Proxy und Offline-Kopie) nur in der Sandbox', async () => {
+  const state = { active: 'Thesis', down: false };
+  const remote = await startRemote(state);
+  const d = await startDesktop(remote.url);
+  const sandboxed = (r, what) => {
+    assert.match(r.headers.get('content-security-policy') || '', /(^|;)\s*sandbox\s*(;|$)/, `${what}: sandbox fehlt`);
+    assert.match(r.headers.get('content-security-policy') || '', /default-src 'none'/, what);
+    assert.strictEqual(r.headers.get('x-content-type-options'), 'nosniff', `${what}: nosniff fehlt`);
+  };
+  try {
+    await d.call('POST', '/api/projects/open', { body: { root: '/thesis' } });
+    assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'Thesis');
+
+    // Online: streamed through from the server, sandboxed by the desktop app itself.
+    const svg = await d.call('GET', '/api/raw?path=abb.svg', { pid: 'Thesis' });
+    assert.strictEqual(svg.status, 200);
+    assert.strictEqual(svg.offline, false);
+    assert.strictEqual(svg.headers.get('content-type'), 'image/svg+xml');
+    assert.strictEqual(svg.text, EVIL_SVG);
+    sandboxed(svg, 'Proxy abb.svg');
+    const pdf = await d.call('GET', '/api/raw?path=quelle.pdf', { pid: 'Thesis' });
+    assert.strictEqual(pdf.headers.get('content-type'), 'application/pdf');
+    assert.strictEqual(pdf.headers.get('x-content-type-options'), 'nosniff');
+    assert.doesNotMatch(pdf.headers.get('content-security-policy') || '', /sandbox/, 'PDF-Vorschau bleibt ohne Sandbox');
+
+    // Offline: from the local copy of the own project.
+    state.down = true;
+    const off = await d.call('GET', '/api/raw?path=abb.svg', { pid: 'Thesis' });
+    assert.strictEqual(off.status, 200);
+    assert.ok(off.offline, 'kommt aus der lokalen Kopie');
+    assert.strictEqual(off.headers.get('content-type'), 'image/svg+xml');
+    assert.strictEqual(off.text, EVIL_SVG);
+    sandboxed(off, 'offline abb.svg');
+    const html = await d.call('GET', '/api/raw?path=seite.html', { pid: 'Thesis' });
+    assert.strictEqual(html.status, 200);
+    assert.strictEqual(html.headers.get('content-type'), 'application/octet-stream', 'kein text/html aus der lokalen Kopie');
+    sandboxed(html, 'offline seite.html');
   } finally {
     await d.stop();
     await remote.close();
