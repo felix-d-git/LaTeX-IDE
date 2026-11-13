@@ -83,8 +83,11 @@ test('texCommand: nur lualatex läuft mit dem Sandbox-Skript (#119)', () => {
 
 test('luaEnv: eigener Font-Cache relativ zum Projekt, Caches der Installation nur dahinter (#119)', () => {
   const d = path.delimiter;
-  assert.deepStrictEqual(luaEnv({}, path.join('.latex-ide-out', 'u-1')), { TEXMFCACHE: `.latex-ide-out/u-1/${FONT_CACHE_DIR}${d}$TEXMFSYSVAR${d}$TEXMFVAR` });
-  assert.deepStrictEqual(luaEnv({ TEXMFCACHE: '/srv/cache' }, '.latex-ide-out'), { TEXMFCACHE: `.latex-ide-out/${FONT_CACHE_DIR}${d}/srv/cache` });
+  assert.deepStrictEqual(luaEnv({}, path.join('.latex-ide-out', 'u-1')), {
+    LATEX_IDE_OUT: '.latex-ide-out/u-1',
+    TEXMFCACHE: `.latex-ide-out/u-1/${FONT_CACHE_DIR}${d}$TEXMFSYSVAR${d}$TEXMFVAR`,
+  });
+  assert.deepStrictEqual(luaEnv({ TEXMFCACHE: '/srv/cache' }, '.latex-ide-out'), { LATEX_IDE_OUT: '.latex-ide-out', TEXMFCACHE: `.latex-ide-out/${FONT_CACHE_DIR}${d}/srv/cache` });
 });
 
 test('seedFontNames: Namensdatenbank der Installation einmal kopieren, nie überschreiben (#119)', async () => {
@@ -431,6 +434,59 @@ test('LuaLaTeX: "Ordner/." gilt als der Ordner, auch mit lualibs im Windows-Modu
   } finally {
     process.env.PATH = saved;
   }
+});
+
+// kpathsea refuses every path component that starts with "." - Lua must not reach the server's
+// folders in the project either: collaboration state, history, trash, other users' output.
+test('LuaLaTeX: versteckte Ordner im Projekt bleiben für Lua gesperrt, die eigene Ausgabe nicht (#119)', { skip: skipTex, timeout: 900000 }, async () => {
+  const L = lab();
+  const versteckt = {
+    '.latex-ide-yjs/main.tex.ystate': 'GEHEIM-YJS',
+    '.latex-ide-history/index.json': 'GEHEIM-VERLAUF',
+    '.trash/alt/geloescht.tex': 'GEHEIM-PAPIERKORB',
+    '.latex-ide-out/u-2/main.log': 'GEHEIM-FREMD',
+    'kapitel/.notizen/x.txt': 'GEHEIM-UNTERORDNER',
+  };
+  for (const [f, text] of Object.entries(versteckt)) {
+    fs.mkdirSync(path.dirname(path.join(L.root, f)), { recursive: true });
+    fs.writeFileSync(path.join(L.root, f), text);
+  }
+  const lua = (s) => `[==[${s}]==]`;
+  fs.writeFileSync(path.join(L.root, 'versteckt.lua'), [
+    'local function zeig(n, ok) texio.write_nl("term and log", (ok and "LECK " or "GESPERRT ") .. n) end',
+    'local cwd = lfs.currentdir()',
+    `for _, f in ipairs({ ${Object.keys(versteckt).map(lua).join(', ')} }) do`,
+    '  for _, name in ipairs({ f, "./" .. f, cwd .. "/" .. f }) do',
+    '    local h = io.open(name, "r")',
+    '    zeig("lesen " .. name, h and h:read("a"))',
+    '    if h then h:close() end',
+    '    local w = io.open(name, "a")',
+    '    zeig("schreiben " .. name, w)',
+    '    if w then w:write("UEBERSCHRIEBEN") w:close() end',
+    '  end',
+    'end',
+    'for _, d in ipairs({ ".latex-ide-yjs", ".latex-ide-out/u-2", cwd .. "/.trash" }) do',
+    '  zeig("liste " .. d, pcall(function() for _ in lfs.dir(d) do end end))',
+    '  zeig("ordner " .. d, lfs.attributes(d, "mode"))',
+    'end',
+    'zeig("neu .latex-ide-yjs/neu", io.open(".latex-ide-yjs/neu", "w"))',
+    `local eigen = io.open(${lua(`${OUT}/eigen.txt`)}, "w")`,
+    'texio.write_nl("term and log", "EIGEN " .. tostring(eigen ~= nil))',
+    'if eigen then eigen:close() end',
+    '',
+  ].join('\n'));
+  L.tex('main.tex', '\\directlua{dofile("versteckt.lua")}');
+  const r = await compile(L.root, 'main.tex', { compiler: 'lualatex' }, OUT, 600000);
+  assert.doesNotMatch(r.log, /luaotfload.*(FATAL|no writeable cache)/i, r.log.slice(-3000));
+  const geprueft = r.log.match(/^(LECK|GESPERRT) .*/gm) || [];
+  assert.strictEqual(geprueft.length, Object.keys(versteckt).length * 6 + 7, r.log.slice(-3000));
+  assert.deepStrictEqual(geprueft.filter((z) => z.startsWith('LECK')), []);
+  assert.doesNotMatch(r.log, /GEHEIM-/);
+  for (const [f, text] of Object.entries(versteckt)) assert.strictEqual(fs.readFileSync(path.join(L.root, f), 'utf8'), text, f);
+  assert.ok(!fs.existsSync(path.join(L.root, '.latex-ide-yjs', 'neu')));
+  // The run's own output folder stays writable (and so does the font cache in it).
+  assert.match(r.log, /EIGEN true/);
+  assert.ok(fs.existsSync(path.join(L.root, OUT, FONT_CACHE_DIR, 'luatex-cache', 'generic')));
 });
 
 test('LuaLaTeX: gemeinsamer Font-Cache bleibt unverändert, das Projekt bekommt einen eigenen (#119)', { skip: skipTex, timeout: 900000 }, async () => {

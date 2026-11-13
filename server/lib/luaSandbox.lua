@@ -18,7 +18,10 @@
 -- Policy (paths normalised to "/", a ".." segment is never allowed):
 --   read:  relative paths (the project), absolute paths in the project or TEXMFOUTPUT,
 --          and the TeX trees ($TEXMF, TEXMFVAR, TEXMFCACHE …) and system font folders,
---          read-only. Like kpathsea, names starting with "." (except ".tex") are refused.
+--          read-only. Like kpathsea, no component of a path in the project may start with
+--          "." ("./" and a final ".tex" aside), which also keeps the server's folders
+--          (.latex-ide-yjs, .latex-ide-history, .trash, other users' output) out of reach;
+--          below the run's own output folder only the components under it count.
 --   write: only in the project or TEXMFOUTPUT (openout_any=p). The font cache shared by
 --          all projects stays read-only; compile.js points luaotfload to one per output
 --          folder (TEXMFCACHE).
@@ -30,7 +33,7 @@
 
 local type, tostring, ipairs, pairs, next, error, select = type, tostring, ipairs, pairs, next, error, select
 local getmetatable = getmetatable
-local find, gsub, sub, lower, match, gmatch = string.find, string.gsub, string.sub, string.lower, string.match, string.gmatch
+local find, gsub, sub, lower, gmatch = string.find, string.gsub, string.sub, string.lower, string.gmatch
 local concat = table.concat
 
 local EPERM = "LaTeX-IDE: Zugriff außerhalb des Projekts nicht erlaubt"
@@ -51,9 +54,12 @@ local function norm(p)
   p = gsub(p, "\\", "/")
   local unc = sub(p, 1, 2) == "//"
   p = gsub(p, "/+", "/")
-  local n
-  repeat p, n = gsub(p, "/%./", "/") until n == 0
-  p = gsub(p, "/%.$", "/")
+  -- Windows device paths (\\.\x, \\?\x) keep their prefix: \\.\x is not the UNC path \\x.
+  if not (unc and find(p, "^/[.?]/")) then
+    local n
+    repeat p, n = gsub(p, "/%./", "/") until n == 0
+    p = gsub(p, "/%.$", "/")
+  end
   if unc then p = "/" .. p end
   if is_windows then p = lower(p) end
   return p
@@ -74,11 +80,22 @@ local function strip_slash(p)
   return p
 end
 
--- kpathsea (openin_any/openout_any = p) refuses ".rhosts" & Co.: base name empty or
--- starting with "." - except ".tex". A trailing slash (folder) does not count.
-local function base_ok(p)
-  local base = match(strip_slash(p), "[^/]*$")
-  return base ~= "" and (sub(base, 1, 1) ~= "." or base == ".tex")
+-- kpathsea (openin_any/openout_any = p) refuses every path component that starts with "."
+-- (".rhosts", ".ssh/x") except "." itself and a final ".tex". `whole`: rel is a path of its
+-- own (not the part below a folder), so it must name something other than ".".
+local function names_ok(rel, whole)
+  local parts = {}
+  for part in gmatch(rel, "[^/]+") do parts[#parts + 1] = part end
+  if whole and (#parts == 0 or parts[#parts] == ".") then return false end
+  for i, part in ipairs(parts) do
+    if part ~= "." and sub(part, 1, 1) == "." and not (part == ".tex" and i == #parts) then return false end
+  end
+  return true
+end
+
+local function drop_dot_slash(p)
+  while sub(p, 1, 2) == "./" do p = sub(p, 3) end
+  return p
 end
 
 local function under(p, dir)
@@ -94,6 +111,19 @@ end
 
 local project = abs_dir(lfs.currentdir())
 local outdir = abs_dir(getenv("TEXMFOUTPUT"))
+-- The output folder relative to the project (.latex-ide-out/u-1): compile.js passes it,
+-- comparing TEXMFOUTPUT with the current folder could miss it (Windows short names).
+local out_rel
+do
+  local r = getenv("LATEX_IDE_OUT")
+  if type(r) == "string" and r ~= "" then
+    r = drop_dot_slash(strip_slash(norm(r)))
+    if r ~= "." and not is_abs(r) and not has_dotdot(r) then out_rel = r end
+  end
+  if not out_rel and project and outdir and outdir ~= project and under(outdir, project) then
+    out_rel = sub(outdir, #project + 2)
+  end
+end
 local home = abs_dir(getenv("HOME") or getenv("USERPROFILE"))
 
 -- TeX trees and font folders (read-only). Computed on first use: kpathsea is initialised
@@ -138,11 +168,23 @@ local function in_project(p)
   return under(p, project) or under(p, outdir)
 end
 
+-- p: a relative path or an absolute one in the project. Below the own output folder only the
+-- components under it count (its font cache, written by luaotfload).
+local function project_names_ok(p)
+  if is_abs(p) then
+    local top = under(p, outdir) and outdir or project
+    return names_ok(sub(p, #top + 2), false)
+  end
+  p = drop_dot_slash(strip_slash(p))
+  if under(p, out_rel) then return names_ok(sub(p, #out_rel + 2), false) end
+  return names_ok(p, true)
+end
+
 local function read_ok(name)
   if type(name) ~= "string" or find(name, "%z") then return false end
   local p = norm(name)
   if has_dotdot(p) then return false end
-  if not is_abs(p) or in_project(p) then return base_ok(p) end
+  if not is_abs(p) or in_project(p) then return project_names_ok(p) end
   for _, d in ipairs(roots()) do
     if under(p, d) then return true end
   end
@@ -155,7 +197,12 @@ local function meta_ok(name)
   if read_ok(name) then return true end
   if type(name) ~= "string" or find(name, "%z") then return false end
   local p = strip_slash(norm(name))
-  if not is_abs(p) or has_dotdot(p) then return false end
+  if has_dotdot(p) then return false end
+  -- Relative: only the folders that lead to the own output folder (.latex-ide-out).
+  if not is_abs(p) then
+    p = drop_dot_slash(p)
+    return out_rel ~= nil and sub(out_rel, 1, #p + 1) == p .. "/"
+  end
   local prefix = sub(p, -1) == "/" and p or p .. "/"
   local function above(d) return d ~= nil and (p == d or sub(d, 1, #prefix) == prefix) end
   if above(project) or above(outdir) then return true end
@@ -169,7 +216,7 @@ local function write_ok(name)
   if type(name) ~= "string" or find(name, "%z") then return false end
   local p = norm(name)
   if has_dotdot(p) or (is_abs(p) and not in_project(p)) then return false end
-  return base_ok(p)
+  return project_names_ok(p)
 end
 
 -- luatex-core.lua (TeX Live 2023+) builds its io/os/lfs wrappers on these two functions

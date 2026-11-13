@@ -169,8 +169,13 @@ async function seedFontNames(outDir, dirs) {
 // root = cwd, so special characters in the project path cannot break the path list),
 // the installation's caches stay readable behind it.
 function luaEnv(env, outRel) {
-  const own = `${outRel.split(path.sep).join('/')}/${FONT_CACHE_DIR}`;
-  return { TEXMFCACHE: [own, env.TEXMFCACHE || ['$TEXMFSYSVAR', '$TEXMFVAR'].join(path.delimiter)].join(path.delimiter) };
+  const out = outRel.split(path.sep).join('/');
+  return {
+    // luaSandbox.lua refuses Lua every hidden folder in the project except the run's own
+    // output folder (and the font cache in it).
+    LATEX_IDE_OUT: out,
+    TEXMFCACHE: [`${out}/${FONT_CACHE_DIR}`, env.TEXMFCACHE || ['$TEXMFSYSVAR', '$TEXMFVAR'].join(path.delimiter)].join(path.delimiter),
+  };
 }
 
 function failed(message, file = '') {
