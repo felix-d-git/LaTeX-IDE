@@ -10,7 +10,8 @@ const path = require('path');
 const http = require('http');
 const net = require('net');
 const { spawn } = require('child_process');
-const { startServer, client } = require('./_server');
+// ADMIN_PASSWORD: the throwaway servers' admin login once #116 is merged, until then the old fallback.
+const { startServer, client, ADMIN_PASSWORD = 'bitte-sofort-aendern' } = require('./_server');
 const { contentSecurityPolicy, parseSources } = require('../server/lib/securityHeaders');
 
 const REPO = path.join(__dirname, '..');
@@ -93,7 +94,7 @@ test('#115: Server setzt die Security-Header auf HTML-, Datei- und API-Antworten
     const c = client(srv.base);
     assertHeaders(await fetch(srv.base + '/api/auth/me'), 'GET /api/auth/me (ohne Login)');
     assertHeaders(await fetch(srv.base + '/healthz'), 'GET /healthz');
-    await c.login('admin', 'bitte-sofort-aendern');
+    await c.login('admin', ADMIN_PASSWORD);
     const me = await fetch(srv.base + '/api/auth/me', { headers: { Cookie: Object.entries(c.jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
     assert.strictEqual(me.status, 200);
     assertHeaders(me, 'GET /api/auth/me (angemeldet)');
