@@ -76,3 +76,25 @@ test('Container-Workflow: Release pusht :<version> und :latest', { skip: !fs.exi
   assert.match(log, new RegExp(`docker push ${img}:latest`), log);
   assert.match(log, new RegExp(`gh release upload v${V} DEBIAN-PACKAGES-v${V}\\.txt pandoc-sources-v${V}\\.tar`), log);
 });
+
+// #109: GPL-Quellen aller Debian-Pakete (debian-sources-*.partNN) gehen mit ans Release, und
+// zwar bevor das Image auf ghcr.io landet.
+test('Container-Workflow: debian-sources-Teile werden hochgeladen, Upload vor Push', { skip: !fs.existsSync(BASH) && 'bash fehlt' }, () => {
+  for (const [event, asset] of [['release', `v${VER}`], ['workflow_dispatch', `v${VER}-abcdef0`]]) {
+    const log = simulate(event);
+    const upload = log.split('\n').find((l) => l.startsWith('gh release upload '));
+    assert.ok(upload, log);
+    // Ohne echte Teile bleibt das Glob-Muster stehen: Pfad und Name stimmen trotzdem.
+    assert.ok(upload.includes(` /mnt/debian-sources-parts/debian-sources-${asset}.tar.part`), upload);
+    assert.match(upload, / --clobber$/);
+    assert.ok(log.indexOf('gh release upload ') < log.indexOf('docker push '), log);
+  }
+  const step = (n) => YML.indexOf(`\n      - name: ${n}\n`);
+  const order = ['Debian-Quellen sammeln', 'Paketliste und pandoc-Quellen an das Release haengen', 'Nach ghcr.io pushen'].map(step);
+  assert.ok(order.every((i) => i > 0), order.join());
+  assert.deepStrictEqual(order, [...order].sort((a, b) => a - b));
+  // Beide nur bei PUBLISH, damit nie ein Image ohne Quellen am Release erscheint
+  for (const n of ['Paketliste und pandoc-Quellen an das Release haengen', 'Nach ghcr.io pushen']) {
+    assert.match(YML.slice(step(n), step(n) + 200), /\n {8}if: env\.PUBLISH == 'true'\n/, n);
+  }
+});
