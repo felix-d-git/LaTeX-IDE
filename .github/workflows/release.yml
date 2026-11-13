@@ -71,7 +71,8 @@ jobs:
 
       - name: Pakete bauen
         shell: pwsh
-        # Quell-Link im Client-Bundle (build.js): Repo dieses Laufs, bei Forks also der Fork.
+        # Quell-Link im Client-Bundle und unter /source der installierten Pakete (build.js schreibt
+        # ihn nach client/dist/source.json): Repo dieses Laufs, bei Forks also der Fork.
         env:
           UPDATE_REPO: ${{ github.repository }}
         run: ./installer/build-release.ps1 -MacStagingOut installer/out/macos

@@ -71,10 +71,18 @@ async function bundleMetafile() {
   return result.metafile;
 }
 
+// Source link of the banner for lib/legal.js: where .git is missing at run time (installer
+// packages, Docker image), /source shows the same link as the banner (builtLink).
+function writeSourceInfo(dir = outDir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ version: legal.VERSION, link: legal.SOURCE_LINK }) + '\n');
+}
+
 async function run() {
   // The banner links the checkout's commit (lib/legal.js); local changes are not in it.
   if (legal.SOURCE_WARNING) console.warn(`build.js: Warnung: ${legal.SOURCE_WARNING}`);
   copyFromNodeModules();
+  writeSourceInfo();
   if (watch) {
     const ctx = await esbuild.context(options);
     await ctx.watch();
@@ -86,7 +94,7 @@ async function run() {
   }
 }
 
-module.exports = { COPIED, options, bundleMetafile };
+module.exports = { COPIED, options, bundleMetafile, writeSourceInfo };
 
 if (require.main === module) {
   run().catch((e) => {
