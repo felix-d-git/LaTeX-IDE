@@ -11,23 +11,33 @@ const watch = process.argv.includes('--watch');
 // --serve: start the server in this process after the first build (npm run dev; "&" does not background on Windows cmd).
 const serve = process.argv.includes('--serve');
 
-function copyPdfWorker() {
-  const outDir = path.join(__dirname, 'client', 'dist');
-  fs.mkdirSync(outDir, { recursive: true });
-  const src = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.min.mjs');
-  fs.copyFileSync(src, path.join(outDir, 'pdf.worker.min.mjs'));
+const outDir = path.join(__dirname, 'client', 'dist');
+
+// Files copied from node_modules to client/dist as they are (from: repo-relative, to: below
+// client/dist). scripts/licenses.js checks their packages like the bundled ones.
+const COPIED = [
+  // pdf.js worker (workerSrc in pdfViewer.js)
+  { from: 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', to: 'pdf.worker.min.mjs' },
   // Decoders for JPEG 2000 and JBIG2 images, colour management (wasmUrl in pdfViewer.js, visualEditor.js).
-  const wasmDir = path.join(outDir, 'pdfjs-wasm');
-  fs.mkdirSync(wasmDir, { recursive: true });
-  for (const f of ['openjpeg.wasm', 'jbig2.wasm', 'qcms_bg.wasm']) {
-    fs.copyFileSync(path.join(__dirname, 'node_modules', 'pdfjs-dist', 'wasm', f), path.join(wasmDir, f));
+  ...['openjpeg.wasm', 'jbig2.wasm', 'qcms_bg.wasm'].map((f) => ({ from: `node_modules/pdfjs-dist/wasm/${f}`, to: `pdfjs-wasm/${f}` })),
+];
+
+function copyFromNodeModules() {
+  for (const { from, to } of COPIED) {
+    const dest = path.join(outDir, to);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(__dirname, from), dest);
   }
 }
 
 const options = {
   entryPoints: [path.join(__dirname, 'client', 'src', 'main.js')],
   bundle: true,
-  outfile: path.join(__dirname, 'client', 'dist', 'bundle.js'),
+  outfile: path.join(outDir, 'bundle.js'),
+  // Input paths in the metafile relative to the repo, whatever the current directory.
+  absWorkingDir: __dirname,
+  // Lists every bundled input; scripts/licenses.js checks the node_modules ones (bundleMetafile).
+  metafile: true,
   sourcemap: true,
   format: 'esm',
   target: 'es2020',
@@ -49,8 +59,14 @@ const options = {
   },
 };
 
+// Metafile of the client bundle, built in memory with the same options (nothing written).
+async function bundleMetafile() {
+  const result = await esbuild.build({ ...options, write: false, logLevel: 'silent' });
+  return result.metafile;
+}
+
 async function run() {
-  copyPdfWorker();
+  copyFromNodeModules();
   if (watch) {
     const ctx = await esbuild.context(options);
     await ctx.watch();
@@ -62,7 +78,11 @@ async function run() {
   }
 }
 
-run().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { COPIED, options, bundleMetafile };
+
+if (require.main === module) {
+  run().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
