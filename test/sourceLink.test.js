@@ -10,7 +10,8 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { sourceInfo, gitState, githubRepo, builtLink } = require('../server/lib/legal');
-const { startServer, client } = require('./_server');
+// ADMIN_PASSWORD: the throwaway servers' admin login once #116 is merged, until then the old fallback.
+const { startServer, client, ADMIN_PASSWORD = 'bitte-sofort-aendern' } = require('./_server');
 
 const VER = require('../package.json').version;
 const SHA = 'a'.repeat(40);
@@ -197,7 +198,7 @@ test('Server: /source ohne Checkout auf den Tag, keine Warnung für Admins', asy
     assert.strictEqual(r.status, 302);
     assert.strictEqual(r.headers.get('location'), `${UP}/tree/v${VER}`);
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     const u = await admin.call('GET', '/api/admin/update');
     assert.strictEqual(u.status, 200);
     assert.strictEqual(u.body.sourceWarning, undefined);
@@ -240,7 +241,7 @@ test('Server: veränderter Checkout ohne SOURCE_URL verlinkt den Commit und warn
     assert.ok(lic.includes(`Source code: ${UP}/tree/${sha}`));
     assert.match(srv.log(), /\[source\] Warnung: .*server\/lokal\.js/);
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     const u = await admin.call('GET', '/api/admin/update');
     assert.match(u.body.sourceWarning, /1 lokal geänderte oder neue Datei\(en\): server\/lokal\.js/);
     assert.match(u.body.sourceWarning, new RegExp(`Commit ${sha.slice(0, 12)} liegt auf keinem Remote-Branch eines GitHub-Repos`));
@@ -262,7 +263,7 @@ test('Server: mit SOURCE_URL keine Warnung, auch bei lokalen Änderungen', { ski
     const r = await fetch(`${srv.base}/source`, { redirect: 'manual' });
     assert.strictEqual(r.headers.get('location'), `https://example.org/fork/tree/v${VER}`);
     const admin = client(srv.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     assert.strictEqual((await admin.call('GET', '/api/admin/update')).body.sourceWarning, undefined);
     assert.doesNotMatch(srv.log(), /\[source\]/);
   } finally {
