@@ -130,8 +130,14 @@ Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen. Ohne `.env` wird ein Fallback-Admin
-  `admin@local.host` / `bitte-sofort-aendern` angelegt - Passwort direkt danach im Profil ändern;
+  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen.
+  Ohne `ADMIN_PASSWORD` legt der Server den Admin `admin` mit einem zufälligen Einmal-Passwort an und
+  schreibt es nur in die Datei `initial-admin-password.txt` im Datenordner (bei verschlüsselten Daten
+  in `VAULT_DIR`, Docker: im eingebundenen Ordner auf dem Host); die Konsole nennt nur den Pfad. Bis
+  dieses Passwort nach dem ersten Login geändert ist, beantwortet der Server alles außer der
+  Passwortänderung mit 403 (auch Desktop-/MCP-Tokens und Websockets), danach wird die Datei gelöscht.
+  Fehlt die Datei vorher, erzeugt der nächste Start ein neues Einmal-Passwort. Ein Admin, der noch das
+  frühere öffentliche Fallback-Passwort hat, bekommt beim nächsten Start ebenso ein Einmal-Passwort.
   `ADMIN_*` wirken nur beim allerersten Start (leerer Datenordner). Der Sitzungs-Schlüssel wird beim ersten Start
   erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
