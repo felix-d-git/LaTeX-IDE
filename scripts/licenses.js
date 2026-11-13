@@ -618,8 +618,13 @@ function applyNotices(packages, errors) {
   }
 }
 
-// "node_modules/a/node_modules/@s/b/dist/x.js" -> [lockfile key "node_modules/a/node_modules/@s/b", "dist/x.js"]
-const PKG_FILE_RE = /^((?:node_modules\/(?:@[^/]+\/)?[^/]+\/)*node_modules\/(?:@[^/]+\/)?[^/]+)\/(.+)$/;
+// "node_modules/a/node_modules/@s/b/dist/x.js" -> [lockfile key "node_modules/a/node_modules/@s/b", "dist/x.js"].
+// A node_modules folder below another directory ("client/node_modules/x/y.js") is a package file
+// as well; it has no lockfile entry and so fails the check.
+const PKG_FILE_RE = /^((?:(?!node_modules\/)[^/]+\/)*(?:node_modules\/(?:@[^/]+\/)?[^/]+\/)*node_modules\/(?:@[^/]+\/)?[^/]+)\/(.+)$/;
+const IN_NODE_MODULES_RE = /(^|\/)node_modules\//;
+// Top-level package a file of the project's own code resolves into ("node_modules/@s/b/x.js" -> "@s/b").
+const TOP_PKG_RE = /^node_modules\/((?:@[^/]+\/)?[^/]+)\//;
 
 // What client/dist gets from node_modules: the inputs of the esbuild bundle (metafile) and the
 // files build.js copies as they are. Each must come from a production package that is in the
@@ -638,14 +643,17 @@ function bundleErrors({ metafile, copied, lockPackages, dependencies, noticeIds,
       errors.push(`${where}: outside the repository`);
       continue;
     }
-    if (!file.startsWith('node_modules/')) {
-      // The project's own code: every package it imports directly must be declared.
+    if (!IN_NODE_MODULES_RE.test(file)) {
+      // The project's own code: every package it imports directly must be declared, also when the
+      // import is written as a relative path into node_modules (judged by the resolved path).
       const undeclared = new Set();
       for (const imp of (metafile.inputs[raw] && metafile.inputs[raw].imports) || []) {
-        const spec = imp.original;
-        if (!spec || imp.external || /^[./]/.test(spec)) continue;
-        const pkg = spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/');
-        if (!Object.prototype.hasOwnProperty.call(dependencies, pkg)) undeclared.add(pkg);
+        if (imp.external) continue;
+        const spec = imp.original || '';
+        const top = TOP_PKG_RE.exec(String(imp.path || '').replace(/\\/g, '/').replace(/^\(disabled\):/, ''));
+        let pkg = top && top[1];
+        if (!pkg && spec && !/^[./]/.test(spec)) pkg = spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/');
+        if (pkg && !Object.prototype.hasOwnProperty.call(dependencies, pkg)) undeclared.add(pkg);
       }
       for (const pkg of undeclared) errors.push(`${file} imports ${pkg}, which package.json does not list in "dependencies"`);
       continue;
@@ -688,7 +696,12 @@ async function checkBundle(root, packages, errors) {
     metafile = await build.bundleMetafile();
     copied = build.COPIED.map((c) => c.from);
   } catch (e) {
-    errors.push(`client bundle: cannot build it to check its packages (npm ci installs esbuild): ${String(e.message).split('\n')[0]}`);
+    // esbuild's BuildFailure lists the real causes (file:line: text); a missing esbuild is MODULE_NOT_FOUND.
+    const causes = Array.isArray(e.errors) && e.errors.length
+      ? e.errors.map((x) => `${x.location ? `${x.location.file}:${x.location.line}:${x.location.column}: ` : ''}${x.text}`)
+      : [String(e.message).split('\n')[0]];
+    const hint = e.code === 'MODULE_NOT_FOUND' ? ' (npm ci installs esbuild)' : '';
+    errors.push(`client bundle: cannot build it to check its packages${hint}: ${causes.join('; ')}`);
     return;
   }
   const readJson = (f) => JSON.parse(fs.readFileSync(path.join(root, f), 'utf8'));

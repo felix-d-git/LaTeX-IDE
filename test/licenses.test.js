@@ -8,6 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle } = require('../scripts/licenses.js');
 
@@ -71,7 +72,14 @@ test('Lizenzen: Client-Bundle enthält nur Prod-Pakete aus THIRD_PARTY_NOTICES.m
 });
 
 test('Lizenzen: client/src importiert nur Pakete aus "dependencies"', async () => {
-  for (const p of DIRECT) assert.strictEqual(pkg.dependencies[p], `^${version(p)}`, `${p} nicht mit Lock-Version in dependencies`);
+  // In "dependencies", and the locked version lies in the declared range (^x.y.z: same major, >= x.y.z).
+  const num = (v) => v.split('.').map(Number);
+  for (const p of DIRECT) {
+    const range = pkg.dependencies[p];
+    assert.match(range || '', /^\^\d+\.\d+\.\d+$/, `${p} fehlt in dependencies`);
+    const [low, have] = [num(range.slice(1)), num(version(p))];
+    assert.ok(have[0] === low[0] && (have[1] - low[1] || have[2] - low[2]) >= 0, `${p}: Lock-Version ${version(p)} liegt nicht in ${range}`);
+  }
   // Gegenprobe: Stand vor #110, die drei kamen nur transitiv über codemirror
   const old = { ...pkg.dependencies };
   for (const p of DIRECT) delete old[p];
@@ -156,6 +164,46 @@ test('Lizenzen: Bundle-Prüfung erkennt Scope-Pakete, verschachtelte node_module
   ], errors.join('\n'));
   assert.match(errors[1], /web\/viewer\.js \(bundled into client\/dist\) lies in a STRIPPED part/);
   assert.match(errors[5], /web\/gone\.js is not shipped any more/);
+});
+
+test('Lizenzen: relativer Import nach node_modules und node_modules unter client/ fallen auf', () => {
+  const errors = bundleErrors({
+    metafile: {
+      inputs: {
+        'client/src/main.js': { imports: [
+          { path: 'node_modules/crelt/index.js', kind: 'import-statement', original: '../../node_modules/crelt/index.js' },
+          { path: 'client/node_modules/fakegpl/index.js', kind: 'import-statement', original: 'fakegpl' },
+          { path: 'client/src/util.js', kind: 'import-statement', original: './util.js' },
+        ] },
+        'client/src/util.js': { imports: [] },
+        'node_modules/crelt/index.js': { imports: [] },
+        'client/node_modules/fakegpl/index.js': { imports: [] },
+      },
+    },
+    copied: [],
+    lockPackages: { 'node_modules/crelt': { version: '1.0.6' } },
+    dependencies: { fakegpl: '^1.0.0' },
+    noticeIds: new Set(['crelt@1.0.6']),
+    shippedFromStripped: {},
+  });
+  assert.deepStrictEqual(errors, [
+    'client/src/main.js imports crelt, which package.json does not list in "dependencies"',
+    'client/node_modules/fakegpl/index.js (bundled into client/dist): no package for it in package-lock.json (run npm ci)',
+  ]);
+});
+
+test('Lizenzen: Build-Fehler im Client nennt Datei und Ursache', async () => {
+  const errors = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-lic-'));
+  try {
+    fs.writeFileSync(path.join(root, 'build.js'), `module.exports = { COPIED: [], bundleMetafile: () => require(${JSON.stringify(require.resolve('esbuild'))}).build({ stdin: { contents: 'const = ;', sourcefile: 'client/src/kaputt.js' }, write: false, metafile: true, logLevel: 'silent' }) };`);
+    await checkBundle(root, [], errors);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  assert.strictEqual(errors.length, 1);
+  assert.match(errors[0], /^client bundle: cannot build it to check its packages: client\/src\/kaputt\.js:1:6: /);
+  assert.doesNotMatch(errors[0], /npm ci/);
 });
 
 test('Lizenzen: SHIPPED_FROM_STRIPPED liegt in STRIPPED-Teilen mit Embedded-Hinweisen', () => {
