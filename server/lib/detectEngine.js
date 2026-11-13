@@ -20,10 +20,17 @@
 // are evaluated for the selected engine: only the branch that engine takes counts, so
 // a document written for every engine keeps its setting. Other conditionals count
 // with both branches.
-// ponytail: scans only the main file; a preamble moved into \input{praeambel} is not
-// seen - follow \input there if that turns out to matter.
+// Besides the main file, the project files it pulls in directly are read - one level,
+// not recursive: \input/\include/\subfile/\import targets and its own .cls/.sty
+// (\documentclass{hsthesis} -> hsthesis.cls). Classes and packages installed in the
+// TeX tree are not read.
+const fs = require('fs');
+const path = require('path');
+
 const ENGINES = ['pdflatex', 'xelatex', 'lualatex'];
-// Bounds, so a huge or hostile document cannot stall the server (detection runs in its event loop).
+// Bounds, so a huge or hostile project cannot stall the server (detection runs in its event loop).
+const MAX_FILES = 32; // project files read besides the main file
+const MAX_BYTES = 1024 * 1024; // per file; preambles are at the top anyway
 const MAX_COMMANDS = 1000; // \usepackage/\input/… looked at per file
 const MAX_ARG = 2048; // characters of one […] or {…} argument
 
@@ -188,12 +195,13 @@ function evalConditionals(src, engine) {
   return out;
 }
 
-const CMD = /\\(usepackage|RequirePackage(?:WithOptions)?|documentclass|LoadClass(?:WithOptions)?|PassOptionsToPackage|babelprovide)(?![A-Za-z@])/g;
+const CMD = /\\(usepackage|RequirePackage(?:WithOptions)?|documentclass|LoadClass(?:WithOptions)?|PassOptionsToPackage|babelprovide|input|include|subfile|subfileinclude|import|subimport|inputfrom|subinputfrom|includefrom|subincludefrom)(?![A-Za-z@])/g;
+const IMPORTS = ['import', 'subimport', 'inputfrom', 'subinputfrom', 'includefrom', 'subincludefrom'];
 const names = (list) => list.split(',').map((s) => s.trim()).filter(Boolean);
 
-// Packages, classes and babel options of one (stripped) file.
+// Packages, classes, babel options and \input-like targets of one (stripped) file.
 function analyse(src) {
-  const info = { packages: [], classes: [], babelOpts: [], provideOpts: [] };
+  const info = { packages: [], classes: [], babelOpts: [], provideOpts: [], files: [] };
   let count = 0;
   for (const m of src.matchAll(CMD)) {
     if (++count > MAX_COMMANDS) break;
@@ -201,7 +209,11 @@ function analyse(src) {
     const at = m.index + m[0].length;
     const opt = arg(src, at, '[');
     const a = arg(src, opt ? opt.end : at, '{');
-    if (!a) continue;
+    if (!a) {
+      const bare = cmd === 'input' && /^\s*([^\s{}\\%]+)/.exec(src.slice(at, at + 256)); // \input praeambel
+      if (bare) info.files.push(bare[1]);
+      continue;
+    }
     if (/^(?:usepackage|RequirePackage)/.test(cmd)) {
       const list = names(a.body);
       info.packages.push(...list);
@@ -211,8 +223,13 @@ function analyse(src) {
     } else if (cmd === 'PassOptionsToPackage') {
       const to = arg(src, a.end, '{');
       if (to && names(to.body).some((p) => p.toLowerCase() === 'babel')) info.babelOpts.push(a.body);
-    } else if (opt) {
-      info.provideOpts.push(opt.body); // \babelprovide
+    } else if (cmd === 'babelprovide') {
+      if (opt) info.provideOpts.push(opt.body);
+    } else if (IMPORTS.includes(cmd)) {
+      const file = arg(src, a.end, '{');
+      if (file) info.files.push(path.posix.join(a.body.trim() || '.', file.body.trim()));
+    } else {
+      info.files.push(a.body.trim());
     }
   }
   const font = FONT_COMMAND.exec(src);
@@ -235,7 +252,20 @@ function needs(info) {
   };
 }
 
-function detectEngine(source, selected) {
+// File names TeX would try for a reference of the main file, in order.
+function candidates(info) {
+  const clean = (n) => n.replace(/^"(.*)"$/, '$1');
+  const ok = (n) => n && !/[\\#]/.test(n);
+  return [
+    ...info.files.map(clean).filter(ok).map((n) => (/\.tex$/i.test(n) ? [n] : [`${n}.tex`, n])),
+    ...info.classes.filter(ok).map((c) => [`${c}.cls`]),
+    ...info.packages.filter(ok).map((p) => [`${p}.sty`]),
+  ];
+}
+
+// source: main file text. read(name) -> text or null for a project file (see projectReader);
+// without it only the main file is looked at.
+function detectEngine(source, selected, read) {
   const sel = ENGINES.includes(selected) ? selected : 'pdflatex';
   const result = (engine, reason, warning = null) => ({ engine, reason, warning, changed: engine !== sel });
   const main = strip(String(source || ''));
@@ -251,11 +281,77 @@ function detectEngine(source, selected) {
     break;
   }
 
-  const found = needs(analyse(evalConditionals(main.text, sel)));
+  const mainText = evalConditionals(main.text, sel);
+  const mainInfo = analyse(mainText);
+  const files = [{ name: null, info: mainInfo }];
+  if (typeof read === 'function') {
+    const seen = new Set();
+    for (const tries of candidates(mainInfo)) {
+      if (files.length > MAX_FILES) break;
+      if (seen.has(tries[0])) continue;
+      seen.add(tries[0]);
+      for (const name of tries) {
+        const text = read(name);
+        if (typeof text !== 'string') continue;
+        files.push({ name, info: analyse(evalConditionals(strip(text).text, sel)) });
+        break;
+      }
+    }
+  }
+
+  const found = {};
+  for (const { name, info } of files) {
+    for (const [k, why] of Object.entries(needs(info))) {
+      if (why && !found[k]) found[k] = name ? `${why} in ${name}` : why;
+    }
+  }
   if (found.lua) return result('lualatex', found.lua, warning);
   if (found.xe) return result('xelatex', found.xe, warning);
   if (sel === 'pdflatex' && found.uni) return result('xelatex', found.uni, warning);
   return result(sel, null, warning);
 }
 
-module.exports = { detectEngine };
+// A project file as text, or null: only regular files whose real path is inside base
+// (no symlink out of the project, no FIFO/device that would block), at most MAX_BYTES.
+function readProjectFile(base, abs) {
+  let fd;
+  try {
+    const rel = path.relative(base, fs.realpathSync(abs));
+    if (!rel || rel.split(path.sep)[0] === '..' || path.isAbsolute(rel)) return null;
+    const { O_RDONLY, O_NONBLOCK = 0, O_NOFOLLOW = 0 } = fs.constants; // not on Windows
+    fd = fs.openSync(path.join(base, rel), O_RDONLY | O_NONBLOCK | O_NOFOLLOW);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return null;
+    const buf = Buffer.alloc(Math.min(st.size, MAX_BYTES));
+    return buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+  }
+}
+
+// read() for detectEngine, resolving names like TeX in compile.js (cwd = project root,
+// TEXINPUTS = main file's folder first): main folder, then root; ./ and ../ from the root only.
+function projectReader(base, mainRelPath) {
+  const mainDir = path.dirname(String(mainRelPath || ''));
+  return (name) => {
+    if (!name || path.isAbsolute(name) || /^[A-Za-z]:|^~/.test(name)) return null;
+    const dirs = mainDir === '.' || /^\.\.?[\\/]/.test(name) ? [''] : [mainDir, ''];
+    for (const dir of dirs) {
+      const text = readProjectFile(base, path.join(base, dir, name));
+      if (text !== null) return text;
+    }
+    return null;
+  };
+}
+
+// detectEngine for a project on disk (compile.js).
+function detectProjectEngine(root, mainRelPath, selected) {
+  let base = null;
+  try { base = fs.realpathSync(root); } catch {}
+  const source = base && readProjectFile(base, path.join(base, String(mainRelPath || '')));
+  return detectEngine(source || '', selected, base && projectReader(base, mainRelPath));
+}
+
+module.exports = { detectEngine, detectProjectEngine };
