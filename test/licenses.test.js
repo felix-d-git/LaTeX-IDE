@@ -10,7 +10,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle } = require('../scripts/licenses.js');
+const { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle, licstartCopyright } = require('../scripts/licenses.js');
 
 const ROOT = path.join(__dirname, '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
@@ -283,3 +283,14 @@ test('Lizenzen: Scope-Text nennt die aus gelöschten Teilen ausgelieferten Datei
   assert.match(head, /covered by the "Embedded:" notices/);
 });
 
+test('Lizenzen: Bundle-Banner nennt pdf.js mit seiner @licstart-Zeile, core-js, webpack, @replit und die KaTeX-Glyphen', () => {
+  const banner = build.options.banner.js;
+  assert.match(banner, /^\/\*! /, 'Banner muss ein Legal-Kommentar bleiben');
+  // esbuild verwirft den @licstart-Kopf von pdf.mjs, der Banner wiederholt Copyright und Lizenz
+  const line = licstartCopyright(path.join(ROOT, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs'));
+  assert.ok(line, 'kein @licstart-Copyright in pdf.mjs');
+  assert.ok(banner.includes(`pdf.js - ${line} - Apache-2.0`), `Banner ohne "${line}"`);
+  for (const s of ['core-js', 'webpack runtime', '@replit/codemirror-vim', '@replit/codemirror-emacs', 'OFL-1.1', '/licenses']) {
+    assert.ok(banner.includes(s), `Banner ohne ${s}`);
+  }
+});

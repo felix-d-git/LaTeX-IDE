@@ -912,4 +912,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle };
+module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle, licstartCopyright };
