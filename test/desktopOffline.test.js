@@ -23,10 +23,10 @@ function freePort() {
   });
 }
 
-// Fake remote: `state.down` = tunnel answers 502 without the app header (Funnel up, Pi off).
-// `state.active` = the user's active project on the server.
 const EVIL_SVG = '<svg xmlns="http://www.w3.org/2000/svg"><script>parent.alert(document.cookie)</script></svg>';
 
+// Fake remote: `state.down` = tunnel answers 502 without the app header (Funnel up, Pi off).
+// `state.active` = the user's active project on the server.
 async function startRemote(state) {
   const srv = http.createServer((req, res) => {
     const send = (status, body) => {

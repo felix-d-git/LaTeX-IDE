@@ -1831,7 +1831,7 @@ app.get('/api/pdf', (req, res) => {
   try {
     const abs = safeResolve(root, req.query.path);
     res.setHeader('Content-Type', 'application/pdf');
-    setUserContentHeaders(res, 'application/pdf'); // any project file: nosniff keeps e.g. an SVG from rendering as such
+    setUserContentHeaders(res, 'application/pdf'); // any project file, always typed as PDF; nosniff as an extra safeguard
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
