@@ -81,6 +81,8 @@ jobs:
           # AGPL §13: /source fuehrt auf den Quellcode genau dieses Images
           loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3077/source)
           [ "$loc" = "$SOURCE_URL" ] || { echo "/source zeigt auf '$loc' statt '$SOURCE_URL'"; exit 1; }
+          # ... und der Lizenz-Banner im Client-Bundle (Build-Stufe, ARG SOURCE_URL vor node build.js)
+          docker exec ide grep -qF "Source: $SOURCE_URL" /app/client/dist/bundle.js || { echo "Bundle-Banner ohne $SOURCE_URL"; exit 1; }
           # Node-Mindestversion
           docker exec ide node -e "const a=parseInt(process.versions.node); console.log('node', process.version); process.exit(a>=26?0:1)"
 

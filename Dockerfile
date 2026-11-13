@@ -14,6 +14,11 @@ COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
 RUN npm ci
 COPY . .
+# Bundle banner (build.js, server/lib/legal.js): same source link as /source in the final image.
+# .git is not in the build context, so without SOURCE_URL both fall back to the version tag.
+# container-image.yml passes the built tag/commit, docker-compose*.yml the values from .env.
+ARG SOURCE_URL=""
+ARG UPDATE_REPO=""
 # esbuild is a dev dependency: build the client, then drop dev deps and optional ones
 # (@napi-rs/canvas: only pdf.js under Node needs it, the app runs pdf.js in the browser).
 # npm prune leaves the emptied scope folders (@esbuild, @napi-rs) behind.

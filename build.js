@@ -72,6 +72,8 @@ async function bundleMetafile() {
 }
 
 async function run() {
+  // The banner links the checkout's commit (lib/legal.js); local changes are not in it.
+  if (legal.SOURCE_WARNING) console.warn(`build.js: Warnung: ${legal.SOURCE_WARNING}`);
   copyFromNodeModules();
   if (watch) {
     const ctx = await esbuild.context(options);

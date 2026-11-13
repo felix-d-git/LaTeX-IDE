@@ -71,6 +71,9 @@ jobs:
 
       - name: Pakete bauen
         shell: pwsh
+        # Quell-Link im Client-Bundle (build.js): Repo dieses Laufs, bei Forks also der Fork.
+        env:
+          UPDATE_REPO: ${{ github.repository }}
         run: ./installer/build-release.ps1 -MacStagingOut installer/out/macos
 
       # Das macOS-ZIP baut der Job "macos": Windows-ZIPs kennen keine Unix-Rechte.

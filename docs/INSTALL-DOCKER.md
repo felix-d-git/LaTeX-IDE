@@ -58,6 +58,7 @@ anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen
 | `LATEX_DATA_DIR` | Datenordner auf dem Host (Standard `./data`). |
 | `TEXLIVE` | `apt` (Debian-Paket im Image, Standard) oder `host` (eigenes TeX Live einhängen). |
 | `UPDATE_MODE` | `notify` / `button` / `auto` / `off`, siehe [UPDATES.md](UPDATES.md). |
+| `SOURCE_URL` | Quellcode-Link unter `/source` (AGPL-3.0 §13). Ohne zeigt er auf den Tag der Version in `UPDATE_REPO`; das Image kennt seinen Git-Stand nicht. Wer einen anderen Stand als ein Release baut (master, Fork, eigene Änderungen), setzt ihn, z. B. auf `…/tree/<commit>`. Geht beim Build auch in den Lizenz-Banner des Clients. |
 | `DATA_KEY`, `VAULT_DIR` | Daten verschlüsselt auf der Platte, siehe README „Verschlüsselte Daten“. Nur mit `docker-compose.pi.yml` lauffähig (tmpfs + Vault-Volume), nicht mit `docker-compose.yml`. |
 | `SMTP_*` | Mailversand für Einladungen/Passwort-Reset (ohne: Links im Log). |
 
@@ -234,7 +235,8 @@ Node.js stammt aus dem offiziellen Image `node:26-bookworm-slim` (Quellen:
 `THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
 Quellcode der IDE: die zur Laufzeit nötigen Quelltexte liegen im Image unter `/app`; der
 vollständige Quellcode einschließlich Build- und Hilfsskripten (`scripts/`, `installer/`,
-`.github/`) liegt unter der `/source`-Adresse des Servers (Tag dieser Version).
+`.github/`) liegt unter der `/source`-Adresse des Servers (beim fertigen Image der
+Release-Tag bzw. bei einem manuellen Build der Commit, aus dem es gebaut wurde).
 
 Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
 und LGPL-3.0 (jeweils §6 d) über diese Release-Dateien beim GitHub-Release derselben Version bereitgestellt,
@@ -264,7 +266,9 @@ Issues an.
   und ist für dessen Inhalt und Lizenzhinweise selbst verantwortlich.
 - Wer den Code ändert und den Server anderen über das Netz anbietet, muss diesen
   Nutzern den Quellcode der geänderten Fassung anbieten (AGPL-3.0 §13), z. B.
-  per Link auf das eigene Repository.
+  per Link auf das eigene Repository in `SOURCE_URL`. Ohne `SOURCE_URL` zeigt
+  `/source` eines selbst gebauten Images auf den Tag der Version, auch wenn es
+  aus master, einem Fork oder einem geänderten Checkout gebaut wurde.
 - Wer ein selbst gebautes Image weitergibt (z. B. in eine eigene Registry
   pusht), verbreitet die enthaltene Drittsoftware selbst und muss deren
   Quellcode wie oben bereitstellen, mit pandoc auch den der statisch gelinkten
