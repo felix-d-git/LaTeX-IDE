@@ -43,11 +43,17 @@ local getenv, expand_braces, status_of = os.getenv, kpse.expand_braces, status
 -- Paths
 
 -- Form used for all comparisons: forward slashes, no doubled slashes (a leading // of a
--- UNC path stays), lower case on Windows.
+-- UNC path stays), no "." segments after a folder, lower case on Windows.
+-- "<folder>/." is that folder (kpathsea allows "/./" as well): lualibs' lfs.isdir asks for
+-- attributes("<folder>/.") on Windows (or with a ";" in PATH), luaotfload's check of its
+-- cache folder included. "." on its own stays as it is.
 local function norm(p)
   p = gsub(p, "\\", "/")
   local unc = sub(p, 1, 2) == "//"
   p = gsub(p, "/+", "/")
+  local n
+  repeat p, n = gsub(p, "/%./", "/") until n == 0
+  p = gsub(p, "/%.$", "/")
   if unc then p = "/" .. p end
   if is_windows then p = lower(p) end
   return p

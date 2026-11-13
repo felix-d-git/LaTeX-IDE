@@ -393,6 +393,46 @@ test('LuaLaTeX: Dateien im Projekt bleiben nutzbar (Bild, Lua-Modul, Daten, Unte
   assert.ok(pdfContains(pdf, 'Zeile aus Datei'));
 });
 
+// lualibs' lfs.isdir asks for attributes("<folder>/.") on Windows, or wherever PATH contains a
+// ";" - which brings that code path to macOS and Linux, too. luaotfload checks its cache folder
+// with it: refusing "<folder>/." meant "no writeable cache path" on every Windows run.
+test('LuaLaTeX: "Ordner/." gilt als der Ordner, auch mit lualibs im Windows-Modus (#119)', { skip: skipTex, timeout: 900000 }, async () => {
+  const L = lab();
+  fs.mkdirSync(path.join(L.root, 'kapitel'));
+  fs.mkdirSync(path.join(L.root, '.versteckt'));
+  L.tex('main.tex', [
+    '\\directlua{',
+    '  local function zeig(n, v) texio.write_nl("term and log", "PUNKT " .. n .. "=" .. tostring(v)) end',
+    '  zeig("relativ", lfs.attributes("kapitel/.", "mode"))',
+    '  zeig("absolut", lfs.attributes(lfs.currentdir() .. "/kapitel/.", "mode"))',
+    '  zeig("isdir", lfs.isdir("kapitel"))',
+    '  zeig("versteckt", lfs.attributes(".versteckt/.", "mode"))',
+    '  zeig("geheim", lfs.attributes(dofile("pfade.lua").geheim .. "/.", "mode"))',
+    '  zeig("geheim-isdir", lfs.isdir(dofile("pfade.lua").geheim))',
+    '}',
+  ].join('\n'));
+  const saved = process.env.PATH;
+  process.env.PATH = `${saved}${path.delimiter}lide-windows-modus;x`;
+  try {
+    const r = await compile(L.root, 'main.tex', { compiler: 'lualatex' }, OUT, 600000);
+    assert.doesNotMatch(r.log, /luaotfload.*(FATAL|no writeable cache)/i, r.log.slice(-3000));
+    const punkte = Object.fromEntries([...r.log.matchAll(/PUNKT ([\w-]+)=(\S+)/g)].map((m) => [m[1], m[2]]));
+    assert.deepStrictEqual(punkte, {
+      relativ: 'directory',
+      absolut: 'directory',
+      isdir: 'true',
+      // Like kpathsea: hidden names stay refused, a folder outside the project as well.
+      versteckt: 'nil',
+      geheim: 'nil',
+      'geheim-isdir': 'false',
+    });
+    assert.ok(r.pdfPath, r.log.slice(-3000));
+    assert.ok(fs.existsSync(path.join(L.root, OUT, FONT_CACHE_DIR, 'luatex-cache', 'generic')));
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
 test('LuaLaTeX: gemeinsamer Font-Cache bleibt unverändert, das Projekt bekommt einen eigenen (#119)', { skip: skipTex, timeout: 900000 }, async () => {
   const L = lab();
   // kpathsea's own check lets Lua write to TEXMFVAR, a cache all projects' runs load code from.
