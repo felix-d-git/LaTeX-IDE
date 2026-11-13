@@ -44,5 +44,8 @@ node scripts/licenses.js
 ```
 
 Das Skript meldet Lizenzen, die nicht auf seiner Positivliste stehen; solche
-Pakete vorher klären. `client/dist/` wird nicht eingecheckt; `node build.js`
+Pakete vorher klären. Es baut außerdem das Client-Bundle im Speicher und bricht
+ab, wenn darin Code aus einem Dev- oder optionalen Paket landet oder `client/src`
+ein Paket importiert, das nicht selbst unter `dependencies` steht (auch wenn es
+transitiv installiert ist). `client/dist/` wird nicht eingecheckt; `node build.js`
 baut das Bundle nur zum lokalen Testen.

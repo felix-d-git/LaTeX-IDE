@@ -3,7 +3,11 @@
 # Prueft bei jedem Push und Pull Request, dass THIRD_PARTY_NOTICES.md zu
 # package-lock.json passt. Schlaegt auch fehl, wenn ein Prod-Paket fehlt oder keinen
 # Lizenztext hat oder pdfjs-dist/katex nicht die Version haben, fuer die die
-# Zusatzhinweise in scripts/licenses.js geprueft wurden. Neu erzeugen:
+# Zusatzhinweise in scripts/licenses.js geprueft wurden. Ausserdem wird das
+# Client-Bundle im Speicher gebaut (esbuild-Metafile aus build.js, dazu die von
+# build.js kopierten Dateien): Jedes Paket daraus muss ein Prod-Paket aus den
+# Notices sein, und client/src darf nur Pakete aus "dependencies" importieren.
+# Braucht esbuild (npm ci), kein TeX. Neu erzeugen:
 # node scripts/licenses.js
 name: Licenses
 

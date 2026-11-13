@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Generates THIRD_PARTY_NOTICES.md from production dependencies listed in
-// package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only.
+// package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only, except
+// the bundle check: it loads <root>/build.js and with it esbuild (dev dependency,
+// installed by npm ci) to list what client/dist contains.
 //
 //   node scripts/licenses.js [--root <dir>] [--out <file>] [--check]
 //
-//   --root   directory with package-lock.json and node_modules (default: repo root)
+//   --root   directory with package-lock.json, node_modules and build.js (default: repo root)
 //   --out    output file (default: <root>/THIRD_PARTY_NOTICES.md)
 //   --check  write nothing, exit 1 if the output file is not up to date
+//
+// Both modes fail when client/dist would ship code from a package that is not a
+// production dependency in the notices, or client/src imports a package that
+// package.json does not list in "dependencies".
 'use strict';
 
 const fs = require('fs');
@@ -387,6 +393,15 @@ const STRIPPED = {
   'pdfjs-dist': ['cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'wasm', 'iccs', 'build/pdf.sandbox*'],
 };
 
+// Files from STRIPPED parts that still reach the browser through client/dist (bundled by
+// esbuild or copied by build.js). Their third-party code is covered by EMBEDDED_NOTICES;
+// any other file from a stripped part needs the same review before it may be shipped.
+const SHIPPED_FROM_STRIPPED = {
+  'pdfjs-dist': ['legacy/build/pdf.mjs', 'legacy/build/pdf.worker.min.mjs', 'wasm/jbig2.wasm', 'wasm/openjpeg.wasm', 'wasm/qcms_bg.wasm'],
+};
+
+const strippedRe = (glob) => new RegExp('^' + glob.replace(/[.]/g, '\\.').replace(/\*/g, '[^/]*') + '(/|$)');
+
 const NESTED_LICENSE_RE = /^(licen[cs]e|copying|notice)/i;
 
 const LICENSE_FILE_NAMES = [
@@ -475,7 +490,7 @@ function licstartCopyright(file) {
 
 // License/notice files below the package root (nested node_modules excluded), minus STRIPPED parts.
 function nestedLicenseFiles(pkgDir, stripped) {
-  const gone = stripped.map((g) => new RegExp('^' + g.replace(/[.]/g, '\\.').replace(/\*/g, '[^/]*') + '(/|$)'));
+  const gone = stripped.map(strippedRe);
   const hits = [];
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -603,6 +618,89 @@ function applyNotices(packages, errors) {
   }
 }
 
+// "node_modules/a/node_modules/@s/b/dist/x.js" -> [lockfile key "node_modules/a/node_modules/@s/b", "dist/x.js"]
+const PKG_FILE_RE = /^((?:node_modules\/(?:@[^/]+\/)?[^/]+\/)*node_modules\/(?:@[^/]+\/)?[^/]+)\/(.+)$/;
+
+// What client/dist gets from node_modules: the inputs of the esbuild bundle (metafile) and the
+// files build.js copies as they are. Each must come from a production package that is in the
+// notices; files from STRIPPED parts only after review (SHIPPED_FROM_STRIPPED). Packages the
+// project's own code imports must be in package.json "dependencies", so their version (and
+// license) is not left to the package that happens to pull them in.
+function bundleErrors({ metafile, copied, lockPackages, dependencies, noticeIds, stripped = STRIPPED, shippedFromStripped = SHIPPED_FROM_STRIPPED }) {
+  const errors = [];
+  const files = new Map(Object.keys(metafile.inputs).map((f) => [f, 'bundled']));
+  for (const f of copied) files.set(f, 'copied');
+  const seen = new Set();
+  for (const [raw, how] of files) {
+    const file = raw.replace(/\\/g, '/').replace(/^\(disabled\):/, '');
+    const where = `${file} (${how} into client/dist)`;
+    if (file.startsWith('../') || path.isAbsolute(file) || /^[a-z]:/i.test(file)) {
+      errors.push(`${where}: outside the repository`);
+      continue;
+    }
+    if (!file.startsWith('node_modules/')) {
+      // The project's own code: every package it imports directly must be declared.
+      const undeclared = new Set();
+      for (const imp of (metafile.inputs[raw] && metafile.inputs[raw].imports) || []) {
+        const spec = imp.original;
+        if (!spec || imp.external || /^[./]/.test(spec)) continue;
+        const pkg = spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/');
+        if (!Object.prototype.hasOwnProperty.call(dependencies, pkg)) undeclared.add(pkg);
+      }
+      for (const pkg of undeclared) errors.push(`${file} imports ${pkg}, which package.json does not list in "dependencies"`);
+      continue;
+    }
+    const m = PKG_FILE_RE.exec(file);
+    const meta = m && lockPackages[m[1]];
+    if (!meta) {
+      errors.push(`${where}: no package for it in package-lock.json (run npm ci)`);
+      continue;
+    }
+    const name = meta.name || m[1].slice(m[1].lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const id = `${name}@${meta.version}`;
+    if ((stripped[name] || []).some((g) => strippedRe(g).test(m[2])) && !(shippedFromStripped[name] || []).includes(m[2])) {
+      errors.push(`${id}: ${where} lies in a STRIPPED part whose licenses the notices leave out; `
+        + 'check them, cover them in EMBEDDED_NOTICES and add the file to SHIPPED_FROM_STRIPPED');
+    }
+    if (seen.has(m[1])) continue; // one message per package
+    seen.add(m[1]);
+    if (meta.dev || meta.optional || meta.devOptional) {
+      errors.push(`${id}: ${where}, but a dev or optional package and so not in the notices; `
+        + 'add it to "dependencies" or stop shipping it');
+    } else if (!noticeIds.has(id)) {
+      errors.push(`${id}: ${where}, but not in the notices`);
+    }
+  }
+  for (const [name, list] of Object.entries(shippedFromStripped)) {
+    for (const f of list) {
+      if (!files.has(`node_modules/${name}/${f}`)) errors.push(`SHIPPED_FROM_STRIPPED['${name}']: ${f} is not shipped any more, remove the entry`);
+    }
+  }
+  return errors;
+}
+
+// Builds the client bundle in memory with build.js' options and checks it (bundleErrors).
+async function checkBundle(root, packages, errors) {
+  let metafile;
+  let copied;
+  try {
+    const build = require(path.join(root, 'build.js'));
+    metafile = await build.bundleMetafile();
+    copied = build.COPIED.map((c) => c.from);
+  } catch (e) {
+    errors.push(`client bundle: cannot build it to check its packages (npm ci installs esbuild): ${String(e.message).split('\n')[0]}`);
+    return;
+  }
+  const readJson = (f) => JSON.parse(fs.readFileSync(path.join(root, f), 'utf8'));
+  errors.push(...bundleErrors({
+    metafile,
+    copied,
+    lockPackages: readJson('package-lock.json').packages || {},
+    dependencies: readJson('package.json').dependencies || {},
+    noticeIds: new Set(packages.map((p) => `${p.name}@${p.version}`)),
+  }));
+}
+
 function render(packages) {
   const lines = [];
   const block = (text) => lines.push('```', text.trimEnd(), '```', '');
@@ -657,7 +755,7 @@ function render(packages) {
   return lines.join('\n');
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const errors = [];
   const packages = collect(opts.root, errors);
@@ -665,6 +763,7 @@ function main() {
   for (const p of packages) {
     if (!isAllowedLicense(p.license)) errors.push(`${p.name}@${p.version}: license not on allow-list: ${p.license}`);
   }
+  await checkBundle(opts.root, packages, errors);
   if (errors.length > 0) {
     console.error('Cannot generate the notices:');
     for (const e of errors) console.error(`  ${e}`);
@@ -689,6 +788,11 @@ function main() {
   console.log(`Packages: ${packages.length}`);
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
 
-module.exports = { STRIPPED };
+module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle };
