@@ -76,8 +76,9 @@ test('öffentliche Beispielpasswörter zählen als nicht gesetzt, fehlende Datei
   const dataDir = tmpDir('lide-initpw-');
   test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const first = await startServer({ ADMIN_PASSWORD: 'bitte-ein-echtes-passwort-setzen', DATA_DIR: dataDir });
-  const initial = readPw(dataDir);
+  let initial;
   try {
+    initial = readPw(dataDir);
     const c = client(first.base);
     await c.call('GET', '/api/auth/me');
     assert.strictEqual((await c.call('POST', '/api/auth/login', { login: 'admin', password: 'bitte-ein-echtes-passwort-setzen' })).status, 401);
@@ -126,8 +127,9 @@ test('mit Verschlüsselung liegt die Datei in VAULT_DIR (für den Host), nicht i
   test.after(() => fs.rmSync(vaultDir, { recursive: true, force: true }));
   const env = { ADMIN_PASSWORD: undefined, DATA_KEY: crypto.randomBytes(32).toString('hex'), VAULT_DIR: vaultDir };
   const first = await startServer(env);
-  const initial = readPw(vaultDir);
+  let initial;
   try {
+    initial = readPw(vaultDir);
     assert.ok(!fs.existsSync(path.join(first.dataDir, FILE)));
   } finally {
     await first.stop();
