@@ -138,7 +138,8 @@ Der Ordner muss `<Jahr>/bin/<arch>` enthalten (Jahr 2025–2027, `x86_64-linux` 
 LuaLaTeX: Jedes Projekt bekommt einen eigenen Font-Cache im Ausgabeordner, den
 gemeinsamen Cache von TeX Live kann ein Dokument nicht verändern. Damit nicht jedes
 Projekt beim ersten Lauf alle Schriften durchsucht (mit `texlive-full` auf dem Pi
-mehrere Minuten), nach dem Start einmal `docker compose exec app luaotfload-tool -u`
+vermutlich mehrere Minuten, nicht gemessen), nach dem Start einmal
+`docker compose exec app luaotfload-tool -u`
 ausführen: Die IDE kopiert die Namensdatenbank dann in neue Projekte (bis der
 Container neu erstellt wird).
 

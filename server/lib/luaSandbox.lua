@@ -24,9 +24,14 @@
 --          folder (TEXMFCACHE).
 -- A TeX or font folder that contains the project (e.g. TEXMFHOME = home folder with the
 -- projects below it) is dropped, otherwise neighbouring projects would become readable.
+-- Allowlist: every C function of the libraries that deal with files (io, os, lfs, zip, gzip,
+-- fontloader, font, img, pdfe, mplib, kpse, package, luaharfbuzz) is either checked here or
+-- known to open nothing by name; any other one (a newer LuaTeX) is removed at the end.
 
 local type, tostring, ipairs, pairs, next, error, select = type, tostring, ipairs, pairs, next, error, select
+local getmetatable = getmetatable
 local find, gsub, sub, lower, match, gmatch = string.find, string.gsub, string.sub, string.lower, string.match, string.gmatch
+local concat = table.concat
 
 local EPERM = "LaTeX-IDE: Zugriff außerhalb des Projekts nicht erlaubt"
 local is_windows, is_mac = os.type == "windows", os.name == "macosx"
@@ -197,15 +202,15 @@ end
 
 local io_lines, io_input, io_output = io.lines, io.input, io.output
 io.lines = function(name, ...)
-  if name ~= nil and not read_ok(name) then raise() end
+  if name ~= nil and not read_ok(name) then return raise() end
   return io_lines(name, ...)
 end
 io.input = function(f, ...)
-  if type(f) == "string" and not read_ok(f) then raise() end
+  if type(f) == "string" and not read_ok(f) then return raise() end
   return io_input(f, ...)
 end
 io.output = function(f, ...)
-  if type(f) == "string" and not write_ok(f) then raise() end
+  if type(f) == "string" and not write_ok(f) then return raise() end
   return io_output(f, ...)
 end
 
@@ -288,6 +293,19 @@ end
 os.remove = guard(os.remove, write_ok)
 -- kpathsea reads openin_any/openout_any/TEXMFOUTPUT from the environment on every check.
 os.setenv = function() end
+-- os.tmpdir(template) creates a folder wherever the template points (luatex-core checks
+-- "os.tempdir", which does not exist). Without a template: luatex.XXXXXX in the current
+-- folder, which luaotfload's HarfBuzz mode uses.
+local os_tmpdir = os.tmpdir
+if os_tmpdir then
+  os.tmpdir = function(template, ...)
+    if template ~= nil and not write_ok(template) then return nil, EPERM end
+    return os_tmpdir(template, ...)
+  end
+end
+-- os.tmpname creates a file in the system's temp folder, which Lua here can neither read
+-- nor write.
+os.tmpname = function() error(EPERM, 2) end
 
 -- lfs: listings like reading, metadata also above the allowed folders, changes like writing.
 lfs.attributes = guard(lfs.attributes, meta_ok)
@@ -311,14 +329,28 @@ end
 -- Libraries that open files by name on the C side.
 if zip then
   zip.open = guard(zip.open, read_ok)
-  zip.openfile = guard(zip.openfile, read_ok)
-end
-if gzip and gzip.open then
-  local gzip_open = gzip.open
-  gzip.open = function(name, mode, ...)
-    if not (read_ok(name) and (mode == nil or not find(mode, "[wa+]") or write_ok(name))) then return nil, EPERM end
-    return gzip_open(name, mode, ...)
+  -- zip.openfile(name, ext) appends "." .. ext to every folder of the name and opens the
+  -- result as the archive, ".." included ("x/a.txt", "/../../b.zip" reads a.txt from
+  -- x./../../b.zip), and copies ext into a fixed-size buffer: no extensions. Without them
+  -- zziplib tries <folder>.zip for every folder of the name, so only relative names: the
+  -- archive then always lies in the project.
+  local zip_openfile = zip.openfile
+  if zip_openfile then
+    zip.openfile = function(name, ext)
+      if ext ~= nil or not read_ok(name) or is_abs(norm(name)) then return nil, EPERM end
+      return zip_openfile(name)
+    end
   end
+end
+if gzip then
+  local gzip_open = gzip.open
+  if gzip_open then
+    gzip.open = function(name, mode, ...)
+      if not (read_ok(name) and (mode == nil or not find(mode, "[wa+]") or write_ok(name))) then return nil, EPERM end
+      return gzip_open(name, mode, ...)
+    end
+  end
+  gzip.lines = guard(gzip.lines, read_ok, raise)
 end
 if pdfe then pdfe.open = guard(pdfe.open, read_ok) end
 -- pdf.obj/pdf.immediateobj with type "file"/"streamfile" (or { file = … }) copy a file into
@@ -329,10 +361,10 @@ if pdf then
     return function(...)
       local a = { ... }
       if type(a[1]) == "table" then
-        if a[1].file ~= nil and not read_ok(a[1].file) then raise() end
+        if a[1].file ~= nil and not read_ok(a[1].file) then return raise() end
       else
         local i = type(a[1]) == "number" and 2 or 1
-        if (a[i] == "file" or a[i] == "streamfile") and not read_ok(a[i + 1]) then raise() end
+        if (a[i] == "file" or a[i] == "streamfile") and not read_ok(a[i + 1]) then return raise() end
       end
       return fn(...)
     end
@@ -348,6 +380,21 @@ end
 if fontloader then
   fontloader.open = guard(fontloader.open, read_ok)
   fontloader.info = guard(fontloader.info, read_ok)
+  -- The second argument is a file as well; a parse error quotes its first word.
+  for _, f in ipairs({ "apply_featurefile", "apply_afmfile" }) do
+    local orig = fontloader[f]
+    if type(orig) == "function" then
+      fontloader[f] = function(font, name, ...)
+        if not read_ok(name) then return raise() end
+        return orig(font, name, ...)
+      end
+    end
+  end
+end
+-- TFM and VF files by name (kpathsea also finds absolute names, without openin_any).
+if font then
+  font.read_tfm = guard(font.read_tfm, read_ok, raise)
+  font.read_vf = guard(font.read_vf, read_ok)
 end
 -- MetaPost opens what find_file returns (without find_file: the name as given).
 if mplib and mplib.new then
@@ -368,16 +415,63 @@ if mplib and mplib.new then
 end
 
 -- kpathsea lookups of absolute names would tell which files exist outside.
-for _, f in ipairs({ "find_file", "readable_file", "lookup" }) do
+local LOOKUPS = { "find_file", "readable_file", "lookup" }
+local function lookup_ok(name)
+  if type(name) ~= "string" then return true end
+  local p = norm(name)
+  return not (is_abs(p) or has_dotdot(p)) or read_ok(name)
+end
+for _, f in ipairs(LOOKUPS) do
   local orig = kpse[f]
   if type(orig) == "function" then
     kpse[f] = function(name, ...)
-      if type(name) == "string" then
-        local p = norm(name)
-        if (is_abs(p) or has_dotdot(p)) and not read_ok(name) then return nil end
-      end
+      if not lookup_ok(name) then return nil end
       return orig(name, ...)
     end
+  end
+end
+-- kpse.new() instances have the same lookups as methods (one metatable for all of them).
+local kpse_new = kpse.new
+if type(kpse_new) == "function" then
+  local patched = false
+  kpse.new = function(...)
+    local k = kpse_new(...)
+    if not patched then
+      local mt = getmetatable(k)
+      local index = type(mt) == "table" and mt.__index
+      if type(index) ~= "table" then return nil end
+      for _, f in ipairs(LOOKUPS) do
+        local orig = index[f]
+        if type(orig) == "function" then
+          index[f] = function(self, name, ...)
+            if not lookup_ok(name) then return nil end
+            return orig(self, name, ...)
+          end
+        end
+      end
+      patched = true
+    end
+    return k
+  end
+end
+-- package.searchpath tries every template with fopen, so it would tell the same.
+if package then
+  local dirsep = sub(package.config or "/", 1, 1)
+  package.searchpath = function(name, path, sep, rep)
+    if type(name) ~= "string" or type(path) ~= "string" then error("bad argument to 'searchpath' (string expected)", 2) end
+    sep, rep = sep or ".", rep or dirsep
+    if sep ~= "" then name = gsub(name, (gsub(sep, "%p", "%%%0")), (gsub(rep, "%%", "%%%%"))) end
+    local tried = {}
+    for template in gmatch(path, "[^;]+") do
+      local file = gsub(template, "%?", function() return name end)
+      local f = read_ok(file) and io_open(file, "r")
+      if f then
+        f:close()
+        return file
+      end
+      tried[#tried + 1] = "\n\tno file '" .. file .. "'"
+    end
+    return nil, concat(tried)
   end
 end
 
@@ -431,6 +525,60 @@ callback.register = function(name, fn, ...)
   return callback_register(name, fn, ...)
 end
 for name, fn in pairs(defaults) do callback_register(name, fn) end
+
+---------------------------------------------------------------------------------------------
+-- Allowlist
+
+-- C functions of these libraries that are checked above or open nothing by name (LuaTeX
+-- 1.15-1.18; methods of opened files, archives, fonts … work on what is already open).
+-- Every other function is removed, so a newer LuaTeX cannot add a way out unnoticed.
+-- Removed rather than replaced: packages that test for a function then behave as with
+-- an older LuaTeX without it. Add a name only after checking what the function opens.
+local KNOWN = {
+  io = "close flush input lines open output popen read tmpfile type write",
+  os = "clock date difftime exec execute exit getenv gettimeofday kpsepopen remove rename setenv setlocale "
+    .. "sleep socketgettime socketsleep spawn time times tmpdir tmpname uname",
+  lfs = "attributes chdir currentdir dir isdir isfile link lock lock_dir mkdir mkdirp readlink rmdir setmode "
+    .. "shortname symlinkattributes touch unlock",
+  zip = "close open openfile type",
+  gzip = "close lines open",
+  fontloader = "apply_afmfile apply_featurefile close fields info open to_table",
+  font = "addcharacters current define each frozen getcopy getfont getparameters id max nextid read_tfm read_vf "
+    .. "setexpansion setfont",
+  img = "boxes copy fields immediatewrite immediatewriteobject keys new node scan types write",
+  pdfe = "arraytotable close closestream dictionarytotable getarray getboolean getbox getcatalog getdictionary "
+    .. "getfromarray getfromdictionary getfromreference getfromstream getinfo getinteger getmemoryusage getname "
+    .. "getnofobjects getnofpages getnumber getpage getpages getsize getstatus getstream getstring gettrailer "
+    .. "getversion new open openstream pagestotable readfromstream readwholestream type unencrypt",
+  mplib = "char_depth char_height char_width execute fields finish get_boolean get_number get_numeric get_path "
+    .. "get_string new pen_info solve_path statistics version",
+  kpse = "check_permission default_texmfcnf expand_braces expand_path expand_var find_file in_name_ok "
+    .. "in_name_ok_silent_extended init_prog lookup new out_name_ok out_name_ok_silent_extended readable_file "
+    .. "record_input_file record_output_file set_program_name show_path var_value version",
+  package = "loadlib searchpath seeall",
+  -- One level deeper: the classes (Blob.new_from_file, Face.new open files).
+  luaharfbuzz = "shape_full shapers version Blob.new Blob.new_from_file Buffer.new Direction.new Face.new "
+    .. "Face.new_from_blob Feature.new Font.new Language.new Script.from_iso15924_tag Script.new Tag.new "
+    .. "Variation.new unicode.script",
+}
+local function sweep(t, prefix, known, depth)
+  for k, v in next, t do
+    local name = type(k) == "string" and prefix .. k
+    if type(v) == "function" then
+      if not (name and known[name]) then t[k] = nil end
+    elseif type(v) == "table" and name and depth > 0 then
+      sweep(v, name .. ".", known, depth - 1)
+    end
+  end
+end
+for lib, names in pairs(KNOWN) do
+  local known = {}
+  for n in gmatch(names, "%S+") do known[n] = true end
+  local depth = lib == "luaharfbuzz" and 1 or 0
+  local global, loaded = _G[lib], package and package.loaded and package.loaded[lib]
+  if type(global) == "table" then sweep(global, "", known, depth) end
+  if type(loaded) == "table" and loaded ~= global then sweep(loaded, "", known, depth) end
+end
 
 -- debug.getupvalue would hand out the unwrapped functions. TeX Live 2023+ removes the
 -- debug library anyway (unless --luadebug), older versions do not.

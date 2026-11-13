@@ -106,6 +106,43 @@ test('seedFontNames: Namensdatenbank der Installation einmal kopieren, nie über
   assert.ok(!fs.existsSync(path.join(base, 'leer', FONT_CACHE_DIR)));
 });
 
+// Smallest ZIP archive with one stored (uncompressed) entry.
+function crc32(buf) {
+  let c = ~0;
+  for (const b of buf) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+function tinyZip(name, text) {
+  const data = Buffer.from(text);
+  const file = Buffer.from(name);
+  const crc = crc32(data);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(10, 4);
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(file.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(10, 6);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(file.length, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + file.length, 12);
+  end.writeUInt32LE(local.length + file.length + data.length, 16);
+  return Buffer.concat([local, file, data, central, file, end]);
+}
+
 // One project for all TeX runs: the per-project font cache is built only once.
 function lab() {
   const base = tmp();
@@ -119,6 +156,8 @@ function lab() {
   fs.writeFileSync(path.join(geheim, 'zugang.env'), 'GEHEIM_KEY=GEHEIM-ENV\n');
   fs.writeFileSync(path.join(geheim, 'modul.lua'), 'x = "GEHEIM-LUA"\n');
   fs.writeFileSync(path.join(geheim, 'geheim.pdf'), tinyPdf('GEHEIM-PDF'));
+  fs.writeFileSync(path.join(geheim, 'archiv.zip'), tinyZip('geheim.txt', 'GEHEIM-ZIP\n'));
+  fs.writeFileSync(path.join(geheim, 'merkmale.fea'), 'GEHEIMWORT feature\n');
   for (const f of ['opfer.txt', 'opfer2.txt']) fs.writeFileSync(path.join(geheim, f), 'opfer\n');
   const gemeinsam = path.join(base, 'gemeinsam');
   fs.mkdirSync(gemeinsam);
@@ -129,12 +168,44 @@ function lab() {
   return { base, root, geheim, gemeinsam, tex, files: () => fs.readdirSync(geheim).sort() };
 }
 
+// Every probe reports LECK (got through), GESPERRT (nil/false, a refusal by the sandbox or by
+// luatex-core with the sandbox's check, or where given another error that means "not found")
+// or FEHLER (the probe itself broke and would prove nothing). The control run without the
+// sandbox shows that each probe can leak.
 const ANGRIFF = String.raw`
 local G = dofile("pfade.lua").geheim
 local function has(s) return type(s) == "string" and s:find("GEHEIM", 1, true) ~= nil end
-local function try(name, f)
+local REFUSED = { "LaTeX-IDE: Zugriff", "LuaTeX: operation not permitted", "patched 'io.lines' can't open" }
+local function try(name, f, notfound)
   local ok, r = pcall(f)
-  texio.write_nl("term and log", (ok and r and "LECK " or "GESPERRT ") .. name)
+  local e = ok and "" or tostring(r)
+  local refused = notfound and e:find(notfound, 1, true)
+  for _, s in ipairs(REFUSED) do refused = refused or e:find(s, 1, true) end
+  local status = "FEHLER "
+  if ok then
+    status = r and "LECK " or "GESPERRT "
+  elseif refused then
+    status = "GESPERRT "
+  else
+    name = name .. " (" .. e:gsub("GEHEIM", "G.") .. ")"
+  end
+  texio.write_nl("term and log", status .. name)
+end
+-- A font for the fontloader probes: TeX Live's Latin Modern, else one of the system's.
+local function schrift()
+  local list = { kpse.find_file("lmroman10-regular.otf", "opentype fonts") }
+  local win = os.getenv("WINDIR") or os.getenv("SystemRoot")
+  if win then list[#list + 1] = win .. "/Fonts/arial.ttf" end
+  list[#list + 1] = "/System/Library/Fonts/Supplemental/Arial.ttf"
+  list[#list + 1] = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+  for _, f in ipairs(list) do
+    local h = io.open(f, "rb")
+    if h then h:close() return f end
+  end
+end
+local SCHRIFT = schrift()
+local function mit_schrift(name, f)
+  if SCHRIFT then try(name, f) else texio.write_nl("term and log", "OHNE " .. name) end
 end
 try("io.open", function() local f = io.open(G .. "/auth-data.json"); return f and has(f:read("a")) end)
 try("io.open ../", function() local f = io.open("../anderes-projekt/main.tex"); return f and has(f:read("a")) end)
@@ -144,15 +215,33 @@ try("io.input", function() io.input(G .. "/auth-data.json"); local s = io.read("
 try("io.output", function() io.output(G .. "/neu.txt"); io.write("x"); io.close(); io.output(io.stdout); return true end)
 try("loadfile", function() local env = {}; local f, e = loadfile(G .. "/modul.lua", "t", env); if not f then return has(e) end; f(); return has(env.x) end)
 try("dofile", function() dofile(G .. "/modul.lua"); return has(x) end)
-try("require", function() require(G .. "/modul"); return has(x) end)
+try("require", function() require(G .. "/modul"); return has(x) end, "not found")
 try("os.remove", function() return os.remove(G .. "/opfer.txt") end)
 try("os.rename", function() return os.rename(G .. "/opfer2.txt", "gestohlen.txt") end)
+try("os.tmpdir", function() return os.tmpdir(G .. "/neuXXXXXX") ~= nil end)
+try("os.tmpdir ../", function() return os.tmpdir("../geheim/neuXXXXXX") ~= nil end)
+try("os.tmpname", function() local n = os.tmpname(); os.remove(n); return n ~= nil end)
 try("lfs.dir", function() for n in lfs.dir(G) do if n == "auth-data.json" then return true end end end)
 try("lfs.attributes", function() return lfs.attributes(G .. "/auth-data.json") ~= nil end)
 try("lfs.mkdir", function() return lfs.mkdir(G .. "/neu") end)
 try("kpse.find_file", function() return kpse.find_file(G .. "/auth-data.json") ~= nil end)
-try("zip.openfile", function() local f = zip and zip.openfile(G .. "/auth-data.json"); return f and has(f:read("a")) end)
-try("gzip.open", function() local f = gzip and gzip.open(G .. "/auth-data.json"); return f and has(f:read("a")) end)
+try("kpse.new", function() return kpse.new("lualatex"):find_file(G .. "/auth-data.json") ~= nil end)
+try("package.searchpath", function() return package.searchpath("auth-data", G .. "/?.json") ~= nil end)
+try("zip.open", function() local z = zip.open(G .. "/archiv.zip"); local f = z and z:open("geheim.txt"); return f and has(f:read("*a")) end)
+try("zip.openfile", function() local f = zip.openfile(G .. "/auth-data.json"); return f and has(f:read("*a")) end)
+try("zip.openfile Archiv", function() local f = zip.openfile(G .. "/archiv/geheim.txt"); return f and has(f:read("*a")) end)
+-- zziplib puts "." + extension behind each folder of the name: x./../../geheim/archiv.zip
+lfs.mkdir("x.")
+try("zip.openfile Endung", function() local f = zip.openfile("x/geheim.txt", "/../../geheim/archiv.zip"); return f and has(f:read("*a")) end)
+try("zip.openfile Endungsliste", function() local f = zip.openfile("x/geheim.txt", { "/../../geheim/archiv.zip" }); return f and has(f:read("*a")) end)
+try("gzip.open", function() local f = gzip.open(G .. "/auth-data.json"); return f and has(f:read("*a")) end)
+try("gzip.lines", function() for l in gzip.lines(G .. "/auth-data.json") do if has(l) then return true end end end)
+try("gzip.lines ../", function() for l in gzip.lines("../anderes-projekt/main.tex") do if has(l) then return true end end end)
+mit_schrift("fontloader.apply_featurefile", function()
+  local r = fontloader.apply_featurefile(fontloader.open(SCHRIFT), G .. "/merkmale.fea")
+  return type(r) == "table" and has(table.concat(r, " "))
+end)
+mit_schrift("fontloader.apply_afmfile", function() fontloader.apply_afmfile(fontloader.open(SCHRIFT), G .. "/merkmale.fea"); return true end)
 try("pdfe.open", function() local d = pdfe and pdfe.open(G .. "/geheim.pdf"); return d ~= nil and pdfe.getnofpages(d) > 0 end)
 try("pdf.immediateobj", function() return pdf.immediateobj("streamfile", G .. "/auth-data.json") ~= nil end)
 try("pdf.obj", function() return pdf.obj({ type = "stream", file = G .. "/auth-data.json", immediate = true }) ~= nil end)
@@ -173,6 +262,26 @@ os.execute("mkdir " .. G .. "/neu-exec")
 os.setenv("openin_any", "a")
 texio.write_nl("term and log", "LUA-ENDE")
 `;
+const PROBEN = [...ANGRIFF.matchAll(/(?:try|mit_schrift)\("([^"]+)"/g)].map((m) => m[1]);
+// LuaTeX refuses these itself, sandbox or not: no debug library without --luadebug (TeX
+// Live 2023+), "cat" is not on the list of restricted \write18 commands.
+const SCHON_OHNE_SANDBOX = ['debug', 'io.popen'];
+
+// Result per probe from the log: { status, text }.
+function proben(log) {
+  const res = {};
+  for (const line of log.split(/\r?\n/)) {
+    const m = /^(LECK|GESPERRT|FEHLER|OHNE) (.*)$/.exec(line);
+    if (!m) continue;
+    const name = PROBEN.find((p) => m[2] === p || m[2].startsWith(`${p} (`));
+    if (name) res[name] = { status: m[1], text: line };
+  }
+  return res;
+}
+// Probes whose status is not one of `ok` (missing ones included), for the assertion message.
+function abweichend(res, ok, skip = []) {
+  return PROBEN.filter((p) => !skip.includes(p) && !ok.includes(res[p] && res[p].status)).map((p) => (res[p] ? res[p].text : `FEHLT ${p}`));
+}
 
 test('LuaLaTeX: Lua kommt nicht aus dem Projekt heraus, TeX-\\openin auch nicht (#119)', { skip: skipTex, timeout: 900000 }, async () => {
   const L = lab();
@@ -190,8 +299,8 @@ test('LuaLaTeX: Lua kommt nicht aus dem Projekt heraus, TeX-\\openin auch nicht 
   // Without the sandbox lualatex aborts while loading luaotfload: nothing of the above ran.
   assert.match(r.log, /LUA-ENDE/, r.log.slice(-3000));
   assert.match(r.log, /SANDBOX-ENDE/, r.log.slice(-3000));
-  assert.deepStrictEqual(r.log.match(/LECK [^\n]*/g), null);
-  assert.ok((r.log.match(/GESPERRT /g) || []).length >= 27, r.log.slice(-3000));
+  assert.deepStrictEqual(abweichend(proben(r.log), ['GESPERRT', 'OHNE']), []);
+  assert.deepStrictEqual(r.log.match(/(LECK|FEHLER) [^\n]*/g), null);
   assert.doesNotMatch(r.log, /GEHEIM/);
   assert.ok(r.pdfPath, r.log.slice(-3000));
   assert.ok(!pdfContains(path.join(L.root, r.pdfPath), 'GEHEIM'));
@@ -214,6 +323,50 @@ test('LuaLaTeX: Lua kommt nicht aus dem Projekt heraus, TeX-\\openin auch nicht 
     assert.doesNotMatch(res.log, /luaotfload.*(FATAL|no writeable cache)/i, main);
   }
   assert.deepStrictEqual(L.files(), before);
+});
+
+test('LuaLaTeX ohne Sandbox (Gegenprobe): jede Lua-Probe kommt an ihr Ziel (#119)', { skip: skipTex, timeout: 900000 }, async () => {
+  const L = lab();
+  fs.writeFileSync(path.join(L.root, 'angriff.lua'), ANGRIFF);
+  L.tex('main.tex', '', '\\directlua{dofile("angriff.lua")}\n');
+  // Plain lualatex, TeX may read and write anywhere; luaotfload gets a cache of its own.
+  const cache = path.join(L.base, 'cache');
+  await seedFontNames(cache);
+  const env = { ...process.env, openin_any: 'a', openout_any: 'a', TEXMFCACHE: path.join(cache, FONT_CACHE_DIR), max_print_line: '10000' };
+  delete env.TEXMFOUTPUT;
+  spawnSync('lualatex', ['-interaction=nonstopmode', 'main.tex'], { cwd: L.root, env, stdio: 'ignore', windowsHide: true, timeout: 600000 });
+  const log = fs.readFileSync(path.join(L.root, 'main.log'), 'latin1');
+  assert.match(log, /LUA-ENDE/, log.slice(-3000));
+  assert.deepStrictEqual(abweichend(proben(log), ['LECK', 'OHNE'], SCHON_OHNE_SANDBOX), []);
+});
+
+test('Lua-Sandbox: unbekannte Funktionen der Datei-Bibliotheken werden entfernt (#119)', { skip: skipTex, timeout: 120000 }, () => {
+  const d = tmp();
+  const libs = ['io', 'os', 'lfs', 'zip', 'gzip', 'fontloader', 'font', 'img', 'pdfe', 'mplib', 'kpse', 'package'];
+  const list = libs.map((l) => `"${l}"`).join(', ');
+  // Stands in for a newer LuaTeX: one more function per library before the sandbox runs.
+  fs.writeFileSync(path.join(d, 'start.lua'), [
+    `for _, l in ipairs({ ${list} }) do _G[l].neu_in_luatex = function() return "OFFEN" end end`,
+    'if luaharfbuzz then luaharfbuzz.neu_in_luatex = print; luaharfbuzz.Face.neu_in_luatex = print end',
+    `dofile([==[${LUA_SANDBOX.split(path.sep).join('/')}]==])`,
+    '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(d, 'pruefen.lua'), [
+    'local t = {}',
+    `for _, l in ipairs({ ${list} }) do t[#t + 1] = l .. "=" .. type(_G[l].neu_in_luatex) end`,
+    'local hb = luaharfbuzz or { Face = {} }',
+    't[#t + 1] = "hb=" .. type(hb.neu_in_luatex) .. "/" .. type(hb.Face.neu_in_luatex)',
+    'texio.write_nl("term and log", "NEU " .. table.concat(t, " "))',
+    'texio.write_nl("term and log", "ALT " .. type(io.open) .. " " .. type(gzip.lines) .. " " .. type(kpse.find_file) .. " " .. type(os.tmpdir))',
+    '',
+  ].join('\n'));
+  // INITEX: no format, braces need their catcodes first.
+  fs.writeFileSync(path.join(d, 'main.tex'), '\\catcode`\\{=1 \\catcode`\\}=2 \\directlua{dofile("pruefen.lua")}\\end\n');
+  const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: d, max_print_line: '10000' };
+  const r = spawnSync('lualatex', [`--lua=${path.join(d, 'start.lua')}`, '--ini', '-interaction=nonstopmode', 'main.tex'], { cwd: d, env, encoding: 'latin1', windowsHide: true, timeout: 100000 });
+  const out = String(r.stdout);
+  assert.ok(out.includes(`NEU ${libs.map((l) => `${l}=nil`).join(' ')} hb=nil/nil`), out.slice(-3000));
+  assert.ok(out.includes('ALT function function function function'), out.slice(-3000));
 });
 
 test('LuaLaTeX: Dateien im Projekt bleiben nutzbar (Bild, Lua-Modul, Daten, Unterordner) (#119)', { skip: skipTex, timeout: 900000 }, async () => {
