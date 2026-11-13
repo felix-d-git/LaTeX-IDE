@@ -10,6 +10,8 @@
 # pandoc bringt statisch gelinkte Haskell-Bibliotheken (u. a. GPL-2.0+) mit: deren Debian-Quellpakete
 # gehen als pandoc-sources-<tag>.tar ans Release, die Quellen aller uebrigen Debian-Pakete im Image als
 # debian-sources-<tag>.tar.partNN, beides bevor das Image gepusht wird (docs/INSTALL-DOCKER.md).
+# Die Copyright-Vermerke (debian/copyright) dieser Bibliotheken legt der Workflow vor dem Push als
+# eigene Schicht unter /usr/share/doc/pandoc/static-libs ins Image (scripts/pandoc-copyright.py).
 name: Container-Image
 
 on:
@@ -167,9 +169,33 @@ jobs:
             n=$(ls *.dsc | wc -l)
             [ "$n" -eq "$(wc -l < SOURCES.txt)" ] || { echo "$n .dsc fuer $(wc -l < SOURCES.txt) Quellpakete"; exit 1; }
           '
+          # debian/copyright jeder dieser Quellen, kommt im naechsten Schritt ins Image
+          python3 scripts/pandoc-copyright.py "$RUNNER_TEMP/src" "$RUNNER_TEMP/pandoc-copyright"
           tar -cf "pandoc-sources-$ASSET.tar" -C "$RUNNER_TEMP/src" .
           ls -lh "pandoc-sources-$ASSET.tar"
           rm -rf "$RUNNER_TEMP/src"
+
+      # BSD-3-Clause, MIT u. a. verlangen die Copyright-Vermerke auch fuer die statisch in pandoc
+      # gelinkten Bibliotheken; Debians pandoc-Paket bringt nur sein eigenes copyright mit. Eigene
+      # Schicht ueber dem gebauten und geprueften Image, vor Upload und Push (docs/INSTALL-DOCKER.md).
+      - name: Copyright-Vermerke der pandoc-Bibliotheken ins Image
+        run: |
+          docker build -t latex-ide:test -f - "$RUNNER_TEMP/pandoc-copyright" <<'EOF'
+          FROM latex-ide:test
+          COPY . /usr/share/doc/pandoc/static-libs/
+          EOF
+          docker run --rm latex-ide:test sh -c '
+            d=/usr/share/doc/pandoc/static-libs
+            test -s "$d/README" && test -s "$d/SOURCES.txt" || { echo "README/SOURCES.txt fehlt in $d"; exit 1; }
+            n=0
+            while read -r src ver; do
+              test -s "$d/$src/copyright" || test -s "$d/${src}_${ver#*:}/copyright" || { echo "fehlt: $d/$src/copyright"; exit 1; }
+              n=$((n+1))
+            done < "$d/SOURCES.txt"
+            [ "$n" -gt 0 ] || { echo "SOURCES.txt leer"; exit 1; }
+            echo "$n Copyright-Dateien unter $d"
+          '
+          rm -rf "$RUNNER_TEMP/pandoc-copyright"
 
       # GPLv3/AGPLv3 §6(d): Quellen aller Debian-Pakete im Image selbst bereithalten, nicht nur
       # ueber snapshot.debian.org. Mehrere GB, daher auf /mnt (zweite Platte des Runners) und in

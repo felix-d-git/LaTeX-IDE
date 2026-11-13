@@ -174,8 +174,12 @@ Image – selbst bauen wie oben.
 Markdown und HTML (File ▸ Download). Debians pandoc ist statisch mit rund 150
 Haskell-Bibliotheken gelinkt (u. a. unter GPL-2.0+, Liste in `SOURCES.txt`
 im Archiv). Deren Debian-Quellpakete liegen deshalb zu jedem Release mit veröffentlichtem Image als
-`pandoc-sources-<tag>.tar` bei den Release-Dateien (siehe unten). Beim eigenen
-Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit `0` ohne).
+`pandoc-sources-<tag>.tar` bei den Release-Dateien (siehe unten), ihre
+Copyright-Vermerke (`debian/copyright` jedes dieser Quellpakete, auch von GHC)
+im fertigen Image unter `/usr/share/doc/pandoc/static-libs/<Quellpaket>/copyright`.
+Beim eigenen Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit
+`0` ohne); die Vermerke unter `static-libs` legt nur der Release-Workflow an
+(`scripts/pandoc-copyright.py`, siehe Hinweise für Betreiber).
 
 ## Drittsoftware im Docker-Image
 
@@ -194,8 +198,10 @@ Lizenzen, u. a. unter GPL, LGPL und AGPL:
   `PANDOC=0`)
 
 Copyright-Vermerke und Lizenzen der Pakete liegen im Image unter
-`/usr/share/doc/<paket>/copyright`, die Volltexte gängiger Lizenzen unter
-`/usr/share/common-licenses/`, die Lizenz von Node.js unter `/usr/local/LICENSE`.
+`/usr/share/doc/<paket>/copyright`, die der statisch in pandoc gelinkten
+Bibliotheken unter `/usr/share/doc/pandoc/static-libs/`, die Volltexte gängiger
+Lizenzen unter `/usr/share/common-licenses/`, die Lizenz von Node.js unter
+`/usr/local/LICENSE`.
 Das Basisimage ist eine „slim“-Variante: Von `/usr/share/doc` bleiben nur die
 `copyright`- und `NOTICE`-Dateien, Handbücher, Manpages und der Inhalt der
 `texlive-*-doc`-Pakete fehlen. Vollständig sind sie in den Debian-Paketen und
@@ -272,7 +278,10 @@ Issues an.
 - Wer ein selbst gebautes Image weitergibt (z. B. in eine eigene Registry
   pusht), verbreitet die enthaltene Drittsoftware selbst und muss deren
   Quellcode wie oben bereitstellen, mit pandoc auch den der statisch gelinkten
-  Haskell-Bibliotheken.
+  Haskell-Bibliotheken, und deren Copyright-Vermerke beilegen: Quellen wie in
+  `.github/workflows/container-image.yml` („pandoc-Quellen sammeln“) laden, dann
+  `python3 scripts/pandoc-copyright.py <quellordner> <ausgabe>` und die Ausgabe
+  nach `/usr/share/doc/pandoc/static-libs/` ins Image kopieren.
 - Große Projekte (viele Dateien/Ordner) brauchen genug inotify-Watches auf dem
   Host, sonst erkennt der Server externe Dateiänderungen nicht mehr live (Log:
   `[watcher] … ENOSPC`): `sysctl -w fs.inotify.max_user_watches=524288`,
