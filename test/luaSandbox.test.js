@@ -479,7 +479,8 @@ test('LuaLaTeX: versteckte Ordner im Projekt bleiben für Lua gesperrt, die eige
   const r = await compile(L.root, 'main.tex', { compiler: 'lualatex' }, OUT, 600000);
   assert.doesNotMatch(r.log, /luaotfload.*(FATAL|no writeable cache)/i, r.log.slice(-3000));
   const geprueft = r.log.match(/^(LECK|GESPERRT) .*/gm) || [];
-  assert.strictEqual(geprueft.length, Object.keys(versteckt).length * 6 + 7, r.log.slice(-3000));
+  // latexmk may run lualatex more than once (on Windows it does): every probe at least once.
+  assert.strictEqual(new Set(geprueft).size, Object.keys(versteckt).length * 6 + 7, r.log.slice(-3000));
   assert.deepStrictEqual(geprueft.filter((z) => z.startsWith('LECK')), []);
   assert.doesNotMatch(r.log, /GEHEIM-/);
   for (const [f, text] of Object.entries(versteckt)) assert.strictEqual(fs.readFileSync(path.join(L.root, f), 'utf8'), text, f);
