@@ -12,7 +12,7 @@ const net = require('net');
 const { spawn } = require('child_process');
 // ADMIN_PASSWORD: the throwaway servers' admin login once #116 is merged, until then the old fallback.
 const { startServer, client, ADMIN_PASSWORD = 'bitte-sofort-aendern' } = require('./_server');
-const { contentSecurityPolicy, parseSources } = require('../server/lib/securityHeaders');
+const { contentSecurityPolicy, parseSources, cspReportHandler, MAX_LOGGED, LOG_WINDOW_MS } = require('../server/lib/securityHeaders');
 
 const REPO = path.join(__dirname, '..');
 
@@ -113,6 +113,23 @@ test('#115: Server setzt die Security-Header auf HTML-, Datei- und API-Antworten
   } finally {
     await srv.stop();
   }
+});
+
+test('#115: CSP-Berichte fluten das Log nicht dauerhaft (Grenze je Stunde)', () => {
+  const lines = [];
+  let t = 0;
+  const handle = cspReportHandler((l) => lines.push(l), { now: () => t })[1];
+  const res = { status: () => ({ end() {} }) };
+  const report = (blocked) => handle({ body: { 'csp-report': { 'effective-directive': 'img-src', 'blocked-uri': blocked, 'document-uri': 'https://ide.example/' } } }, res);
+  for (let i = 0; i < MAX_LOGGED + 50; i++) report(`https://spam.example/${i}`);
+  report('https://spam.example/0'); // repeated line: never logged twice
+  assert.strictEqual(lines.length, MAX_LOGGED + 1, 'Grenze plus ein Hinweis');
+  assert.match(lines.at(-1), /weitere unterdrückt/);
+  report('https://echt.example/x.png');
+  assert.strictEqual(lines.length, MAX_LOGGED + 1, 'innerhalb der Stunde unterdrückt');
+  t += LOG_WINDOW_MS;
+  report('https://echt.example/x.png');
+  assert.match(lines.at(-1), /^\[csp\] blockiert: img-src https:\/\/echt\.example\/x\.png/, 'nach einer Stunde wieder im Log');
 });
 
 test('#115: CSP_REPORT_ONLY=1 meldet nur, Clickjacking-Schutz bleibt; Berichte landen einmal im Log', async () => {

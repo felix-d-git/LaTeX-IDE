@@ -65,13 +65,17 @@ function securityHeaders({ reportOnly = envFlag(process.env.CSP_REPORT_ONLY), co
 }
 
 // Violation reports (report-uri): one log line per distinct violation, at most MAX_LOGGED per
-// process, so the unauthenticated endpoint cannot flood the log. Query strings are cut off
+// hour, so the unauthenticated endpoint cannot flood the log; the window restarts every hour so
+// spam cannot hide real violations until the next restart. Query strings are cut off
 // (?pid=, reset/verify tokens).
 const MAX_LOGGED = 200;
+const LOG_WINDOW_MS = 60 * 60 * 1000;
 const clean = (v) => String(v ?? '?').replace(/[?#].*$/s, '').replace(/[^\x20-\x7e]/g, '?').slice(0, 200);
 
-function cspReportHandler(log = (line) => console.warn(line)) {
-  const seen = new Set();
+function cspReportHandler(log = (line) => console.warn(line), { now = Date.now } = {}) {
+  let seen = new Set();
+  let windowStart = now();
+  let suppressed = false;
   return [
     express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '16kb' }),
     (req, res) => {
@@ -86,7 +90,17 @@ function cspReportHandler(log = (line) => console.warn(line)) {
         const where = file ? ` in ${clean(file)}:${Number(r['line-number'] || r.lineNumber) || 0}` : '';
         const mode = (r.disposition || '') === 'report' ? 'gemeldet' : 'blockiert';
         const line = `[csp] ${mode}: ${directive} ${blocked} (Seite ${doc}${where})`;
-        if (seen.has(line) || seen.size >= MAX_LOGGED) continue;
+        if (now() - windowStart >= LOG_WINDOW_MS) {
+          seen = new Set();
+          windowStart = now();
+          suppressed = false;
+        }
+        if (seen.has(line)) continue;
+        if (seen.size >= MAX_LOGGED) {
+          if (!suppressed) log(`[csp] mehr als ${MAX_LOGGED} verschiedene Meldungen in dieser Stunde, weitere unterdrückt`);
+          suppressed = true;
+          continue;
+        }
         seen.add(line);
         log(line);
       }
@@ -95,4 +109,4 @@ function cspReportHandler(log = (line) => console.warn(line)) {
   ];
 }
 
-module.exports = { securityHeaders, cspReportHandler, contentSecurityPolicy, parseSources, REPORT_PATH, SAME_ORIGIN_FRAMES };
+module.exports = { securityHeaders, cspReportHandler, contentSecurityPolicy, parseSources, REPORT_PATH, SAME_ORIGIN_FRAMES, MAX_LOGGED, LOG_WINDOW_MS };
