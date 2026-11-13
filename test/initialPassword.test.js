@@ -55,8 +55,12 @@ test('ohne ADMIN_PASSWORD: Einmal-Passwort in der Datei, Konto bis zur Änderung
   }
   assert.strictEqual(await wsPing(srv.base, c), 'closed');
 
-  assert.strictEqual((await c.call('POST', '/api/auth/change-password', { currentPassword: 'falsch', newPassword: 'mein-neues-passwort' })).status, 400);
+  // Wrong current password, the one-time password itself or a public value don't lift the lock.
+  for (const [currentPassword, newPassword] of [['falsch', 'mein-neues-passwort'], [initial, initial], [initial, 'bitte-sofort-aendern']]) {
+    assert.strictEqual((await c.call('POST', '/api/auth/change-password', { currentPassword, newPassword })).status, 400, newPassword);
+  }
   assert.ok(fs.existsSync(file));
+  assert.strictEqual((await c.call('GET', '/api/projects/list')).status, 403);
   const changed = await c.call('POST', '/api/auth/change-password', { currentPassword: initial, newPassword: 'mein-neues-passwort' });
   assert.strictEqual(changed.status, 200, changed.text);
   assert.ok(!fs.existsSync(file), 'Datei nach der Änderung gelöscht');
@@ -102,21 +106,48 @@ test('öffentliche Beispielpasswörter zählen als nicht gesetzt, fehlende Datei
   }
 });
 
-test('bestehender Admin mit dem alten Fallback-Passwort bekommt beim Update ein Einmal-Passwort', async () => {
+test('bestehender Admin mit dem alten Fallback-Passwort bekommt beim Update ein Einmal-Passwort, seine Tokens verfallen', async () => {
   const dataDir = tmpDir('lide-initpw-alt-');
   test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const bcrypt = require('bcryptjs');
-  const admin = { id: 'a1', email: 'admin@local.host', username: 'admin', passwordHash: bcrypt.hashSync('bitte-sofort-aendern', 4), isAdmin: true, emailVerified: true, createdAt: new Date().toISOString() };
-  fs.writeFileSync(path.join(dataDir, 'auth-data.json'), JSON.stringify({ users: [admin] }));
+  const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
+  const now = new Date().toISOString();
+  const admin = { id: 'a1', email: 'admin@local.host', username: 'admin', passwordHash: bcrypt.hashSync('bitte-sofort-aendern', 4), isAdmin: true, emailVerified: true, createdAt: now };
+  // Tokens someone could have created with the public password before the update.
+  const desktopToken = 'lide_' + 'a'.repeat(48);
+  const mcpToken = 'lmcp_' + 'b'.repeat(48);
+  fs.writeFileSync(
+    path.join(dataDir, 'auth-data.json'),
+    JSON.stringify({
+      users: [admin],
+      apiTokens: [{ id: 't1', tokenHash: sha(desktopToken), userId: 'a1', label: 'x', createdAt: now, lastUsedAt: null }],
+      mcpTokens: [{ id: 'm1', tokenHash: sha(mcpToken), userId: 'a1', name: 'x', perms: ['read'], projects: null, createdAt: now, lastUsedAt: null }],
+    })
+  );
   const srv = await startServer({ DATA_DIR: dataDir });
+  const desktopList = () => fetch(srv.base + '/api/projects/list', { headers: { Authorization: 'Bearer ' + desktopToken } });
+  const mcpList = () =>
+    fetch(srv.base + '/mcp', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + mcpToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
   try {
     const initial = readPw(dataDir);
+    assert.match(srv.log(), /2 Desktop-\/MCP-Token widerrufen/);
     const c = client(srv.base);
     await c.call('GET', '/api/auth/me');
     assert.strictEqual((await c.call('POST', '/api/auth/login', { login: 'admin', password: 'bitte-sofort-aendern' })).status, 401);
     await c.login('admin', initial);
     assert.strictEqual((await c.call('GET', '/api/auth/me')).body.user.mustChangePassword, true);
     assert.strictEqual((await c.call('GET', '/api/projects/list')).status, 403);
+    assert.strictEqual((await desktopList()).status, 401);
+    assert.strictEqual((await mcpList()).status, 401);
+    // Still gone once the admin has their own password.
+    assert.strictEqual((await c.call('POST', '/api/auth/change-password', { currentPassword: initial, newPassword: 'mein-neues-passwort' })).status, 200);
+    assert.strictEqual((await c.call('GET', '/api/projects/list')).status, 200);
+    assert.strictEqual((await desktopList()).status, 401);
+    assert.strictEqual((await mcpList()).status, 401);
   } finally {
     await srv.stop();
   }

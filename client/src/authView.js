@@ -273,8 +273,9 @@ export function setupAuthView({ onAuthenticated }) {
     return true;
   }
 
-  // Logged in with the one-time password generated on the first start (no ADMIN_PASSWORD): the server
-  // refuses everything but the password change until then, so this replaces the app.
+  // Logged in with a generated one-time password (first start without ADMIN_PASSWORD, or an admin migrated
+  // off the old public fallback): the server refuses everything but the password change until then,
+  // so this replaces the app.
   function showPasswordChange(user) {
     if (!user.mustChangePassword) return false;
     view.classList.remove('hidden');
@@ -290,7 +291,7 @@ export function setupAuthView({ onAuthenticated }) {
     };
     body.append(
       note(
-        `Angemeldet als „${user.username}“ mit dem Einmal-Passwort vom ersten Start (Datei initial-admin-password.txt). ` +
+        `Angemeldet als „${user.username}“ mit dem Einmal-Passwort aus der Datei initial-admin-password.txt. ` +
           'Bitte jetzt ein eigenes Passwort festlegen, vorher ist nichts anderes möglich. Die Datei wird danach gelöscht.'
       ),
       ...form.nodes,

@@ -2259,7 +2259,7 @@ wss.on('connection', (ws, req) => {
 // VAULT_DIR next to the encrypted data, because DATA_DIR is tmpfs inside the container there.
 const INITIAL_PASSWORD_FILE = path.join(HOST_DIR, 'initial-admin-password.txt');
 // The former hard-coded fallback and the old .env.example value are public -> treated as "not set".
-const PUBLIC_PASSWORDS = new Set(['bitte-sofort-aendern', 'bitte-ein-echtes-passwort-setzen']);
+const { PUBLIC_PASSWORDS } = auth;
 
 function writeInitialPassword() {
   const password = crypto.randomBytes(12).toString('base64url');
@@ -2296,8 +2296,11 @@ async function checkInitialPassword() {
     if (!u.isAdmin || u.passwordChangedAt || u.mustChangePassword) continue; // only never-changed admins
     for (const pw of PUBLIC_PASSWORDS) {
       if (!(await auth.verifyPassword(u, pw))) continue;
-      console.warn(`[auth] Admin "${u.username}" hatte noch ein öffentlich bekanntes Passwort - durch ein Einmal-Passwort ersetzt.`);
-      await auth.resetInitialPassword(u, writeInitialPassword());
+      const revoked = await auth.resetInitialPassword(u, writeInitialPassword());
+      console.warn(
+        `[auth] Admin "${u.username}" hatte noch ein öffentlich bekanntes Passwort - durch ein Einmal-Passwort ersetzt, ` +
+          `alle Sitzungen beendet und ${revoked} Desktop-/MCP-Token widerrufen.`
+      );
       break;
     }
   }

@@ -84,8 +84,13 @@ function toPublicUser(user) {
   };
 }
 
+// The former hard-coded admin fallback and the old .env.example value are public: never accepted as a
+// new password, and an admin still on one gets a one-time password at startup (server/index.js).
+const PUBLIC_PASSWORDS = new Set(['bitte-sofort-aendern', 'bitte-ein-echtes-passwort-setzen']);
+
 function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+  if (PUBLIC_PASSWORDS.has(pw)) throw new Error('Dieses Passwort ist öffentlich bekannt, bitte ein anderes wählen.');
 }
 
 // mustChangePassword: first-boot admin with a generated one-time password; until it is changed the
@@ -126,25 +131,31 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(password || '', user.passwordHash);
 }
 
-function validatePassword(pw) {
-  if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
-}
-
 async function setPassword(user, newPassword) {
   validatePassword(newPassword);
+  // Otherwise the lock could be lifted by "changing" the one-time password to itself.
+  if (user.mustChangePassword && (await verifyPassword(user, newPassword))) {
+    throw new Error('Bitte ein eigenes Passwort wählen, nicht das Einmal-Passwort.');
+  }
   user.passwordHash = await bcrypt.hash(newPassword, 12);
   user.passwordChangedAt = new Date().toISOString();
   delete user.mustChangePassword;
   save(data);
 }
 
-// New one-time password for an account that still has to change it (its file went missing).
+// New one-time password for an admin that still has to change it (its file went missing, or a public
+// password from before #116). Old sessions end via passwordChangedAt; desktop and MCP tokens are revoked,
+// whoever knew the old password could have created some. Returns the number of revoked tokens.
 async function resetInitialPassword(user, password) {
   validatePassword(password);
   user.passwordHash = await bcrypt.hash(password, 12);
   user.passwordChangedAt = new Date().toISOString();
   user.mustChangePassword = true;
+  const before = data.apiTokens.length + data.mcpTokens.length;
+  data.apiTokens = data.apiTokens.filter((t) => t.userId !== user.id);
+  data.mcpTokens = data.mcpTokens.filter((t) => t.userId !== user.id);
   save(data);
+  return before - data.apiTokens.length - data.mcpTokens.length;
 }
 
 // --- Invites: admin generates a link, the recipient uses it once to self-register ---
@@ -414,6 +425,7 @@ module.exports = {
   setPassword,
   resetInitialPassword,
   validatePassword,
+  PUBLIC_PASSWORDS,
   createInvite,
   listInvites,
   getValidInvite,

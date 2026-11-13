@@ -137,7 +137,8 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
   dieses Passwort nach dem ersten Login geändert ist, beantwortet der Server alles außer der
   Passwortänderung mit 403 (auch Desktop-/MCP-Tokens und Websockets), danach wird die Datei gelöscht.
   Fehlt die Datei vorher, erzeugt der nächste Start ein neues Einmal-Passwort. Ein Admin, der noch das
-  frühere öffentliche Fallback-Passwort hat, bekommt beim nächsten Start ebenso ein Einmal-Passwort.
+  frühere öffentliche Fallback-Passwort hat, bekommt beim nächsten Start ebenso ein Einmal-Passwort;
+  seine Sitzungen enden, seine Desktop- und MCP-Tokens werden widerrufen (Desktop-App neu verbinden).
   `ADMIN_*` wirken nur beim allerersten Start (leerer Datenordner). Der Sitzungs-Schlüssel wird beim ersten Start
   erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
