@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { safeResolve } = require('./fsTree');
+const { childEnv } = require('./childEnv');
 const { expandInputs, stripComments } = require('./wordcount');
 
 const PANDOC = process.env.PANDOC || 'pandoc';
@@ -26,7 +27,7 @@ const KEEP_META = ['title', 'author', 'date', 'abstract'];
 
 function pandoc(args, input, cwd) {
   return new Promise((resolve, reject) => {
-    const child = execFile(PANDOC, args, { cwd, encoding: 'buffer', maxBuffer: 200 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
+    const child = execFile(PANDOC, args, { cwd, env: childEnv(), encoding: 'buffer', maxBuffer: 200 * 1024 * 1024, timeout: 120000 }, (err, stdout, stderr) => {
       if (err) {
         const errText = stderr && stderr.length ? stderr.toString('utf8').trim() : '';
         if (err.code === 'ENOENT') err.message = 'Pandoc ist auf dem Server nicht installiert.';

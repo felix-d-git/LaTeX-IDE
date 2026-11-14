@@ -3,12 +3,28 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { childEnv } = require('./childEnv');
 
 const OUT_DIR = '.latex-ide-out';
 
+// The main file name reaches latexmk as an argument and from there a shell command line
+// (pdflatex … "<name>"): "-x=…" is read as a latexmk option, `…` runs as a command
+// inside the double quotes (#112). $ % \ ~ are refused by latexmk itself, " by treeOps.
+const UNSAFE_MAIN_CHARS = /[\x00-\x1f\x7f`$%\\~"]/;
+
+// null = usable as main file, otherwise the reason (German, shown in the UI).
+function mainPathError(relPath) {
+  const s = String(relPath || '').split(path.sep).join('/');
+  if (!/\.tex$/i.test(s)) return 'Die Hauptdatei muss eine .tex-Datei sein.';
+  if (path.isAbsolute(s) || s.split('/').includes('..')) return 'Die Hauptdatei muss im Projekt liegen.';
+  if (UNSAFE_MAIN_CHARS.test(s)) return 'Der Pfad der Hauptdatei enthält ein nicht erlaubtes Zeichen (` $ % \\ ~ " oder Steuerzeichen). Bitte umbenennen.';
+  if (s.startsWith('&') || s.split('/').some((seg) => seg.startsWith('-'))) return 'Datei- und Ordnernamen im Pfad der Hauptdatei dürfen nicht mit - beginnen (die Datei nicht mit &). Bitte umbenennen.';
+  return null;
+}
+
 function findMainCandidate(root) {
   // Prefer main.tex, else first .tex at project root containing \documentclass.
-  const rootFiles = fs.readdirSync(root).filter((f) => f.toLowerCase().endsWith('.tex'));
+  const rootFiles = fs.readdirSync(root).filter((f) => f.toLowerCase().endsWith('.tex') && !mainPathError(f));
   if (rootFiles.includes('main.tex')) return 'main.tex';
   for (const f of rootFiles) {
     const content = fs.readFileSync(path.join(root, f), 'utf8');
@@ -28,6 +44,11 @@ const ENGINE_FLAG = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualate
 // the PDF<->source jump; SwiftLaTeX would be a browser-side (WASM) swap instead.
 const BACKEND = process.env.TEX_BACKEND === 'tectonic' ? 'tectonic' : 'latexmk';
 
+// latexmk runs latexmkrc/.latexmkrc from the project folder (plus system/user rc files) as
+// Perl code. Project files are untrusted (collaborators, zip import, TeX's own \openout),
+// so never load them (#111). Opt-in for single-user setups only; the desktop app ignores it.
+const RC_ARGS = process.env.LATEXMK_ALLOW_RC === '1' ? [] : ['-norc'];
+
 function texCommand(mainRelPath, settings, outDir) {
   if (BACKEND === 'tectonic') {
     return ['tectonic', ['-X', 'compile', '--untrusted', '--synctex', '--keep-logs', '--keep-intermediates', '--outdir', outDir, mainRelPath]];
@@ -35,6 +56,7 @@ function texCommand(mainRelPath, settings, outDir) {
   return [
     'latexmk',
     [
+      ...RC_ARGS, // first: latexmk reads the rc files before it looks at the other options
       ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex,
       '-g', // force a real rerun even if latexmk thinks nothing changed since the last (possibly failed) run
       '-interaction=nonstopmode', // skip past recoverable errors instead of blocking on stdin
@@ -82,6 +104,12 @@ function pdfNameFor(mainRelPath) {
 
 // outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
 function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs = COMPILE_TIMEOUT_MS) {
+  // Every caller (web, desktop, MCP, autocompile) passes through here before latexmk runs.
+  const bad = mainPathError(mainRelPath);
+  if (bad) {
+    const error = { file: String(mainRelPath || ''), line: null, message: bad, hint: '', raw: '' };
+    return Promise.resolve({ success: false, hasErrors: true, log: bad, errors: [error], warnings: [], infos: [], pdfPath: null });
+  }
   return new Promise((resolve) => {
     const outDir = path.join(root, outRel);
     fs.mkdirSync(outDir, { recursive: true });
@@ -91,7 +119,8 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
     // max_print_line & Co.: kein harter Umbruch der Log-Zeilen nach 79 Zeichen (Pfade/Warnungen bleiben ganz).
-    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir, max_print_line: '10000', error_line: '254', half_error_line: '238' };
+    // Restricted \write18 (TeX Live default: repstopdf for EPS, makeindex …) stays on.
+    const env = { ...childEnv(), openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir, max_print_line: '10000', error_line: '254', half_error_line: '238' };
     // \input/\includegraphics relative to a main file in a subfolder (cwd stays the
     // root, see pdfNameFor). "./" keeps log paths in the "(./x.tex" form parseLog
     // reads; the trailing separator appends TeX's default search path.
@@ -246,4 +275,4 @@ function parseLog(log, root) {
   return { errors, warnings, infos };
 }
 
-module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS };
+module.exports = { compile, findMainCandidate, mainPathError, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS };

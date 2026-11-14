@@ -25,7 +25,7 @@ const { WebSocketServer } = require('ws');
 const { ZipArchive } = require('archiver');
 
 const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
+const { compile, findMainCandidate, mainPathError, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, collectRefs } = require('./lib/search');
@@ -46,18 +46,8 @@ const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
 const legal = require('./lib/legal');
+const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
-
-const RAW_MIME = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.pdf': 'application/pdf',
-};
 
 // compileMode 'individual' (default): every user compiles into their own
 // subfolder and only sees their own PDF; 'group': one shared output for all.
@@ -1442,6 +1432,7 @@ app.get('/api/projects/download/zip', (req, res) => {
   }
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', 'attachment; filename="projekte.zip"');
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1515,6 +1506,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   collab.flushRoot(root);
   res.attachment(`${req.params.name}.zip`); // RFC 5987 filename*: names outside Latin-1 no longer make setHeader throw
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1538,6 +1530,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.attachment(`${req.params.name}.pdf`);
+  setUserContentHeaders(res, 'application/pdf');
   streamFile(res, pdfAbs);
 });
 
@@ -1710,12 +1703,24 @@ app.post('/api/tree/upload', (req, res) => {
 app.post('/api/main-file', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
+  // Empty = back to auto-detection. Otherwise an existing .tex file whose name latexmk
+  // can't misread as an option or shell command (#112); compile() checks it again.
+  const rel = typeof req.body.path === 'string' ? req.body.path : '';
+  if (rel) {
+    const bad = mainPathError(rel);
+    if (bad) return res.status(400).json({ error: bad });
+    try {
+      if (!fs.statSync(safeResolve(root, rel)).isFile()) throw new Error();
+    } catch {
+      return res.status(400).json({ error: 'Datei nicht gefunden.' });
+    }
+  }
   const prev = state.getMainFile(root);
-  state.setMainFile(root, req.body.path);
+  state.setMainFile(root, rel || null);
   // main.tex and thesis/main.tex both write main.pdf: drop the other file's
   // output so download/SyncTeX don't serve it until the next compile. Queued
   // behind running compiles so it doesn't pull the directory from under latexmk.
-  if (prev && req.body.path && prev !== req.body.path && pdfNameFor(prev) === pdfNameFor(req.body.path)) {
+  if (prev && rel && prev !== rel && pdfNameFor(prev) === pdfNameFor(rel)) {
     compileChain = compileChain.then(() => fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true })).catch(() => {});
   }
   res.json({ ok: true });
@@ -1843,6 +1848,7 @@ app.get('/api/pdf', (req, res) => {
   try {
     const abs = safeResolve(root, req.query.path);
     res.setHeader('Content-Type', 'application/pdf');
+    setUserContentHeaders(res, 'application/pdf'); // any project file, always typed as PDF; nosniff as an extra safeguard
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1852,14 +1858,16 @@ app.get('/api/pdf', (req, res) => {
 
 // Raw byte stream for previewing arbitrary project files (images, reference
 // PDFs) in a tab - unlike /api/file (base64 JSON), this is a direct stream
-// so <img>/<iframe> can point straight at the URL.
+// so <img>/<iframe> can point straight at the URL. Sandboxed (#113): opened
+// directly, an uploaded SVG must not run script in the app's origin.
 app.get('/api/raw', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
     const abs = safeResolve(root, req.query.path);
-    const ext = path.extname(abs).toLowerCase();
-    res.setHeader('Content-Type', RAW_MIME[ext] || 'application/octet-stream');
+    const type = rawMime(abs);
+    res.setHeader('Content-Type', type);
+    setUserContentHeaders(res, type);
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1881,6 +1889,7 @@ app.get('/api/export', ah(async (req, res) => {
     const name = `${path.basename(root) || 'dokument'}.${fmt.ext}`;
     res.setHeader('Content-Type', fmt.mime);
     res.setHeader('Content-Disposition', `attachment; filename="export.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    setUserContentHeaders(res, fmt.mime); // HTML export = the user's document: never as a page of the app
     res.send(data);
   } catch (e) {
     res.status(e.code === 'ENOENT' ? 501 : 400).json({ error: e.message.slice(0, 500) });
@@ -1893,6 +1902,7 @@ app.get('/api/download/zip', (req, res) => {
   const name = path.basename(root) || 'project';
   collab.flushRoot(root);
   res.attachment(`${name}.zip`);
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
