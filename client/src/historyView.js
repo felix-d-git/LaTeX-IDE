@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { renderTree } from './fileTree.js';
 
-const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', autocompile: 'Auto-Kompilieren', restore: 'Wiederhergestellt' };
+const TRIGGER_LABEL = { autosave: 'Autosave', compile: 'Kompilieren', autocompile: 'Auto-Kompilieren', restore: 'Wiederhergestellt', ai: 'KI-Assistent' };
 
 const hasPath = (nodes, path) => (nodes || []).some((n) => n.path === path || (n.children && hasPath(n.children, path)));
 

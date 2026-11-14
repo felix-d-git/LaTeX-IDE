@@ -80,7 +80,11 @@ können dann gelöscht werden.
   `Referrer-Policy: same-origin` gelten in beiden Fällen.
 - `CSP_CONNECT_SRC` — weitere Ziele, die der Browser direkt abfragen darf
   (CSP `connect-src`), mit Leerzeichen getrennt, z. B.
-  `https://languagetool.example.com`.
+  `https://languagetool.example.com`. Auch für den KI-Assistenten mit einem
+  Cloud-Anbieter im Web (z. B. `https://api.openai.com`; der Anbieter muss
+  CORS erlauben). Lokale Modelle (Ollama, LM Studio) auf `localhost` gehen
+  ohne Eintrag, Ollama braucht dann `OLLAMA_ORIGINS=<Adresse der IDE>`; die
+  Desktop-App braucht beides nicht.
 - `PANDOC` — Pfad zu Pandoc (GPL, läuft als externer Prozess) für
   File ▸ Download ▸ Markdown/HTML. Im selbst gebauten Docker-Image enthalten,
   nicht im fertigen Image von ghcr.io

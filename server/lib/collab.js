@@ -450,6 +450,33 @@ function editText(root, rel, fn) {
   }
 }
 
+// AI agent edit as a tracked change (same "review" map entries the client's trackChanges writes):
+// pick(text) -> [index, chars to delete, text to insert]; the deleted text stays visible struck
+// through, the insertion marked, until someone accepts/rejects it in the review panel.
+function editTracked(root, rel, pick, user) {
+  const entry = getDoc(root, rel);
+  try {
+    const { ydoc, ytext } = entry;
+    const [i, len, raw] = pick(ytext.toString());
+    const ins = normEol(raw);
+    const old = ytext.toString().slice(i, i + len);
+    const relOf = (idx, assoc = 0) => Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(ytext, idx, assoc));
+    const id = () => Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+    ydoc.transact(() => {
+      if (len) ytext.delete(i, len);
+      if (ins) ytext.insert(i, ins);
+      const review = ydoc.getMap('review');
+      const at = Date.now();
+      if (old) review.set(id(), { type: 'delete', f: relOf(i), text: old, user, at });
+      if (ins) review.set(id(), { type: 'insert', f: relOf(i), t: relOf(i + ins.length, -1), user, at });
+    }, 'ai');
+    if (entry.timer) persist(entry);
+    if (entry.dirty) throw new Error('Speichern fehlgeschlagen (wird wiederholt).');
+  } finally {
+    maybeUnload(entry);
+  }
+}
+
 function flushAll() {
   for (const entry of docs.values()) if (entry.timer) persist(entry);
 }
@@ -468,4 +495,5 @@ module.exports = {
   applyText,
   readText,
   editText,
+  editTracked,
 };
