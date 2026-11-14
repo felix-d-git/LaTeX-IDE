@@ -21,6 +21,7 @@ const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
+const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const os = require('os');
 const { Readable, pipeline } = require('stream');
 const { spawn, execFileSync } = require('child_process');
@@ -641,6 +642,7 @@ app.get('/api/pdf', (req, res) => {
     const abs = inside(proj.dir, req.query.path);
     if (!fs.existsSync(abs)) throw new Error('Datei nicht gefunden.');
     res.setHeader('Content-Type', 'application/pdf');
+    setUserContentHeaders(res, 'application/pdf');
     res.setHeader('Cache-Control', 'no-store');
     fs.createReadStream(abs).pipe(res);
   } catch (e) {
@@ -770,6 +772,10 @@ function serveLocal(req, res) {
   try {
     const abs = inside(c.dir, req.query.path);
     if (req.baseUrl + req.path === '/api/raw') {
+      // Same types and sandbox as the server's /api/raw (#113): sendFile alone would serve .html as text/html.
+      const type = rawMime(abs);
+      res.setHeader('Content-Type', type);
+      setUserContentHeaders(res, type);
       res.sendFile(abs, { headers: { 'Cache-Control': 'no-store' } });
       return true;
     }
@@ -807,6 +813,8 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
     for (const h of FORWARD_RES) if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
     // Everything except JSON (PDF, zip, raw files) streams through: no buffering, no total time limit.
     if (!(r.headers.get('content-type') || '').includes('application/json') || !r.body) {
+      // Project files from the app's origin (localhost): sandboxed here too, whatever the server sent (#113).
+      setUserContentHeaders(res, r.headers.get('content-type'));
       res.status(r.status);
       if (!r.body) return res.end();
       return pipeline(Readable.fromWeb(r.body), res, () => {});

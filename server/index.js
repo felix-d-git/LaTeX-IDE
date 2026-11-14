@@ -46,17 +46,7 @@ const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
 const legal = require('./lib/legal');
-
-const RAW_MIME = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.pdf': 'application/pdf',
-};
+const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 
 // compileMode 'individual' (default): every user compiles into their own
 // subfolder and only sees their own PDF; 'group': one shared output for all.
@@ -1437,6 +1427,7 @@ app.get('/api/projects/download/zip', (req, res) => {
   }
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', 'attachment; filename="projekte.zip"');
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1510,6 +1501,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   collab.flushRoot(root);
   res.attachment(`${req.params.name}.zip`); // RFC 5987 filename*: names outside Latin-1 no longer make setHeader throw
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1533,6 +1525,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.attachment(`${req.params.name}.pdf`);
+  setUserContentHeaders(res, 'application/pdf');
   streamFile(res, pdfAbs);
 });
 
@@ -1850,6 +1843,7 @@ app.get('/api/pdf', (req, res) => {
   try {
     const abs = safeResolve(root, req.query.path);
     res.setHeader('Content-Type', 'application/pdf');
+    setUserContentHeaders(res, 'application/pdf'); // any project file, always typed as PDF; nosniff as an extra safeguard
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1859,14 +1853,16 @@ app.get('/api/pdf', (req, res) => {
 
 // Raw byte stream for previewing arbitrary project files (images, reference
 // PDFs) in a tab - unlike /api/file (base64 JSON), this is a direct stream
-// so <img>/<iframe> can point straight at the URL.
+// so <img>/<iframe> can point straight at the URL. Sandboxed (#113): opened
+// directly, an uploaded SVG must not run script in the app's origin.
 app.get('/api/raw', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
     const abs = safeResolve(root, req.query.path);
-    const ext = path.extname(abs).toLowerCase();
-    res.setHeader('Content-Type', RAW_MIME[ext] || 'application/octet-stream');
+    const type = rawMime(abs);
+    res.setHeader('Content-Type', type);
+    setUserContentHeaders(res, type);
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1888,6 +1884,7 @@ app.get('/api/export', ah(async (req, res) => {
     const name = `${path.basename(root) || 'dokument'}.${fmt.ext}`;
     res.setHeader('Content-Type', fmt.mime);
     res.setHeader('Content-Disposition', `attachment; filename="export.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    setUserContentHeaders(res, fmt.mime); // HTML export = the user's document: never as a page of the app
     res.send(data);
   } catch (e) {
     res.status(e.code === 'ENOENT' ? 501 : 400).json({ error: e.message.slice(0, 500) });
@@ -1900,6 +1897,7 @@ app.get('/api/download/zip', (req, res) => {
   const name = path.basename(root) || 'project';
   collab.flushRoot(root);
   res.attachment(`${name}.zip`);
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
