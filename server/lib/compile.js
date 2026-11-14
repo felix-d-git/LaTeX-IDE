@@ -357,8 +357,9 @@ function parseLog(log, root) {
   lines.forEach((line, i) => {
     for (const open of line.matchAll(/\((\.\/[^\s()]+\.tex)/g)) currentFile = normalizeTexPath(root, open[1]);
     let m = line.match(/^(?:error: )?(.*\.(?:tex|sty|cls|bbl|def|cfg|clo|ltx|tikz|pgf|lua)):(\d+):\s*(.*)$/); // tectonic prefixes "error: "
-    // TeX bricht Log-Zeilen hart nach 79 Zeichen um - Fehlermeldung wieder zusammensetzen.
-    for (let j = i; m && lines[j].length >= 79 && j + 1 < lines.length; j++) m[3] += lines[j + 1];
+    // TeX bricht Log-Zeilen hart nach genau max_print_line (79) Bytes um - Fehlermeldung wieder
+    // zusammensetzen. compile() setzt max_print_line=10000, längere Zeilen sind also nicht umgebrochen (#138).
+    for (let j = i; m && Buffer.byteLength(lines[j]) === 79 && j + 1 < lines.length; j++) m[3] += lines[j + 1];
     if (m) return push(errors, { file: normalizeTexPath(root, m[1]), line: Number(m[2]), message: m[3].trim() }, i);
     m = line.match(/^(?:ERROR|FATAL) - (.*)$/); // biber
     if (m) return push(errors, { file: '', line: null, message: `biber: ${m[1].trim()}` }, i);
@@ -372,7 +373,10 @@ function parseLog(log, root) {
     m = line.match(/^((?:Over|Under)full \\[hv]box .*?)(?:in paragraph |in alignment |detected )?at lines? (\d+)/);
     if (m) push(infos, { file: currentFile, line: Number(m[2]), message: line.trim() }, i);
   });
-  return { errors, warnings, infos };
+  // "Emergency stop." / "==> Fatal error occurred …" schließen nur einen echten Fehler ab (#138).
+  const closing = /^(?:Emergency stop\.|==> Fatal error occurred)/;
+  const real = errors.filter((e) => !closing.test(e.message));
+  return { errors: real.length ? real : errors, warnings, infos };
 }
 
 module.exports = { compile, findMainCandidate, mainPathError, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS, texCommand, luaLatexCommand, luaEnv, seedFontNames, LUA_SANDBOX, FONT_CACHE_DIR };
