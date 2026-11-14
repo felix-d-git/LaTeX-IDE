@@ -290,11 +290,20 @@ function createMcp(ctx) {
         if (typeof args.new_text !== 'string') throw new Error('new_text fehlt.');
         let line;
         try {
-          collab.editText(root, rel, (text) => {
-            const i = uniqueIndex(text, args.old_text);
-            line = lineOf(text, i);
-            return text.slice(0, i) + args.new_text + text.slice(i + args.old_text.length);
-          });
+          // Built-in AI agent: tracked change, accepted/rejected in the review panel.
+          if (a.tracked) {
+            collab.editTracked(root, rel, (text) => {
+              const i = uniqueIndex(text, args.old_text);
+              line = lineOf(text, i);
+              return [i, args.old_text.length, args.new_text];
+            }, a.tracked);
+          } else {
+            collab.editText(root, rel, (text) => {
+              const i = uniqueIndex(text, args.old_text);
+              line = lineOf(text, i);
+              return text.slice(0, i) + args.new_text + text.slice(i + args.old_text.length);
+            });
+          }
         } catch (e) {
           throw e.notFound ? new Error(`Datei nicht gefunden: ${rel}`) : e;
         }
@@ -404,7 +413,15 @@ function createMcp(ctx) {
     }
   }
 
-  return async function handle(req, res) {
+  // Built-in AI chat (session auth, see /api/ai/*): same tools, same per-call checks.
+  handle.callTool = callTool;
+  handle.toolList = (perms) => TOOLS.filter((t) => t.perm && perms.includes(t.perm)).map(({ name, perm, description, inputSchema }) => {
+      const { project, ...properties } = inputSchema.properties; // the chat's project is the window's
+      return { name, perm, description, inputSchema: { ...inputSchema, properties } };
+    });
+  return handle;
+
+  async function handle(req, res) {
     const h = req.headers.authorization || '';
     const t = auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '');
     if (!t) return res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
@@ -414,7 +431,7 @@ function createMcp(ctx) {
     const replies = (await Promise.all((Array.isArray(body) ? body : [body]).map((m) => rpc(t, m)))).filter(Boolean);
     if (!replies.length) return res.status(202).end();
     res.json(Array.isArray(body) ? replies : replies[0]);
-  };
+  }
 }
 
 module.exports = { createMcp };
