@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { childEnv } = require('./childEnv');
+const { detectProjectEngine } = require('./detectEngine');
 
 const OUT_DIR = '.latex-ide-out';
 
@@ -188,6 +189,17 @@ async function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeo
   // Every caller (web, desktop, MCP, autocompile) passes through here before latexmk runs.
   const bad = mainPathError(mainRelPath);
   if (bad) return failed(bad, String(mainRelPath || ''));
+  // Engine from the document itself when the project setting can't work (see detectEngine.js).
+  // Before the LuaLaTeX check, so an automatic switch to lualatex still gets sandbox + font cache.
+  let note = '';
+  if (BACKEND === 'latexmk') {
+    const { engine, reason, warning, changed } = detectProjectEngine(root, mainRelPath, settings.compiler);
+    if (changed) {
+      settings = { ...settings, compiler: engine };
+      note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})\n`;
+    }
+    if (warning) note += `[LaTeX-IDE] ${warning}\n`;
+  }
   const lua = BACKEND === 'latexmk' && settings.compiler === 'lualatex';
   if (lua && !(fs.existsSync(LUA_SANDBOX) && luaLatexCommand())) {
     return failed('LuaLaTeX ist hier nicht verfügbar: Das Sandbox-Skript fehlt oder der Installationspfad enthält " oder %. Bitte pdfLaTeX oder XeLaTeX wählen.');
@@ -235,7 +247,7 @@ async function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeo
       settled = true;
       clearTimeout(timer);
       running.delete(proc);
-      resolve(r);
+      resolve({ ...r, log: note + r.log });
     };
     // Resolve right away instead of waiting for 'close': a grandchild holding the
     // pipe open would delay it forever. No pdfPath - the PDF may be half-written,
