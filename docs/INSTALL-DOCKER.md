@@ -47,12 +47,18 @@ auf GitHub unter Releases „Source code (tar.gz)“ herunterladen und entpacken
 Danach unter `http://<server>:3077` mit `ADMIN_EMAIL` / `ADMIN_PASSWORD`
 anmelden. Weitere Konten entstehen über Einladungslinks (Profil → Einladungen).
 
+Ohne `ADMIN_PASSWORD` legt der erste Start den Admin `admin` mit einem zufälligen
+Einmal-Passwort an. Es steht nur in `data/initial-admin-password.txt` (bzw. im Ordner aus
+`LATEX_DATA_DIR`, mit Verschlüsselung in `vault/initial-admin-password.txt`), lesbar mit
+`sudo cat data/initial-admin-password.txt`. Nach dem ersten Login muss es geändert werden,
+vorher geht nichts anderes; danach löscht der Server die Datei.
+
 ### Wichtige Einstellungen in `.env`
 
 | Variable | Bedeutung |
 |---|---|
 | `PUBLIC_URL` | Adresse, unter der der Server von außen erreichbar ist. Steht in Einladungslinks und wird in die Desktop-App eingebaut. |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Erstes Admin-Konto (nur beim allerersten Start). |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Erstes Admin-Konto (nur beim allerersten Start). Ohne Passwort: Einmal-Passwort in `initial-admin-password.txt`, siehe oben. |
 | `COOKIE_SECURE` | `true`, sobald HTTPS davor sitzt. |
 | `HOST_PORT` | Port auf dem Host (Standard 3077). |
 | `LATEX_DATA_DIR` | Datenordner auf dem Host (Standard `./data`). |
@@ -134,6 +140,14 @@ services:
 
 Der Ordner muss `<Jahr>/bin/<arch>` enthalten (Jahr 2025–2027, `x86_64-linux` oder
 `aarch64-linux`). Prüfen: `docker compose exec app latexmk -v`.
+
+LuaLaTeX: Jedes Projekt bekommt einen eigenen Font-Cache im Ausgabeordner, den
+gemeinsamen Cache von TeX Live kann ein Dokument nicht verändern. Damit nicht jedes
+Projekt beim ersten Lauf alle Schriften durchsucht (mit `texlive-full` auf dem Pi
+vermutlich mehrere Minuten, nicht gemessen), nach dem Start einmal
+`docker compose exec app luaotfload-tool -u`
+ausführen: Die IDE kopiert die Namensdatenbank dann in neue Projekte (bis der
+Container neu erstellt wird).
 
 Eigene Anpassungen (Port, Speicherlimit, Proxy-Netz) gehören immer in
 `docker-compose.override.yml` – Updates fassen die Datei nicht an.

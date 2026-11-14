@@ -11,6 +11,7 @@ const { spawnSync } = require('child_process');
 const { compile, parseLog, pdfNameFor } = require('../server/lib/compile');
 
 const hasTex = spawnSync('latexmk', ['-v'], { windowsHide: true }).status === 0;
+const hasLua = hasTex && spawnSync('lualatex', ['--version'], { windowsHide: true }).status === 0;
 
 function tmp() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-compile-'));
@@ -53,4 +54,13 @@ test('Kompilieren: Hauptdatei im Unterordner -> PDF gefunden, \\input relativ da
   assert.ok(fs.existsSync(path.join(root, r.pdfPath)));
   assert.ok(fs.existsSync(path.join(root, '.latex-ide-out', 'main.synctex.gz')));
   assert.deepStrictEqual(r.errors.map((e) => [e.file, e.line]), [['thesis/kapitel.tex', 2]]);
+});
+
+// openin_any=p kept luaotfload from its own files in texmf-dist: every lualatex run aborted (#119).
+test('Kompilieren mit LuaLaTeX: fontspec und \\directlua -> PDF (#119)', { skip: !hasLua && 'latexmk/lualatex fehlt', timeout: 900000 }, async () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'main.tex'), '\\documentclass{article}\n\\usepackage{fontspec}\n\\setmainfont{Latin Modern Roman}\n\\begin{document}\nHallo \\directlua{tex.sprint("aus Lua")}\n\\end{document}\n');
+  const r = await compile(root, 'main.tex', { compiler: 'lualatex' }, '.latex-ide-out', 600000);
+  assert.strictEqual(r.pdfPath, '.latex-ide-out/main.pdf', r.log.slice(-3000));
+  assert.ok(r.success, r.log.slice(-3000));
 });

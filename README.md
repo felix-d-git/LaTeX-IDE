@@ -67,7 +67,20 @@ können dann gelöscht werden.
   zu einem Dateinamen, der Browser verwirft dann jede Antwort), z. B. `java -cp
   languagetool-server.jar org.languagetool.server.HTTPServer --port 8081
   --allow-origin`. Leer =
-  Server-LanguageTool.
+  Server-LanguageTool. Die Content-Security-Policy erlaubt dem Browser dafür
+  nur `localhost` und `127.0.0.1`; ein LanguageTool auf einem anderen Rechner
+  braucht seine Adresse in `CSP_CONNECT_SRC`.
+- `CSP_REPORT_ONLY` — `1` liefert die Content-Security-Policy nur als
+  `Content-Security-Policy-Report-Only` aus (gestufte Einführung, z. B. nach
+  einem Update): Der Browser blockiert nichts, meldet Verstöße aber in seiner
+  Konsole und an den Server, der sie einmal je Verstoß als `[csp] gemeldet: …`
+  ins Log schreibt (`docker compose logs | grep '\[csp\]'`). Bleibt das Log
+  ruhig, den Eintrag wieder entfernen und neu starten. Ohne Eintrag wird die
+  CSP durchgesetzt. Clickjacking-Schutz (`X-Frame-Options`), `nosniff` und
+  `Referrer-Policy: same-origin` gelten in beiden Fällen.
+- `CSP_CONNECT_SRC` — weitere Ziele, die der Browser direkt abfragen darf
+  (CSP `connect-src`), mit Leerzeichen getrennt, z. B.
+  `https://languagetool.example.com`.
 - `PANDOC` — Pfad zu Pandoc (GPL, läuft als externer Prozess) für
   File ▸ Download ▸ Markdown/HTML. Im selbst gebauten Docker-Image enthalten,
   nicht im fertigen Image von ghcr.io
@@ -130,8 +143,15 @@ Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen. Ohne `.env` wird ein Fallback-Admin
-  `admin@local.host` / `bitte-sofort-aendern` angelegt - Passwort direkt danach im Profil ändern;
+  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen.
+  Ohne `ADMIN_PASSWORD` legt der Server den Admin `admin` mit einem zufälligen Einmal-Passwort an und
+  schreibt es nur in die Datei `initial-admin-password.txt` im Datenordner (bei verschlüsselten Daten
+  in `VAULT_DIR`, Docker: im eingebundenen Ordner auf dem Host); die Konsole nennt nur den Pfad. Bis
+  dieses Passwort nach dem ersten Login geändert ist, beantwortet der Server alles außer der
+  Passwortänderung mit 403 (auch Desktop-/MCP-Tokens und Websockets), danach wird die Datei gelöscht.
+  Fehlt die Datei vorher, erzeugt der nächste Start ein neues Einmal-Passwort. Ein Admin, der noch das
+  frühere öffentliche Fallback-Passwort hat, bekommt beim nächsten Start ebenso ein Einmal-Passwort;
+  seine Sitzungen enden, seine Desktop- und MCP-Tokens werden widerrufen (Desktop-App neu verbinden).
   `ADMIN_*` wirken nur beim allerersten Start (leerer Datenordner). Der Sitzungs-Schlüssel wird beim ersten Start
   erzeugt und im Datenordner (`.session-secret`) gespeichert.
 - **Projekt-Isolation:** Der Admin behält den bestehenden `projects/`-Ordner
@@ -147,6 +167,13 @@ erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
   Sitzung vs. 30 Tage).
 - **CSRF-Schutz:** Double-Submit-Cookie-Pattern für alle verändernden
   Requests, zusätzlich `SameSite=Lax`-Cookies.
+- **Security-Header** (`server/lib/securityHeaders.js`, Server und
+  Desktop-App, jede Antwort): Content-Security-Policy ohne Inline-Skripte und
+  `eval` (nur WebAssembly für pdf.js), `X-Frame-Options: DENY` bzw.
+  `frame-ancestors 'none'` gegen Clickjacking (nur `/api/pdf` und `/api/raw`
+  darf die IDE selbst einbetten), `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`. Verstöße meldet der Browser an
+  `/csp-report` (Server-Log). Gestufte Einführung per `CSP_REPORT_ONLY=1`.
 - **Session-Store:** eigener Datei-Store (`server/lib/sessionStore.js`),
   schreibt atomar (Temp-Datei + Rename). Scheitert unter Windows das
   Verlängern einer Session (`EPERM` beim Rename), bleibt die Session gültig.

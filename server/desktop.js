@@ -13,12 +13,16 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const httpProxy = require('http-proxy');
+// Shared projects bring other people's files: latexmkrc stays off here, whatever the environment says (#111).
+delete process.env.LATEXMK_ALLOW_RC;
 const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compile');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
+const { rawMime, setUserContentHeaders } = require('./lib/userContent');
+const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 const os = require('os');
 const { Readable, pipeline } = require('stream');
 const { spawn, execFileSync } = require('child_process');
@@ -176,6 +180,10 @@ const app = express();
 // Express 4 does not catch rejected promises from async handlers (crash in Node >= 15).
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Same security headers as the server (#115), on every answer: own pages, local routes and the
+// /api proxy (it only forwards content-type/-disposition/cache-control, never the server's headers).
+app.use(securityHeaders());
+
 // DNS rebinding / other local sites: only our own origin may talk to us.
 app.use((req, res, next) => {
   if (!LOCAL_HOSTS.has(req.headers.host)) return res.status(421).end('Falscher Host.');
@@ -190,6 +198,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// CSP violation reports of the local pages (outside /api: no CSRF token needed).
+app.post(CSP_REPORT_PATH, ...cspReportHandler());
 
 // --- login via the server's web UI ---
 
@@ -639,6 +650,7 @@ app.get('/api/pdf', (req, res) => {
     const abs = inside(proj.dir, req.query.path);
     if (!fs.existsSync(abs)) throw new Error('Datei nicht gefunden.');
     res.setHeader('Content-Type', 'application/pdf');
+    setUserContentHeaders(res, 'application/pdf');
     res.setHeader('Cache-Control', 'no-store');
     fs.createReadStream(abs).pipe(res);
   } catch (e) {
@@ -768,6 +780,10 @@ function serveLocal(req, res) {
   try {
     const abs = inside(c.dir, req.query.path);
     if (req.baseUrl + req.path === '/api/raw') {
+      // Same types and sandbox as the server's /api/raw (#113): sendFile alone would serve .html as text/html.
+      const type = rawMime(abs);
+      res.setHeader('Content-Type', type);
+      setUserContentHeaders(res, type);
       res.sendFile(abs, { headers: { 'Cache-Control': 'no-store' } });
       return true;
     }
@@ -805,6 +821,8 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
     for (const h of FORWARD_RES) if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
     // Everything except JSON (PDF, zip, raw files) streams through: no buffering, no total time limit.
     if (!(r.headers.get('content-type') || '').includes('application/json') || !r.body) {
+      // Project files from the app's origin (localhost): sandboxed here too, whatever the server sent (#113).
+      setUserContentHeaders(res, r.headers.get('content-type'));
       res.status(r.status);
       if (!r.body) return res.end();
       return pipeline(Readable.fromWeb(r.body), res, () => {});

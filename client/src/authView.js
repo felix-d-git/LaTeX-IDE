@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { authApi } from './api.js';
+import { createPasswordForm } from './passwordForm.js';
 
 function input(type, placeholder, autocomplete) {
   const el = document.createElement('input');
@@ -272,5 +273,33 @@ export function setupAuthView({ onAuthenticated }) {
     return true;
   }
 
-  return { show, hide, showDesktopConnect };
+  // Logged in with a generated one-time password (first start without ADMIN_PASSWORD, or an admin migrated
+  // off the old public fallback): the server refuses everything but the password change until then,
+  // so this replaces the app.
+  function showPasswordChange(user) {
+    if (!user.mustChangePassword) return false;
+    view.classList.remove('hidden');
+    appEl.classList.add('hidden');
+    setError('');
+    body.innerHTML = '';
+    title.textContent = 'Eigenes Passwort festlegen';
+    const form = createPasswordForm({ noteClass: 'auth-note', onChanged: () => location.reload(), onError: setError });
+    form.current.placeholder = 'Einmal-Passwort';
+    const logout = async () => {
+      await authApi.logout().catch(() => {});
+      location.reload();
+    };
+    body.append(
+      note(
+        `Angemeldet als „${user.username}“ mit dem Einmal-Passwort aus der Datei initial-admin-password.txt. ` +
+          'Bitte jetzt ein eigenes Passwort festlegen, vorher ist nichts anderes möglich. Die Datei wird danach gelöscht.'
+      ),
+      ...form.nodes,
+      linkRow('Abmelden', logout)
+    );
+    form.current.focus();
+    return true;
+  }
+
+  return { show, hide, showDesktopConnect, showPasswordChange };
 }

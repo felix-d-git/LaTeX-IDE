@@ -36,6 +36,7 @@ workspace.json.tmp
 .update-request
 .update-status
 .update.lock
+initial-admin-password.txt
 .release-files
 .env.*
 !.env.example

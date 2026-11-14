@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
-# PDF-zu-Code-Sprung mit echtem TeX Live unter Windows (Umlaute, Leerzeichen, Junction).
-# Nur bei Aenderungen am Sprung: die Installation dauert einige Minuten.
+# PDF-zu-Code-Sprung mit echtem TeX Live unter Windows (Umlaute, Leerzeichen, Junction),
+# dazu die LuaLaTeX-Sandbox (#119, Pfade mit Laufwerksbuchstaben, Windows-Schriften).
+# Nur bei Aenderungen daran: die Installation dauert einige Minuten.
 name: SyncTeX Windows
 
 on:
@@ -9,7 +10,9 @@ on:
     paths:
       - server/lib/synctex.js
       - server/lib/compile.js
+      - server/lib/luaSandbox.lua
       - test/syncLt.test.js
+      - test/luaSandbox.test.js
       - .github/workflows/synctex-windows.yml
   workflow_dispatch:
 
@@ -48,10 +51,15 @@ jobs:
           tlpdbopt_file_assocs 0
           "@ -replace '(?m)^\s+', '' | Set-Content tl.profile -Encoding ascii
           & "$Dir/install-tl-windows.bat" -no-gui -profile tl.profile -repository $Repo
-          & "$Tex/bin/windows/tlmgr.bat" install latexmk synctex
+          & "$Tex/bin/windows/tlmgr.bat" install latexmk synctex luaotfload
           "$Tex/bin/windows" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Test
         env:
           REQUIRE_TEX: '1'
         run: node --test test/syncLt.test.js
+
+      - name: Test LuaLaTeX-Sandbox
+        env:
+          REQUIRE_TEX: '1'
+        run: node --test test/luaSandbox.test.js

@@ -106,9 +106,18 @@ function currentUser(req) {
   return sessionUser(req.session) || localUser();
 }
 
+// Generated first-boot admin password: until it is changed the account (session, desktop and MCP
+// tokens, websockets) may only change it. /api/auth/me and /logout don't pass requireAuth and stay open,
+// so the client can tell this state apart and show the change dialog. Local mode has no login -> never blocked.
+const mustChangePassword = (user) => !LOCAL_MODE && !!(user && user.mustChangePassword);
+const ALLOWED_BEFORE_CHANGE = new Set(['/api/auth/change-password']);
+
 function requireAuth(req, res, next) {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
+  if (mustChangePassword(user) && !ALLOWED_BEFORE_CHANGE.has(req.baseUrl + req.path)) {
+    return res.status(403).json({ error: 'Bitte zuerst das Einmal-Passwort ändern.', mustChangePassword: true });
+  }
   req.user = user;
   next();
 }
@@ -162,7 +171,7 @@ function upgradeUserId(req) {
   const token = bearerToken(req);
   if (token) {
     const user = auth.findUserByApiToken(token);
-    return Promise.resolve(user ? user.id : null);
+    return Promise.resolve(user && !mustChangePassword(user) ? user.id : null);
   }
   return new Promise((resolve) => {
     const header = req.headers.cookie;
@@ -174,7 +183,7 @@ function upgradeUserId(req) {
     if (!sid) return resolve(null);
     sessionStore.get(sid, (err, sessionData) => {
       const user = err ? null : sessionUser(sessionData);
-      resolve(user ? user.id : null);
+      resolve(user && !mustChangePassword(user) ? user.id : null);
     });
   });
 }
@@ -186,6 +195,7 @@ module.exports = {
   requireAuth,
   requireAdmin,
   currentUser,
+  mustChangePassword,
   rateLimit,
   applyRememberMe,
   getUserIdFromUpgradeRequest,

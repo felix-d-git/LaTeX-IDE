@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
-const { startServer, client } = require('./_server');
+const { startServer, client, ADMIN_PASSWORD } = require('./_server');
 
 let srv;
 test.before(async () => {
@@ -27,9 +27,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('zwei Fenster, zwei Projekte: Anfragen und Events bleiben im eigenen Projekt', async () => {
   const w1 = client(srv.base);
-  await w1.login('admin', 'bitte-sofort-aendern');
+  await w1.login('admin', ADMIN_PASSWORD);
   const w2 = client(srv.base);
-  await w2.login('admin', 'bitte-sofort-aendern');
+  await w2.login('admin', ADMIN_PASSWORD);
   const a = (await w1.call('POST', '/api/projects/create', { name: 'ProjektA' })).body.root;
   const b = (await w1.call('POST', '/api/projects/create', { name: 'ProjektB' })).body.root;
   const idA = (await w1.call('POST', '/api/projects/open', { root: a })).body.projectId;

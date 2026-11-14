@@ -9,6 +9,9 @@ const net = require('net');
 const { spawn } = require('child_process');
 
 const REPO = path.join(__dirname, '..');
+// Admin login of every throwaway server (user "admin"); without ADMIN_PASSWORD the server would
+// generate a one-time password that has to be changed first (see initialPassword.test.js).
+const ADMIN_PASSWORD = 'test-admin-passwort';
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -29,8 +32,10 @@ async function startServer(extraEnv = {}) {
   fs.mkdirSync(dataDir);
   const port = await freePort();
   const env = { ...process.env, PORT: String(port), DATA_DIR: dataDir, LATEX_IDE_LOCAL: path.join(dir, 'local'), NODE_PATH: path.join(REPO, 'node_modules') };
-  for (const k of ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'SMTP_HOST', 'DATA_KEY', 'VAULT_DIR', 'LOCAL_MODE', 'UPDATE_MODE', 'REMOTE_URL']) delete env[k];
+  for (const k of ['ADMIN_EMAIL', 'ADMIN_USERNAME', 'SMTP_HOST', 'DATA_KEY', 'VAULT_DIR', 'LOCAL_MODE', 'UPDATE_MODE', 'REMOTE_URL']) delete env[k];
+  env.ADMIN_PASSWORD = extraEnv.LOCAL_MODE === '1' ? undefined : ADMIN_PASSWORD; // local mode runs without one (installer option 3)
   Object.assign(env, extraEnv);
+  for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k]; // extraEnv { X: undefined } = leave X unset
   const child = spawn(process.execPath, [path.join(dir, 'server', 'index.js')], { env, cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
@@ -93,7 +98,7 @@ function client(base) {
 // Admin + a second verified user (invite -> register [-> verify link from the mail outbox]).
 async function adminAndUser(srv, username = 'bob') {
   const admin = client(srv.base);
-  await admin.login('admin', 'bitte-sofort-aendern');
+  await admin.login('admin', ADMIN_PASSWORD);
   const { token } = (await admin.call('POST', '/api/admin/invites')).body;
   const user = client(srv.base);
   await user.call('GET', '/api/auth/me');
@@ -109,4 +114,4 @@ async function adminAndUser(srv, username = 'bob') {
   return { admin, user, userId: u.id };
 }
 
-module.exports = { startServer, client, adminAndUser };
+module.exports = { startServer, client, adminAndUser, ADMIN_PASSWORD };
