@@ -1,4 +1,6 @@
 @echo off
+rem SPDX-License-Identifier: AGPL-3.0-only
+rem SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 cd /d "%~dp0"
 set "NEED="
 if not exist node_modules set "NEED=1"

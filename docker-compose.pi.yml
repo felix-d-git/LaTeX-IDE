@@ -12,6 +12,9 @@ services:
       context: .
       args:
         TEXLIVE: host
+        # Quellcode-Link im Client-Bundle wie /source (Werte aus .env, leer = Tag dieser Version)
+        SOURCE_URL: ${SOURCE_URL:-}
+        UPDATE_REPO: ${UPDATE_REPO:-}
     image: latex-collab
     container_name: latex-collab
     restart: unless-stopped

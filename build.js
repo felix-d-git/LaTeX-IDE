@@ -42,15 +42,21 @@ const options = {
   format: 'esm',
   target: 'es2020',
   loader: { '.css': 'text' },
-  // License notice in every copy of the bundle (pdf.js' @licstart header is not an esbuild legal comment).
+  // License notice in every copy of the bundle. esbuild drops pdf.js' @licstart header (not a legal
+  // comment for it), so its copyright and license line is repeated here (test/licenses.test.js
+  // compares it with legacy/build/pdf.mjs). Every bundled package is in THIRD_PARTY_NOTICES.md.
   banner: {
     js: [
       `/*! LaTeX-IDE ${legal.VERSION} - ${legal.COPYRIGHT}`,
       ` * AGPL-3.0-only, WITHOUT ANY WARRANTY. Source: ${legal.SOURCE_LINK}`,
       ' * Includes third-party code, among others:',
-      ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0',
-      ' *   CodeMirror, Lezer - Copyright Marijn Haverbeke and others - MIT',
-      ' *   KaTeX - Copyright Khan Academy and other contributors - MIT',
+      ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0 (http://www.apache.org/licenses/LICENSE-2.0),',
+      ' *     with core-js - Copyright Denis Pushkarev, CoreJS Company - MIT',
+      ' *     and the webpack runtime - Copyright JS Foundation and other contributors - MIT',
+      ' *   CodeMirror, Lezer, @replit/codemirror-vim, @replit/codemirror-emacs, style-mod, w3c-keyname, crelt',
+      ' *     - Copyright Marijn Haverbeke and others - MIT',
+      ' *   KaTeX - Copyright Khan Academy and other contributors - MIT; its SVG glyphs come from the KaTeX fonts',
+      ' *     - Copyright Design Science, Inc., Khan Academy - OFL-1.1',
       ' *   Yjs, y-indexeddb - Copyright Kevin Jahns, RWTH Aachen University - MIT',
       ' *   lib0, y-protocols, y-websocket, y-codemirror.next - Copyright Kevin Jahns - MIT',
       ' * Full license texts and notices: /licenses',
@@ -65,8 +71,18 @@ async function bundleMetafile() {
   return result.metafile;
 }
 
+// Source link of the banner for lib/legal.js: where .git is missing at run time (installer
+// packages, Docker image), /source shows the same link as the banner (builtLink).
+function writeSourceInfo(dir = outDir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ version: legal.VERSION, link: legal.SOURCE_LINK }) + '\n');
+}
+
 async function run() {
+  // The banner links the checkout's commit (lib/legal.js); local changes are not in it.
+  if (legal.SOURCE_WARNING) console.warn(`build.js: Warnung: ${legal.SOURCE_WARNING}`);
   copyFromNodeModules();
+  writeSourceInfo();
   if (watch) {
     const ctx = await esbuild.context(options);
     await ctx.watch();
@@ -78,7 +94,7 @@ async function run() {
   }
 }
 
-module.exports = { COPIED, options, bundleMetafile };
+module.exports = { COPIED, options, bundleMetafile, writeSourceInfo };
 
 if (require.main === module) {
   run().catch((e) => {

@@ -25,15 +25,17 @@ powershell -File installer\build-release.ps1
 
 1. Kopiert `client/` (ohne `client/dist`), `server/`, `package.json`,
    `package-lock.json`, `build.js`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-   `install-texlive.ps1` und die Windows-Starter (`LatexIDE.cmd`,
+   `AUTHORS`, `install-texlive.ps1` und die Windows-Starter (`LatexIDE.cmd`,
    `LatexIDE-Server.cmd`, `LatexIDE-Lokal.vbs`) nach `installer\out\staging`.
    `LICENSES-INSTALLER.txt` und `LICENSES-INSTALLER-en.txt` entstehen dort aus
    den Vorlagen (siehe unten), `{{TAG}}` wird zu `v<version>` aus `package.json`.
 2. Fuehrt dort `npm ci`, `node build.js`, `npm prune --omit=dev --omit=optional`
    aus und loescht danach ungenutzte Teile von `pdfjs-dist` (`cmaps`,
-   `standard_fonts`, `legacy`, `image_decoders`, `web`, `types`,
-   `build/pdf.sandbox*`): pdf.js steckt gebuendelt in `client/dist`, der Server
-   laedt es nicht.
+   `standard_fonts`, `legacy`, `image_decoders`, `web`, `types`, `wasm`,
+   `iccs`, `build/pdf.sandbox*`) und `katex` (`src`, `cli.js`): pdf.js und
+   KaTeX stecken gebuendelt bzw. kopiert in `client/dist`, die KaTeX-Fonts
+   kommen aus `katex/dist`. Die Listen entsprechen `STRIPPED` in
+   `scripts/licenses.js` (geprueft von `test/licenses.test.js`).
 3. Laedt Node.js 26 (win-x64) von nodejs.org, prueft SHA256 gegen
    `SHASUMS256.txt`, kopiert es inkl. LICENSE nach `staging\node` (fehlt die
    LICENSE, bricht der Build ab).

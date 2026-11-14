@@ -157,12 +157,38 @@ ${MIT_BODY}`,
 // License files pdfjs-dist ships next to its wasm modules (only read when notices are generated: wasm/ is stripped).
 const pdfjsWasmLicense = (name) => fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'pdfjs-dist', 'wasm', name), 'utf8').trim();
 
+// MIT text as in rust-lang/rust LICENSE-MIT, dlmalloc-rs and wasm-bindgen LICENSE-MIT (same wording and wrapping).
+const RUST_MIT_BODY = `Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.`;
+
 // Third-party code compiled into the package's build files.
 const EMBEDDED_NOTICES = {
   // https://github.com/mozilla/pdf.js/blob/v6.4.299/external/openjpeg/README.md
   'pdfjs-dist': {
     version: '6.4.299',
-    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); MIT (qcms, Emscripten runtime, musl, core-js)',
+    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); '
+      + 'MIT (qcms, Brotli decoder, Emscripten runtime, musl, core-js, webpack runtime, Rust standard library, dlmalloc, wasm-bindgen)',
     copyrightFrom: 'build/pdf.mjs',
     notices: [
       {
@@ -259,6 +285,46 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`,
         get text() { return pdfjsWasmLicense('LICENSE_PDFJS_QCMS'); },
       },
       {
+        title: 'Embedded: Rust standard library, dlmalloc, wasm-bindgen (MIT)',
+        note: 'Compiled from Rust into the qcms WebAssembly module (client/dist/pdfjs-wasm/qcms_bg.wasm; its panic '
+          + 'messages name rustc 8bab26f4 and dlmalloc 0.2.13): the Rust standard library, the dlmalloc allocator '
+          + "(Rust port of Doug Lea's public-domain malloc) and the wasm-bindgen runtime. All three are dual-licensed "
+          + 'MIT OR Apache-2.0; used here under MIT. See https://github.com/rust-lang/rust/blob/master/COPYRIGHT, '
+          + 'https://github.com/alexcrichton/dlmalloc-rs and https://github.com/wasm-bindgen/wasm-bindgen',
+        // LICENSE-MIT of rust-lang/rust, alexcrichton/dlmalloc-rs and wasm-bindgen/wasm-bindgen (identical text)
+        text: `Rust standard library: Copyright (c) The Rust Project Contributors
+dlmalloc-rs, wasm-bindgen: Copyright (c) 2014 Alex Crichton
+
+${RUST_MIT_BODY}`,
+      },
+      {
+        title: 'Embedded: Brotli decoder (MIT)',
+        note: "Google's JavaScript Brotli decoder (pdf.js external/brotli/decode.js, BrotliDecode filter), "
+          + 'compiled into the worker client/dist/pdf.worker.min.mjs. '
+          + 'See https://github.com/mozilla/pdf.js/blob/v6.4.299/external/brotli/decode.js and https://github.com/google/brotli/blob/master/LICENSE',
+        // Header of external/brotli/decode.js, then https://github.com/google/brotli/blob/master/LICENSE
+        text: `Copyright 2017 Google Inc. All Rights Reserved.
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.`,
+      },
+      {
         title: 'Embedded: Emscripten runtime (MIT)',
         note: 'JavaScript glue and runtime code generated by Emscripten when compiling the decoders to WebAssembly, '
           + 'in the worker and the wasm modules. Emscripten is dual-licensed MIT / University of Illinois/NCSA; used here under MIT. '
@@ -311,6 +377,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.`,
       },
       {
+        title: 'Embedded: webpack runtime (MIT)',
+        note: 'Module loader code that webpack generates when pdf.js is built, in legacy/build/pdf.mjs (bundled into '
+          + 'client/dist/bundle.js) and in the worker client/dist/pdf.worker.min.mjs. See https://github.com/webpack/webpack/blob/main/LICENSE',
+        // https://github.com/webpack/webpack/blob/main/LICENSE
+        text: `Copyright JS Foundation and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`,
+      },
+      {
         title: 'Embedded: musl libc (MIT)',
         note: 'Parts of the C library bundled with Emscripten, compiled into the WebAssembly modules. '
           + 'See https://git.musl-libc.org/cgit/musl/tree/COPYRIGHT',
@@ -344,11 +436,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`,
 const EXTRA_NOTICES = {
   katex: {
     version: '0.19.1',
-    displayLicense: 'MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem)',
+    displayLicense: 'MIT (code); OFL-1.1 (fonts and SVG glyphs derived from them); Apache-2.0 (contrib/mhchem)',
     notices: [
       {
-        title: 'Fonts: dist/fonts/KaTeX_* (OFL-1.1)',
-        note: 'Copyright lines and Reserved Font Names from the font metadata (name table, license description).',
+        title: 'Fonts: dist/fonts/KaTeX_* and SVG glyphs derived from them (OFL-1.1)',
+        note: 'Copyright lines and Reserved Font Names from the font metadata (name table, license description). '
+          + 'The SVG paths for stretchy symbols, square roots and large delimiters (src/svgGeometry.ts, compiled into '
+          + 'dist/katex.mjs and so into client/dist/bundle.js) are drawn from these fonts and fall under the same license.',
         text: `Copyright (c) 2009-2010, Design Science, Inc. (<www.mathjax.org>)
 Copyright (c) 2014-2018 Khan Academy (<www.khanacademy.org>),
 with Reserved Font Names KaTeX_AMS, KaTeX_Caligraphic, KaTeX_Fraktur,
@@ -387,9 +481,13 @@ limitations under the License.`,
 
 // Parts of packages that Dockerfile and installer/build-release.ps1 delete before shipping,
 // so their own licenses (pdfjs-dist: Adobe cmaps, Foxit/Liberation fonts, ICC profiles, QuickJS in
-// pdf.sandbox* and wasm/) are not reproduced here; wasm/ files in use are copied to client/dist first. test/licenses.test.js checks that both delete
+// pdf.sandbox* and wasm/; katex: AMS METAFONT source src/fonts/xbbold.mf, MathJax-derived files
+// under Apache-2.0, font build tools) are not reproduced here; files in use are bundled or copied to
+// client/dist first (SHIPPED_FROM_STRIPPED). test/licenses.test.js checks that both delete
 // lists match this one, container-image.yml checks the image.
 const STRIPPED = {
+  // client/dist bundles dist/katex.mjs, /katex serves dist/; src/ and the CLI are never used.
+  katex: ['src', 'cli.js'],
   'pdfjs-dist': ['cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'wasm', 'iccs', 'build/pdf.sandbox*'],
 };
 
@@ -726,10 +824,16 @@ function render(packages) {
   lines.push(`Scope: the npm packages the app ships (${packages.length} packages), i.e. the production`);
   lines.push('dependencies from package-lock.json without dev and optional packages, as left by');
   lines.push('`npm prune --omit=dev --omit=optional`. This includes the code bundled into client/dist.');
-  for (const [name, parts] of Object.entries(STRIPPED)) {
-    lines.push(`Not shipped and therefore not covered (deleted by the Docker and installer builds): from ${name}`);
-    lines.push(`${parts.map((x) => `\`${x}\``).join(', ')}.`);
-  }
+  lines.push('');
+  lines.push('The Docker and installer builds delete these parts of packages from node_modules; their');
+  lines.push('own licenses are therefore not reproduced here:');
+  const code = (list) => list.map((x) => `\`${x}\``).join(', ');
+  for (const [name, parts] of Object.entries(STRIPPED)) lines.push(`- ${name}: ${code(parts)}`);
+  lines.push('Exception: the following files from these parts reach client/dist before the deletion');
+  lines.push('(bundled into client/dist/bundle.js or copied next to it). The third-party code they contain');
+  lines.push('is covered by the "Embedded:" notices of their package below:');
+  for (const [name, files] of Object.entries(SHIPPED_FROM_STRIPPED)) lines.push(`- ${name}: ${code(files)}`);
+  lines.push('');
   lines.push('Generated by scripts/licenses.js, do not edit by hand.');
   lines.push('');
   lines.push('Not covered here:');
@@ -808,4 +912,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle };
+module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle, licstartCopyright };
