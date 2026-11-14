@@ -8,7 +8,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const esbuild = require('esbuild');
-const { toProjectPath, inverseInProject } = require('../server/lib/synctex');
+const { toProjectPath, inverseInProject, decodeOutput } = require('../server/lib/synctex');
 const { compile } = require('../server/lib/compile');
 
 const load = async (file) => {
@@ -104,6 +104,30 @@ test('inverseInProject: Umlaut und Leerzeichen im Projektpfad', { skip: skipTex 
     const pdf = path.join(root, r.pdfPath);
     assert.deepStrictEqual(await inverseInProject(root, pdf, 1, 150, 134), { file: 'main.tex', line: 3 });
     assert.strictEqual((await inverseInProject(root, pdf, 1, 150, 134 + 5 * 28.45 + 12)).file, 'kap/eins.tex');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// pdfTeX/XeTeX on Windows write cp1252 names into the .synctex, LuaTeX UTF-8 (#137).
+test('decodeOutput: cp1252- und UTF-8-Zeilen gemischt', () => {
+  const out = Buffer.concat([Buffer.from('Input:C:/p/./Kapitel '), Buffer.from([0xdc, 0x2f, 0xfc]), Buffer.from('ber.tex\nInput:C:/p/./h\u00e4.tex\n')]);
+  assert.strictEqual(decodeOutput(out), 'Input:C:/p/./Kapitel \u00dc/\u00fcber.tex\nInput:C:/p/./h\u00e4.tex\n');
+});
+
+test('inverseInProject: Umlaut und Leerzeichen in Datei- und Ordnernamen im Projekt (#137)', { skip: skipTex }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lide-sync-'));
+  try {
+    fs.mkdirSync(path.join(root, 'Kapitel \u00dc'));
+    fs.writeFileSync(path.join(root, 'Haupt \u00e4.tex'), '\\documentclass{article}\n\\begin{document}\nErster Absatz.\n\n\\input{"Kapitel \u00dc/\u00fcber eins"}\n\\end{document}\n');
+    fs.writeFileSync(path.join(root, 'Kapitel \u00dc', '\u00fcber eins.tex'), '\\vspace*{5cm}\nKapiteltext.\n');
+    for (const compiler of ['pdflatex', 'xelatex']) {
+      const r = await compile(root, 'Haupt \u00e4.tex', { compiler }, '.latex-ide-out', 120000);
+      assert.ok(r.pdfPath, r.log.slice(-2000));
+      const pdf = path.join(root, r.pdfPath);
+      assert.deepStrictEqual(await inverseInProject(root, pdf, 1, 150, 134), { file: 'Haupt \u00e4.tex', line: 3 }, compiler);
+      assert.strictEqual((await inverseInProject(root, pdf, 1, 150, 134 + 5 * 28.45 + 12)).file, 'Kapitel \u00dc/\u00fcber eins.tex', compiler);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
