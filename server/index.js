@@ -25,7 +25,7 @@ const { WebSocketServer } = require('ws');
 const { ZipArchive } = require('archiver');
 
 const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
+const { compile, findMainCandidate, mainPathError, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, collectRefs } = require('./lib/search');
@@ -1705,12 +1705,24 @@ app.post('/api/tree/upload', (req, res) => {
 app.post('/api/main-file', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
+  // Empty = back to auto-detection. Otherwise an existing .tex file whose name latexmk
+  // can't misread as an option or shell command (#112); compile() checks it again.
+  const rel = typeof req.body.path === 'string' ? req.body.path : '';
+  if (rel) {
+    const bad = mainPathError(rel);
+    if (bad) return res.status(400).json({ error: bad });
+    try {
+      if (!fs.statSync(safeResolve(root, rel)).isFile()) throw new Error();
+    } catch {
+      return res.status(400).json({ error: 'Datei nicht gefunden.' });
+    }
+  }
   const prev = state.getMainFile(root);
-  state.setMainFile(root, req.body.path);
+  state.setMainFile(root, rel || null);
   // main.tex and thesis/main.tex both write main.pdf: drop the other file's
   // output so download/SyncTeX don't serve it until the next compile. Queued
   // behind running compiles so it doesn't pull the directory from under latexmk.
-  if (prev && req.body.path && prev !== req.body.path && pdfNameFor(prev) === pdfNameFor(req.body.path)) {
+  if (prev && rel && prev !== rel && pdfNameFor(prev) === pdfNameFor(rel)) {
     compileChain = compileChain.then(() => fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true })).catch(() => {});
   }
   res.json({ ok: true });
