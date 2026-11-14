@@ -141,6 +141,14 @@ services:
 Der Ordner muss `<Jahr>/bin/<arch>` enthalten (Jahr 2025–2027, `x86_64-linux` oder
 `aarch64-linux`). Prüfen: `docker compose exec app latexmk -v`.
 
+LuaLaTeX: Jedes Projekt bekommt einen eigenen Font-Cache im Ausgabeordner, den
+gemeinsamen Cache von TeX Live kann ein Dokument nicht verändern. Damit nicht jedes
+Projekt beim ersten Lauf alle Schriften durchsucht (mit `texlive-full` auf dem Pi
+vermutlich mehrere Minuten, nicht gemessen), nach dem Start einmal
+`docker compose exec app luaotfload-tool -u`
+ausführen: Die IDE kopiert die Namensdatenbank dann in neue Projekte (bis der
+Container neu erstellt wird).
+
 Eigene Anpassungen (Port, Speicherlimit, Proxy-Netz) gehören immer in
 `docker-compose.override.yml` – Updates fassen die Datei nicht an.
 
