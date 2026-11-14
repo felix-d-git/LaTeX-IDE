@@ -1,3 +1,5 @@
+' SPDX-License-Identifier: AGPL-3.0-only
+' SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 ' 100 % lokal (Installer-Option "Nur dieser Rechner"): Server ohne sichtbares Fenster,
 ' ohne Anmeldung, nur 127.0.0.1. Oeffnet selbst den Browser und beendet sich,
 ' sobald kein Browserfenster mehr verbunden ist.

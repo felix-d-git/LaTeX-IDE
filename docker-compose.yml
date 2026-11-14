@@ -16,6 +16,9 @@ services:
       args:
         # apt = TeX Live im Image (Debian, ~5 GB); host = eigenes TeX Live einhaengen (siehe unten)
         TEXLIVE: ${TEXLIVE:-apt}
+        # Quellcode-Link im Client-Bundle wie /source (Werte aus .env, leer = Tag dieser Version)
+        SOURCE_URL: ${SOURCE_URL:-}
+        UPDATE_REPO: ${UPDATE_REPO:-}
     image: latex-ide
     restart: unless-stopped
     env_file: .env

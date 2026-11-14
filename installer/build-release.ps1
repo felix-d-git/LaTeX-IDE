@@ -153,6 +153,16 @@ try {
     # Eigene Lizenzen (Adobe-cmaps, Foxit/Liberation-Fonts, ICC-Profile, QuickJS) deckt THIRD_PARTY_NOTICES nicht ab.
     $PdfjsLeft = Get-Item -Path $PdfjsUnused -ErrorAction SilentlyContinue
     if ($PdfjsLeft) { throw "pdfjs-dist-Teile ohne Lizenzhinweis im Staging: $($PdfjsLeft.FullName -join ', ')" }
+
+    # KaTeX: das Bundle nutzt dist\katex.mjs, /katex liefert dist\ aus. src\ (eigene Lizenzen, u. a.
+    # AMS-METAFONT-Quelle, MathJax-Dateien) und die CLI braucht die App nicht.
+    Write-Step "Ungenutzte katex-Dateien entfernen"
+    $KatexDir = Join-Path $StagingDir 'node_modules\katex'
+    $KatexUnused = @('src', 'cli.js') |
+        ForEach-Object { Join-Path $KatexDir $_ }
+    Get-Item -Path $KatexUnused -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+    $KatexLeft = Get-Item -Path $KatexUnused -ErrorAction SilentlyContinue
+    if ($KatexLeft) { throw "katex-Teile ohne Lizenzhinweis im Staging: $($KatexLeft.FullName -join ', ')" }
 } finally {
     Pop-Location
 }

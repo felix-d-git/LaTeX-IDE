@@ -640,6 +640,9 @@ function updateStatus() {
 
 app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
   const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
+  // AGPL §13: /source shows a commit, but the checkout has local changes and SOURCE_URL is unset (lib/legal.js).
+  // Local mode has no other users to offer the source to.
+  if (legal.SOURCE_WARNING && !authMw.LOCAL_MODE) base.sourceWarning = legal.SOURCE_WARNING;
   if (UPDATE_MODE === 'off') return res.json({ ...base, available: false });
   try {
     const rel = await latestRelease();
@@ -2432,6 +2435,7 @@ bootstrapAdmin()
     }
     server.listen(PORT, authMw.LOCAL_MODE ? '127.0.0.1' : undefined, () => {
       console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
+      if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
       if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});

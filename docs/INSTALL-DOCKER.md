@@ -64,6 +64,7 @@ vorher geht nichts anderes; danach löscht der Server die Datei.
 | `LATEX_DATA_DIR` | Datenordner auf dem Host (Standard `./data`). |
 | `TEXLIVE` | `apt` (Debian-Paket im Image, Standard) oder `host` (eigenes TeX Live einhängen). |
 | `UPDATE_MODE` | `notify` / `button` / `auto` / `off`, siehe [UPDATES.md](UPDATES.md). |
+| `SOURCE_URL` | Quellcode-Link unter `/source` (AGPL-3.0 §13). Ohne zeigt er auf den Tag der Version in `UPDATE_REPO`; das Image kennt seinen Git-Stand nicht. Wer einen anderen Stand als ein Release baut (master, Fork, eigene Änderungen), setzt ihn, z. B. auf `…/tree/<commit>`. Geht beim Build auch in den Lizenz-Banner des Clients. |
 | `DATA_KEY`, `VAULT_DIR` | Daten verschlüsselt auf der Platte, siehe README „Verschlüsselte Daten“. Nur mit `docker-compose.pi.yml` lauffähig (tmpfs + Vault-Volume), nicht mit `docker-compose.yml`. |
 | `SMTP_*` | Mailversand für Einladungen/Passwort-Reset (ohne: Links im Log). |
 
@@ -187,8 +188,12 @@ Image – selbst bauen wie oben.
 Markdown und HTML (File ▸ Download). Debians pandoc ist statisch mit rund 150
 Haskell-Bibliotheken gelinkt (u. a. unter GPL-2.0+, Liste in `SOURCES.txt`
 im Archiv). Deren Debian-Quellpakete liegen deshalb zu jedem Release mit veröffentlichtem Image als
-`pandoc-sources-<tag>.tar` bei den Release-Dateien (siehe unten). Beim eigenen
-Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit `0` ohne).
+`pandoc-sources-<tag>.tar` bei den Release-Dateien (siehe unten), ihre
+Copyright-Vermerke (`debian/copyright` jedes dieser Quellpakete, auch von GHC)
+im fertigen Image unter `/usr/share/doc/pandoc/static-libs/<Quellpaket>/copyright`.
+Beim eigenen Build steuert das Build-Argument `PANDOC` pandoc (Standard `1`, mit
+`0` ohne); die Vermerke unter `static-libs` legt nur der Release-Workflow an
+(`scripts/pandoc-copyright.py`, siehe Hinweise für Betreiber).
 
 ## Drittsoftware im Docker-Image
 
@@ -198,17 +203,26 @@ Lizenzen, u. a. unter GPL, LGPL und AGPL:
 - Debian-Basissystem (`node:26-bookworm-slim`), z. B. bash und coreutils
   (GPL-3.0+), mawk (GPL-2.0), glibc und GMP (LGPL)
 - `perl` (GPL-1.0+ oder Artistic)
-- aus dem Node-Basisimage außerdem Node.js mit npm (MIT u. a., Lizenz unter
-  `/usr/local/LICENSE`) und Yarn 1 (BSD-2-Clause, unter `/opt/yarn-*`)
+- aus dem Node-Basisimage außerdem Node.js (MIT, eingebaute Komponenten unter
+  weiteren Lizenzen; alle Texte unter `/usr/local/LICENSE`) und npm
+  (Artistic-2.0, `/usr/local/lib/node_modules/npm/LICENSE`); Yarn enthält das
+  Node-26-Basisimage nicht
 - beim Standard-Build (`TEXLIVE=apt`): `texlive-full` und `latexmk` (u. a. GPL,
   LPPL) mit ihren Abhängigkeiten, darunter Ghostscript/libgs (AGPL-3.0+),
-  ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL)
-- `pandoc` (GPL-2.0+) mit statisch gelinkten Haskell-Bibliotheken (fehlt bei
-  `PANDOC=0`)
+  ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL),
+  Python 3 (PSF-2.0), Ruby (Ruby-Lizenz oder BSD-2-Clause), Asymptote (LGPL/GPL),
+  biber (Artistic-2.0), ConTeXt/LuaTeX (u. a. GPL) und zahlreiche Schriften
+  (u. a. OFL-1.1, GPL mit Font-Ausnahme, LPPL); die genaue Lizenz jedes Pakets
+  steht in dessen `copyright`-Datei
+- `pandoc` (GPL-2.0-or-later, einzelne Teile GPL-2.0-only, z. B. der
+  TikiWiki-Reader) mit statisch gelinkten Haskell-Bibliotheken (überwiegend
+  BSD-3-Clause, MIT/Expat und ISC) und der GHC-Runtime (fehlt bei `PANDOC=0`)
 
 Copyright-Vermerke und Lizenzen der Pakete liegen im Image unter
-`/usr/share/doc/<paket>/copyright`, die Volltexte gängiger Lizenzen unter
-`/usr/share/common-licenses/`, die Lizenz von Node.js unter `/usr/local/LICENSE`.
+`/usr/share/doc/<paket>/copyright`, die der statisch in pandoc gelinkten
+Bibliotheken unter `/usr/share/doc/pandoc/static-libs/`, die Volltexte gängiger
+Lizenzen unter `/usr/share/common-licenses/`, die Lizenz von Node.js unter
+`/usr/local/LICENSE`.
 Das Basisimage ist eine „slim“-Variante: Von `/usr/share/doc` bleiben nur die
 `copyright`- und `NOTICE`-Dateien, Handbücher, Manpages und der Inhalt der
 `texlive-*-doc`-Pakete fehlen. Vollständig sind sie in den Debian-Paketen und
@@ -248,7 +262,8 @@ Node.js stammt aus dem offiziellen Image `node:26-bookworm-slim` (Quellen:
 `THIRD_PARTY_NOTICES.md` bzw. unter `/licenses` im laufenden Server. Der
 Quellcode der IDE: die zur Laufzeit nötigen Quelltexte liegen im Image unter `/app`; der
 vollständige Quellcode einschließlich Build- und Hilfsskripten (`scripts/`, `installer/`,
-`.github/`) liegt unter der `/source`-Adresse des Servers (Tag dieser Version).
+`.github/`) liegt unter der `/source`-Adresse des Servers (beim fertigen Image der
+Release-Tag bzw. bei einem manuellen Build der Commit, aus dem es gebaut wurde).
 
 Für Downloads des Images von ghcr.io wird der Quellcode nach GPL-3.0, AGPL-3.0
 und LGPL-3.0 (jeweils §6 d) über diese Release-Dateien beim GitHub-Release derselben Version bereitgestellt,
@@ -278,11 +293,16 @@ Issues an.
   und ist für dessen Inhalt und Lizenzhinweise selbst verantwortlich.
 - Wer den Code ändert und den Server anderen über das Netz anbietet, muss diesen
   Nutzern den Quellcode der geänderten Fassung anbieten (AGPL-3.0 §13), z. B.
-  per Link auf das eigene Repository.
+  per Link auf das eigene Repository in `SOURCE_URL`. Ohne `SOURCE_URL` zeigt
+  `/source` eines selbst gebauten Images auf den Tag der Version, auch wenn es
+  aus master, einem Fork oder einem geänderten Checkout gebaut wurde.
 - Wer ein selbst gebautes Image weitergibt (z. B. in eine eigene Registry
   pusht), verbreitet die enthaltene Drittsoftware selbst und muss deren
   Quellcode wie oben bereitstellen, mit pandoc auch den der statisch gelinkten
-  Haskell-Bibliotheken.
+  Haskell-Bibliotheken, und deren Copyright-Vermerke beilegen: Quellen wie in
+  `.github/workflows/container-image.yml` („pandoc-Quellen sammeln“) laden, dann
+  `python3 scripts/pandoc-copyright.py <quellordner> <ausgabe>` und die Ausgabe
+  nach `/usr/share/doc/pandoc/static-libs/` ins Image kopieren.
 - Große Projekte (viele Dateien/Ordner) brauchen genug inotify-Watches auf dem
   Host, sonst erkennt der Server externe Dateiänderungen nicht mehr live (Log:
   `[watcher] … ENOSPC`): `sysctl -w fs.inotify.max_user_watches=524288`,

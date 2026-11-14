@@ -1,4 +1,6 @@
 @echo off
+rem SPDX-License-Identifier: AGPL-3.0-only
+rem SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 rem Eigener Server auf diesem Rechner (Installer-Option "Eigener Server").
 rem Einstellungen (Admin, Datenordner, Port) stehen in .env im App-Ordner.
 setlocal

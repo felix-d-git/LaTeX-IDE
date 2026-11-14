@@ -4,7 +4,8 @@
 #          at /data/texlive (the path it was installed to). Used on the Pi, where
 #          TeX Live 2025 lives on the SSD and the SD card stays free.
 # PANDOC=1 (default) installs pandoc for the Word/Markdown/HTML export, also in the
-# image published on ghcr.io (sources of its static libs: docs/INSTALL-DOCKER.md).
+# image published on ghcr.io (sources of its static libs: docs/INSTALL-DOCKER.md; their
+# copyright files: container-image.yml adds /usr/share/doc/pandoc/static-libs on top).
 #
 # Two stages: npm ci with dev and optional packages (esbuild, @napi-rs/canvas) only
 # happens in the build stage, which is not part of the final image.
@@ -14,15 +15,24 @@ COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
 RUN npm ci
 COPY . .
+# Bundle banner (build.js, server/lib/legal.js): same source link as /source in the final image.
+# .git is not in the build context, so without SOURCE_URL both fall back to the version tag.
+# container-image.yml passes the built tag/commit, docker-compose*.yml the values from .env.
+ARG SOURCE_URL=""
+ARG UPDATE_REPO=""
 # esbuild is a dev dependency: build the client, then drop dev deps and optional ones
 # (@napi-rs/canvas: only pdf.js under Node needs it, the app runs pdf.js in the browser).
 # npm prune leaves the emptied scope folders (@esbuild, @napi-rs) behind.
 # pdfjs-dist: the client is bundled and build.js copies only the worker and three wasm files to client/dist,
-# the rest (cmaps, fonts, legacy build, QuickJS sandbox ...) is never served.
+# the rest (cmaps, fonts, legacy build, QuickJS sandbox ...) is never served. katex: the bundle uses
+# dist/katex.mjs, /katex serves dist/; src/ (own licenses, e.g. AMS METAFONT, MathJax) and the CLI go.
+# Both lists = STRIPPED in scripts/licenses.js (test/licenses.test.js).
 RUN node build.js \
     && npm prune --omit=dev --omit=optional \
     && find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete \
-    && cd node_modules/pdfjs-dist \
+    && cd /app/node_modules/katex \
+    && rm -rf src cli.js \
+    && cd /app/node_modules/pdfjs-dist \
     && rm -rf cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*
 
 FROM node:26-bookworm-slim

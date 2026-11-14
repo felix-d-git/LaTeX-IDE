@@ -11,36 +11,52 @@ const watch = process.argv.includes('--watch');
 // --serve: start the server in this process after the first build (npm run dev; "&" does not background on Windows cmd).
 const serve = process.argv.includes('--serve');
 
-function copyPdfWorker() {
-  const outDir = path.join(__dirname, 'client', 'dist');
-  fs.mkdirSync(outDir, { recursive: true });
-  const src = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.min.mjs');
-  fs.copyFileSync(src, path.join(outDir, 'pdf.worker.min.mjs'));
+const outDir = path.join(__dirname, 'client', 'dist');
+
+// Files copied from node_modules to client/dist as they are (from: repo-relative, to: below
+// client/dist). scripts/licenses.js checks their packages like the bundled ones.
+const COPIED = [
+  // pdf.js worker (workerSrc in pdfViewer.js)
+  { from: 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', to: 'pdf.worker.min.mjs' },
   // Decoders for JPEG 2000 and JBIG2 images, colour management (wasmUrl in pdfViewer.js, visualEditor.js).
-  const wasmDir = path.join(outDir, 'pdfjs-wasm');
-  fs.mkdirSync(wasmDir, { recursive: true });
-  for (const f of ['openjpeg.wasm', 'jbig2.wasm', 'qcms_bg.wasm']) {
-    fs.copyFileSync(path.join(__dirname, 'node_modules', 'pdfjs-dist', 'wasm', f), path.join(wasmDir, f));
+  ...['openjpeg.wasm', 'jbig2.wasm', 'qcms_bg.wasm'].map((f) => ({ from: `node_modules/pdfjs-dist/wasm/${f}`, to: `pdfjs-wasm/${f}` })),
+];
+
+function copyFromNodeModules() {
+  for (const { from, to } of COPIED) {
+    const dest = path.join(outDir, to);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(__dirname, from), dest);
   }
 }
 
 const options = {
   entryPoints: [path.join(__dirname, 'client', 'src', 'main.js')],
   bundle: true,
-  outfile: path.join(__dirname, 'client', 'dist', 'bundle.js'),
+  outfile: path.join(outDir, 'bundle.js'),
+  // Input paths in the metafile relative to the repo, whatever the current directory.
+  absWorkingDir: __dirname,
+  // Lists every bundled input; scripts/licenses.js checks the node_modules ones (bundleMetafile).
+  metafile: true,
   sourcemap: true,
   format: 'esm',
   target: 'es2020',
   loader: { '.css': 'text' },
-  // License notice in every copy of the bundle (pdf.js' @licstart header is not an esbuild legal comment).
+  // License notice in every copy of the bundle. esbuild drops pdf.js' @licstart header (not a legal
+  // comment for it), so its copyright and license line is repeated here (test/licenses.test.js
+  // compares it with legacy/build/pdf.mjs). Every bundled package is in THIRD_PARTY_NOTICES.md.
   banner: {
     js: [
       `/*! LaTeX-IDE ${legal.VERSION} - ${legal.COPYRIGHT}`,
       ` * AGPL-3.0-only, WITHOUT ANY WARRANTY. Source: ${legal.SOURCE_LINK}`,
       ' * Includes third-party code, among others:',
-      ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0',
-      ' *   CodeMirror, Lezer - Copyright Marijn Haverbeke and others - MIT',
-      ' *   KaTeX - Copyright Khan Academy and other contributors - MIT',
+      ' *   pdf.js - Copyright 2024 Mozilla Foundation - Apache-2.0 (http://www.apache.org/licenses/LICENSE-2.0),',
+      ' *     with core-js - Copyright Denis Pushkarev, CoreJS Company - MIT',
+      ' *     and the webpack runtime - Copyright JS Foundation and other contributors - MIT',
+      ' *   CodeMirror, Lezer, @replit/codemirror-vim, @replit/codemirror-emacs, style-mod, w3c-keyname, crelt',
+      ' *     - Copyright Marijn Haverbeke and others - MIT',
+      ' *   KaTeX - Copyright Khan Academy and other contributors - MIT; its SVG glyphs come from the KaTeX fonts',
+      ' *     - Copyright Design Science, Inc., Khan Academy - OFL-1.1',
       ' *   Yjs, y-indexeddb - Copyright Kevin Jahns, RWTH Aachen University - MIT',
       ' *   lib0, y-protocols, y-websocket, y-codemirror.next - Copyright Kevin Jahns - MIT',
       ' * Full license texts and notices: /licenses',
@@ -49,8 +65,24 @@ const options = {
   },
 };
 
+// Metafile of the client bundle, built in memory with the same options (nothing written).
+async function bundleMetafile() {
+  const result = await esbuild.build({ ...options, write: false, logLevel: 'silent' });
+  return result.metafile;
+}
+
+// Source link of the banner for lib/legal.js: where .git is missing at run time (installer
+// packages, Docker image), /source shows the same link as the banner (builtLink).
+function writeSourceInfo(dir = outDir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ version: legal.VERSION, link: legal.SOURCE_LINK }) + '\n');
+}
+
 async function run() {
-  copyPdfWorker();
+  // The banner links the checkout's commit (lib/legal.js); local changes are not in it.
+  if (legal.SOURCE_WARNING) console.warn(`build.js: Warnung: ${legal.SOURCE_WARNING}`);
+  copyFromNodeModules();
+  writeSourceInfo();
   if (watch) {
     const ctx = await esbuild.context(options);
     await ctx.watch();
@@ -62,7 +94,11 @@ async function run() {
   }
 }
 
-run().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { COPIED, options, bundleMetafile, writeSourceInfo };
+
+if (require.main === module) {
+  run().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

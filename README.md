@@ -233,10 +233,13 @@ der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
   `/licenses` (Help ▸ Licenses). Software im Docker-Image:
   [docs/INSTALL-DOCKER.md](docs/INSTALL-DOCKER.md#drittsoftware-im-docker-image).
 - Quellcode: Jede Instanz verweist unter `/source` (Help ▸ Source code) auf
-  ihren Quellcode, standardmäßig auf den Tag ihrer Version in diesem
-  Repository. Wer eine veränderte Fassung betreibt oder weitergibt, setzt
-  `SOURCE_URL` auf den eigenen Quellcode (AGPL Abschnitt 13 bzw. 6, siehe
-  `.env.example`).
+  ihren Quellcode in diesem Repository: aus einem Git-Checkout gestartet auf
+  dessen Commit, sonst (Docker-Image, Installer) auf den Tag ihrer Version.
+  Wer eine veränderte Fassung betreibt oder weitergibt, setzt `SOURCE_URL` auf
+  den eigenen Quellcode (AGPL Abschnitt 13 bzw. 6, siehe `.env.example`);
+  läuft ein Checkout mit lokalen Änderungen oder einem Commit, der auf keinem
+  GitHub-Remote liegt, ohne `SOURCE_URL`, warnen Server-Log und ein Hinweis für
+  Admins.
 - Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md), Urheber: [AUTHORS](AUTHORS).
 
 ## Marken

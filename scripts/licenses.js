@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Generates THIRD_PARTY_NOTICES.md from production dependencies listed in
-// package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only.
+// package-lock.json (lockfileVersion 3 "packages" map). Node stdlib only, except
+// the bundle check: it loads <root>/build.js and with it esbuild (dev dependency,
+// installed by npm ci) to list what client/dist contains.
 //
 //   node scripts/licenses.js [--root <dir>] [--out <file>] [--check]
 //
-//   --root   directory with package-lock.json and node_modules (default: repo root)
+//   --root   directory with package-lock.json, node_modules and build.js (default: repo root)
 //   --out    output file (default: <root>/THIRD_PARTY_NOTICES.md)
 //   --check  write nothing, exit 1 if the output file is not up to date
+//
+// Both modes fail when client/dist would ship code from a package that is not a
+// production dependency in the notices, or client/src imports a package that
+// package.json does not list in "dependencies".
 'use strict';
 
 const fs = require('fs');
@@ -151,12 +157,38 @@ ${MIT_BODY}`,
 // License files pdfjs-dist ships next to its wasm modules (only read when notices are generated: wasm/ is stripped).
 const pdfjsWasmLicense = (name) => fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'pdfjs-dist', 'wasm', name), 'utf8').trim();
 
+// MIT text as in rust-lang/rust LICENSE-MIT, dlmalloc-rs and wasm-bindgen LICENSE-MIT (same wording and wrapping).
+const RUST_MIT_BODY = `Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.`;
+
 // Third-party code compiled into the package's build files.
 const EMBEDDED_NOTICES = {
   // https://github.com/mozilla/pdf.js/blob/v6.4.299/external/openjpeg/README.md
   'pdfjs-dist': {
     version: '6.4.299',
-    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); MIT (qcms, Emscripten runtime, musl, core-js)',
+    displayLicense: 'Apache-2.0; BSD-2-Clause (OpenJPEG, pdf.js.openjpeg); BSD-3-Clause and Apache-2.0 (PDFium JBIG2); '
+      + 'MIT (qcms, Brotli decoder, Emscripten runtime, musl, core-js, webpack runtime, Rust standard library, dlmalloc, wasm-bindgen)',
     copyrightFrom: 'build/pdf.mjs',
     notices: [
       {
@@ -253,6 +285,46 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`,
         get text() { return pdfjsWasmLicense('LICENSE_PDFJS_QCMS'); },
       },
       {
+        title: 'Embedded: Rust standard library, dlmalloc, wasm-bindgen (MIT)',
+        note: 'Compiled from Rust into the qcms WebAssembly module (client/dist/pdfjs-wasm/qcms_bg.wasm; its panic '
+          + 'messages name rustc 8bab26f4 and dlmalloc 0.2.13): the Rust standard library, the dlmalloc allocator '
+          + "(Rust port of Doug Lea's public-domain malloc) and the wasm-bindgen runtime. All three are dual-licensed "
+          + 'MIT OR Apache-2.0; used here under MIT. See https://github.com/rust-lang/rust/blob/master/COPYRIGHT, '
+          + 'https://github.com/alexcrichton/dlmalloc-rs and https://github.com/wasm-bindgen/wasm-bindgen',
+        // LICENSE-MIT of rust-lang/rust, alexcrichton/dlmalloc-rs and wasm-bindgen/wasm-bindgen (identical text)
+        text: `Rust standard library: Copyright (c) The Rust Project Contributors
+dlmalloc-rs, wasm-bindgen: Copyright (c) 2014 Alex Crichton
+
+${RUST_MIT_BODY}`,
+      },
+      {
+        title: 'Embedded: Brotli decoder (MIT)',
+        note: "Google's JavaScript Brotli decoder (pdf.js external/brotli/decode.js, BrotliDecode filter), "
+          + 'compiled into the worker client/dist/pdf.worker.min.mjs. '
+          + 'See https://github.com/mozilla/pdf.js/blob/v6.4.299/external/brotli/decode.js and https://github.com/google/brotli/blob/master/LICENSE',
+        // Header of external/brotli/decode.js, then https://github.com/google/brotli/blob/master/LICENSE
+        text: `Copyright 2017 Google Inc. All Rights Reserved.
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.`,
+      },
+      {
         title: 'Embedded: Emscripten runtime (MIT)',
         note: 'JavaScript glue and runtime code generated by Emscripten when compiling the decoders to WebAssembly, '
           + 'in the worker and the wasm modules. Emscripten is dual-licensed MIT / University of Illinois/NCSA; used here under MIT. '
@@ -305,6 +377,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.`,
       },
       {
+        title: 'Embedded: webpack runtime (MIT)',
+        note: 'Module loader code that webpack generates when pdf.js is built, in legacy/build/pdf.mjs (bundled into '
+          + 'client/dist/bundle.js) and in the worker client/dist/pdf.worker.min.mjs. See https://github.com/webpack/webpack/blob/main/LICENSE',
+        // https://github.com/webpack/webpack/blob/main/LICENSE
+        text: `Copyright JS Foundation and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`,
+      },
+      {
         title: 'Embedded: musl libc (MIT)',
         note: 'Parts of the C library bundled with Emscripten, compiled into the WebAssembly modules. '
           + 'See https://git.musl-libc.org/cgit/musl/tree/COPYRIGHT',
@@ -338,11 +436,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`,
 const EXTRA_NOTICES = {
   katex: {
     version: '0.19.1',
-    displayLicense: 'MIT (code); OFL-1.1 (fonts); Apache-2.0 (contrib/mhchem)',
+    displayLicense: 'MIT (code); OFL-1.1 (fonts and SVG glyphs derived from them); Apache-2.0 (contrib/mhchem)',
     notices: [
       {
-        title: 'Fonts: dist/fonts/KaTeX_* (OFL-1.1)',
-        note: 'Copyright lines and Reserved Font Names from the font metadata (name table, license description).',
+        title: 'Fonts: dist/fonts/KaTeX_* and SVG glyphs derived from them (OFL-1.1)',
+        note: 'Copyright lines and Reserved Font Names from the font metadata (name table, license description). '
+          + 'The SVG paths for stretchy symbols, square roots and large delimiters (src/svgGeometry.ts, compiled into '
+          + 'dist/katex.mjs and so into client/dist/bundle.js) are drawn from these fonts and fall under the same license.',
         text: `Copyright (c) 2009-2010, Design Science, Inc. (<www.mathjax.org>)
 Copyright (c) 2014-2018 Khan Academy (<www.khanacademy.org>),
 with Reserved Font Names KaTeX_AMS, KaTeX_Caligraphic, KaTeX_Fraktur,
@@ -381,11 +481,24 @@ limitations under the License.`,
 
 // Parts of packages that Dockerfile and installer/build-release.ps1 delete before shipping,
 // so their own licenses (pdfjs-dist: Adobe cmaps, Foxit/Liberation fonts, ICC profiles, QuickJS in
-// pdf.sandbox* and wasm/) are not reproduced here; wasm/ files in use are copied to client/dist first. test/licenses.test.js checks that both delete
+// pdf.sandbox* and wasm/; katex: AMS METAFONT source src/fonts/xbbold.mf, MathJax-derived files
+// under Apache-2.0, font build tools) are not reproduced here; files in use are bundled or copied to
+// client/dist first (SHIPPED_FROM_STRIPPED). test/licenses.test.js checks that both delete
 // lists match this one, container-image.yml checks the image.
 const STRIPPED = {
+  // client/dist bundles dist/katex.mjs, /katex serves dist/; src/ and the CLI are never used.
+  katex: ['src', 'cli.js'],
   'pdfjs-dist': ['cmaps', 'standard_fonts', 'legacy', 'image_decoders', 'web', 'types', 'wasm', 'iccs', 'build/pdf.sandbox*'],
 };
+
+// Files from STRIPPED parts that still reach the browser through client/dist (bundled by
+// esbuild or copied by build.js). Their third-party code is covered by EMBEDDED_NOTICES;
+// any other file from a stripped part needs the same review before it may be shipped.
+const SHIPPED_FROM_STRIPPED = {
+  'pdfjs-dist': ['legacy/build/pdf.mjs', 'legacy/build/pdf.worker.min.mjs', 'wasm/jbig2.wasm', 'wasm/openjpeg.wasm', 'wasm/qcms_bg.wasm'],
+};
+
+const strippedRe = (glob) => new RegExp('^' + glob.replace(/[.]/g, '\\.').replace(/\*/g, '[^/]*') + '(/|$)');
 
 const NESTED_LICENSE_RE = /^(licen[cs]e|copying|notice)/i;
 
@@ -475,7 +588,7 @@ function licstartCopyright(file) {
 
 // License/notice files below the package root (nested node_modules excluded), minus STRIPPED parts.
 function nestedLicenseFiles(pkgDir, stripped) {
-  const gone = stripped.map((g) => new RegExp('^' + g.replace(/[.]/g, '\\.').replace(/\*/g, '[^/]*') + '(/|$)'));
+  const gone = stripped.map(strippedRe);
   const hits = [];
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -603,6 +716,102 @@ function applyNotices(packages, errors) {
   }
 }
 
+// "node_modules/a/node_modules/@s/b/dist/x.js" -> [lockfile key "node_modules/a/node_modules/@s/b", "dist/x.js"].
+// A node_modules folder below another directory ("client/node_modules/x/y.js") is a package file
+// as well; it has no lockfile entry and so fails the check.
+const PKG_FILE_RE = /^((?:(?!node_modules\/)[^/]+\/)*(?:node_modules\/(?:@[^/]+\/)?[^/]+\/)*node_modules\/(?:@[^/]+\/)?[^/]+)\/(.+)$/;
+const IN_NODE_MODULES_RE = /(^|\/)node_modules\//;
+// Top-level package a file of the project's own code resolves into ("node_modules/@s/b/x.js" -> "@s/b").
+const TOP_PKG_RE = /^node_modules\/((?:@[^/]+\/)?[^/]+)\//;
+
+// What client/dist gets from node_modules: the inputs of the esbuild bundle (metafile) and the
+// files build.js copies as they are. Each must come from a production package that is in the
+// notices; files from STRIPPED parts only after review (SHIPPED_FROM_STRIPPED). Packages the
+// project's own code imports must be in package.json "dependencies", so their version (and
+// license) is not left to the package that happens to pull them in.
+function bundleErrors({ metafile, copied, lockPackages, dependencies, noticeIds, stripped = STRIPPED, shippedFromStripped = SHIPPED_FROM_STRIPPED }) {
+  const errors = [];
+  const files = new Map(Object.keys(metafile.inputs).map((f) => [f, 'bundled']));
+  for (const f of copied) files.set(f, 'copied');
+  const seen = new Set();
+  for (const [raw, how] of files) {
+    const file = raw.replace(/\\/g, '/').replace(/^\(disabled\):/, '');
+    const where = `${file} (${how} into client/dist)`;
+    if (file.startsWith('../') || path.isAbsolute(file) || /^[a-z]:/i.test(file)) {
+      errors.push(`${where}: outside the repository`);
+      continue;
+    }
+    if (!IN_NODE_MODULES_RE.test(file)) {
+      // The project's own code: every package it imports directly must be declared, also when the
+      // import is written as a relative path into node_modules (judged by the resolved path).
+      const undeclared = new Set();
+      for (const imp of (metafile.inputs[raw] && metafile.inputs[raw].imports) || []) {
+        if (imp.external) continue;
+        const spec = imp.original || '';
+        const top = TOP_PKG_RE.exec(String(imp.path || '').replace(/\\/g, '/').replace(/^\(disabled\):/, ''));
+        let pkg = top && top[1];
+        if (!pkg && spec && !/^[./]/.test(spec)) pkg = spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/');
+        if (pkg && !Object.prototype.hasOwnProperty.call(dependencies, pkg)) undeclared.add(pkg);
+      }
+      for (const pkg of undeclared) errors.push(`${file} imports ${pkg}, which package.json does not list in "dependencies"`);
+      continue;
+    }
+    const m = PKG_FILE_RE.exec(file);
+    const meta = m && lockPackages[m[1]];
+    if (!meta) {
+      errors.push(`${where}: no package for it in package-lock.json (run npm ci)`);
+      continue;
+    }
+    const name = meta.name || m[1].slice(m[1].lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const id = `${name}@${meta.version}`;
+    if ((stripped[name] || []).some((g) => strippedRe(g).test(m[2])) && !(shippedFromStripped[name] || []).includes(m[2])) {
+      errors.push(`${id}: ${where} lies in a STRIPPED part whose licenses the notices leave out; `
+        + 'check them, cover them in EMBEDDED_NOTICES and add the file to SHIPPED_FROM_STRIPPED');
+    }
+    if (seen.has(m[1])) continue; // one message per package
+    seen.add(m[1]);
+    if (meta.dev || meta.optional || meta.devOptional) {
+      errors.push(`${id}: ${where}, but a dev or optional package and so not in the notices; `
+        + 'add it to "dependencies" or stop shipping it');
+    } else if (!noticeIds.has(id)) {
+      errors.push(`${id}: ${where}, but not in the notices`);
+    }
+  }
+  for (const [name, list] of Object.entries(shippedFromStripped)) {
+    for (const f of list) {
+      if (!files.has(`node_modules/${name}/${f}`)) errors.push(`SHIPPED_FROM_STRIPPED['${name}']: ${f} is not shipped any more, remove the entry`);
+    }
+  }
+  return errors;
+}
+
+// Builds the client bundle in memory with build.js' options and checks it (bundleErrors).
+async function checkBundle(root, packages, errors) {
+  let metafile;
+  let copied;
+  try {
+    const build = require(path.join(root, 'build.js'));
+    metafile = await build.bundleMetafile();
+    copied = build.COPIED.map((c) => c.from);
+  } catch (e) {
+    // esbuild's BuildFailure lists the real causes (file:line: text); a missing esbuild is MODULE_NOT_FOUND.
+    const causes = Array.isArray(e.errors) && e.errors.length
+      ? e.errors.map((x) => `${x.location ? `${x.location.file}:${x.location.line}:${x.location.column}: ` : ''}${x.text}`)
+      : [String(e.message).split('\n')[0]];
+    const hint = e.code === 'MODULE_NOT_FOUND' ? ' (npm ci installs esbuild)' : '';
+    errors.push(`client bundle: cannot build it to check its packages${hint}: ${causes.join('; ')}`);
+    return;
+  }
+  const readJson = (f) => JSON.parse(fs.readFileSync(path.join(root, f), 'utf8'));
+  errors.push(...bundleErrors({
+    metafile,
+    copied,
+    lockPackages: readJson('package-lock.json').packages || {},
+    dependencies: readJson('package.json').dependencies || {},
+    noticeIds: new Set(packages.map((p) => `${p.name}@${p.version}`)),
+  }));
+}
+
 function render(packages) {
   const lines = [];
   const block = (text) => lines.push('```', text.trimEnd(), '```', '');
@@ -615,10 +824,16 @@ function render(packages) {
   lines.push(`Scope: the npm packages the app ships (${packages.length} packages), i.e. the production`);
   lines.push('dependencies from package-lock.json without dev and optional packages, as left by');
   lines.push('`npm prune --omit=dev --omit=optional`. This includes the code bundled into client/dist.');
-  for (const [name, parts] of Object.entries(STRIPPED)) {
-    lines.push(`Not shipped and therefore not covered (deleted by the Docker and installer builds): from ${name}`);
-    lines.push(`${parts.map((x) => `\`${x}\``).join(', ')}.`);
-  }
+  lines.push('');
+  lines.push('The Docker and installer builds delete these parts of packages from node_modules; their');
+  lines.push('own licenses are therefore not reproduced here:');
+  const code = (list) => list.map((x) => `\`${x}\``).join(', ');
+  for (const [name, parts] of Object.entries(STRIPPED)) lines.push(`- ${name}: ${code(parts)}`);
+  lines.push('Exception: the following files from these parts reach client/dist before the deletion');
+  lines.push('(bundled into client/dist/bundle.js or copied next to it). The third-party code they contain');
+  lines.push('is covered by the "Embedded:" notices of their package below:');
+  for (const [name, files] of Object.entries(SHIPPED_FROM_STRIPPED)) lines.push(`- ${name}: ${code(files)}`);
+  lines.push('');
   lines.push('Generated by scripts/licenses.js, do not edit by hand.');
   lines.push('');
   lines.push('Not covered here:');
@@ -657,7 +872,7 @@ function render(packages) {
   return lines.join('\n');
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const errors = [];
   const packages = collect(opts.root, errors);
@@ -665,6 +880,7 @@ function main() {
   for (const p of packages) {
     if (!isAllowedLicense(p.license)) errors.push(`${p.name}@${p.version}: license not on allow-list: ${p.license}`);
   }
+  await checkBundle(opts.root, packages, errors);
   if (errors.length > 0) {
     console.error('Cannot generate the notices:');
     for (const e of errors) console.error(`  ${e}`);
@@ -689,6 +905,11 @@ function main() {
   console.log(`Packages: ${packages.length}`);
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
 
-module.exports = { STRIPPED };
+module.exports = { STRIPPED, SHIPPED_FROM_STRIPPED, bundleErrors, checkBundle, licstartCopyright };

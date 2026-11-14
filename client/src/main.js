@@ -1052,6 +1052,7 @@ async function checkServerUpdate() {
   document.getElementById('update-banner')?.remove(); // re-run from the admin page
   const u = await adminApi.updateStatus().catch(() => null);
   if (!u) return;
+  showSourceWarning(u.sourceWarning);
   const st = u.status;
   const running = st && st.state === 'running';
   if (!u.available && !running) return;
@@ -1134,9 +1135,33 @@ async function checkServerUpdate() {
     }
   }
   bar.appendChild(close);
-  document.body.appendChild(bar);
+  adminNotices().appendChild(bar);
 }
 if (currentUser.isAdmin) checkServerUpdate();
+
+// Admin notices at the bottom centre, stacked instead of on top of each other (update banner,
+// source warning). The column stays in the DOM when empty; it lets clicks through.
+function adminNotices() {
+  let box = document.getElementById('admin-notices');
+  if (!box) {
+    box = Object.assign(document.createElement('div'), { id: 'admin-notices' });
+    document.body.appendChild(box);
+  }
+  return box;
+}
+
+// Admins: the server runs a git checkout with local changes but links /source to its commit
+// (no SOURCE_URL, AGPL-3.0 §13). Text from the server, shown until closed for this page load.
+function showSourceWarning(text) {
+  document.getElementById('source-warning')?.remove();
+  if (!text) return;
+  const bar = Object.assign(document.createElement('div'), { id: 'source-warning', role: 'alert' });
+  bar.appendChild(Object.assign(document.createElement('div'), { textContent: `Quellcode-Hinweis: ${text}` }));
+  const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
+  close.addEventListener('click', () => bar.remove());
+  bar.appendChild(close);
+  adminNotices().prepend(bar); // above the update banner
+}
 
 // Desktop app: the local server asks GitHub for a newer release.
 async function checkDesktopUpdate() {

@@ -911,4 +911,5 @@ process.on('unhandledRejection', (e) => console.error('[desktop] unbehandelte Pr
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`LaTeX IDE Desktop: http://localhost:${PORT}  (Server: ${REMOTE}, Daten: ${DATA})`);
+  if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
 });
