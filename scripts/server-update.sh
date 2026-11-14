@@ -97,7 +97,8 @@ status running
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
 tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$BACKUP_SRC/desktop" \
-  --exclude="$BACKUP_SRC/.update-request" --exclude="$BACKUP_SRC/.update-status" --exclude='*/.latex-ide-out' \
+  --exclude="$BACKUP_SRC/.update-request" --exclude="$BACKUP_SRC/.update-status" --exclude="$BACKUP_SRC/initial-admin-password.txt" \
+  --exclude='*/.latex-ide-out' \
   -C "$SRC_PARENT" "$BACKUP_SRC" 2>>"$RUNLOG" || [ $? -eq 1 ]  # exit 1 = file changed while reading (server keeps writing)
 ls -1t "$BACKUP_DIR"/data-*.tar.gz | tail -n +4 | while IFS= read -r f; do rm -f -- "$f"; done
 say "Backup fertig"

@@ -23,11 +23,11 @@ const tmp = () => {
 // --- 1. If-Match ---
 
 test('Server: PUT /api/collab/raw prüft If-Match, ohne Header wie bisher', async () => {
-  const { startServer, client } = require('./_server');
+  const { startServer, client, ADMIN_PASSWORD } = require('./_server');
   const s = await startServer();
   try {
     const admin = client(s.base);
-    await admin.login('admin', 'bitte-sofort-aendern');
+    await admin.login('admin', ADMIN_PASSWORD);
     await admin.call('POST', '/api/projects/create', { name: 'Thesis' });
     const url = (p) => `${s.base}/api/collab/raw?project=Thesis&path=${p}`;
     const put = (p, body, ifMatch) =>

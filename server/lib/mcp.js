@@ -408,6 +408,7 @@ function createMcp(ctx) {
     const h = req.headers.authorization || '';
     const t = auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '');
     if (!t) return res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
+    if (ctx.mustChangePassword && ctx.mustChangePassword(t.user)) return res.status(403).json({ error: 'Bitte zuerst das Einmal-Passwort des Kontos ändern.' });
     const body = req.body;
     if (Array.isArray(body) ? !body.length : !body || typeof body !== 'object') return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Ungültige Anfrage.' } });
     const replies = (await Promise.all((Array.isArray(body) ? body : [body]).map((m) => rpc(t, m)))).filter(Boolean);

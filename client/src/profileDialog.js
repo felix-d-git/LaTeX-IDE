@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 ﻿import { adminApi, authApi } from './api.js';
 import { copyText } from './clipboard.js';
+import { createPasswordForm } from './passwordForm.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -29,23 +30,12 @@ export function setupProfileDialog({ currentUser, onLogout, onShowAdmin }) {
 
   function renderPasswordSection() {
     const box = el('div');
-    const current = pw('Aktuelles Passwort', 'current-password');
-    const next = pw('Neues Passwort (mind. 8 Zeichen)', 'new-password');
-    const repeat = pw('Neues Passwort wiederholen', 'new-password');
-    const msg = note('');
-    const btn = el('button', 'primary', 'Passwort ändern');
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (next.value !== repeat.value) return (msg.textContent = 'Neue Passwörter stimmen nicht überein.');
-      try {
-        await authApi.changePassword(current.value, next.value);
-        current.value = next.value = repeat.value = '';
-        msg.textContent = 'Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.';
-      } catch (e) {
-        msg.textContent = e.message;
-      }
+    const form = createPasswordForm({
+      inputClass: 'settings-pw-input',
+      noteClass: 'settings-inert-note',
+      onChanged: (msg) => (msg.textContent = 'Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.'),
     });
-    box.append(el('h4', null, 'Passwort ändern'), current, next, repeat, btn, msg);
+    box.append(el('h4', null, 'Passwort ändern'), ...form.nodes);
     return box;
   }
 

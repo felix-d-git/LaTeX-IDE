@@ -81,6 +81,7 @@ if (joinToken) {
     authView.show();
     return;
   }
+  if (authView.showPasswordChange(currentUser)) return;
   if (authView.showDesktopConnect(currentUser)) return;
   authView.hide();
   await startApp(currentUser);
