@@ -56,6 +56,16 @@ test('Kompilieren: Hauptdatei im Unterordner -> PDF gefunden, \\input relativ da
   assert.deepStrictEqual(r.errors.map((e) => [e.file, e.line]), [['thesis/kapitel.tex', 2]]);
 });
 
+// -norc dropped latexmk's makeglossaries rule, the glossary stayed empty (#139).
+test('Kompilieren: glossaries -> main.gls mit Eintrag', { skip: !hasTex && 'latexmk fehlt' }, async () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'main.tex'), '\\documentclass{article}\n\\usepackage[acronym]{glossaries}\n\\makeglossaries\n\\newglossaryentry{tex}{name=TeX,description={Satzsystem}}\n\\newacronym{ide}{IDE}{Entwicklungsumgebung}\n\\begin{document}\n\\gls{tex}, \\gls{ide}.\n\\printglossaries\n\\end{document}\n');
+  const r = await compile(root, 'main.tex', {}, '.latex-ide-out', 120000);
+  assert.ok(r.success, r.log.slice(-2000));
+  assert.match(fs.readFileSync(path.join(root, '.latex-ide-out', 'main.gls'), 'utf8'), /glossentry{tex}/);
+  assert.match(fs.readFileSync(path.join(root, '.latex-ide-out', 'main.acr'), 'utf8'), /glossentry{ide}/);
+});
+
 // openin_any=p kept luaotfload from its own files in texmf-dist: every lualatex run aborted (#119).
 test('Kompilieren mit LuaLaTeX: fontspec und \\directlua -> PDF (#119)', { skip: !hasLua && 'latexmk/lualatex fehlt', timeout: 900000 }, async () => {
   const root = tmp();

@@ -49,7 +49,8 @@ const BACKEND = process.env.TEX_BACKEND === 'tectonic' ? 'tectonic' : 'latexmk';
 // latexmk runs latexmkrc/.latexmkrc from the project folder (plus system/user rc files) as
 // Perl code. Project files are untrusted (collaborators, zip import, TeX's own \openout),
 // so never load them (#111). Opt-in for single-user setups only; the desktop app ignores it.
-const RC_ARGS = process.env.LATEXMK_ALLOW_RC === '1' ? [] : ['-norc'];
+// The app's own rc (glossaries, #139) is part of the program, not the project, so it always loads.
+const RC_ARGS = [...(process.env.LATEXMK_ALLOW_RC === '1' ? [] : ['-norc']), '-r', path.join(__dirname, 'latexmkrc')];
 
 // LuaLaTeX (#119): openin_any=p (see compile()) also blocks Lua's io.open since TeX Live
 // 2023, so luaotfload cannot read texmf-dist and every run aborts; older versions check
