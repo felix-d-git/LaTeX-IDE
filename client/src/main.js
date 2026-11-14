@@ -81,6 +81,7 @@ if (joinToken) {
     authView.show();
     return;
   }
+  if (authView.showPasswordChange(currentUser)) return;
   if (authView.showDesktopConnect(currentUser)) return;
   authView.hide();
   await startApp(currentUser);
@@ -588,7 +589,12 @@ function refreshTreeHighlight() {
 }
 
 async function setMainFile(path) {
-  await api.setMainFile(path);
+  try {
+    await api.setMainFile(path);
+  } catch (e) {
+    alert(`Hauptdatei nicht geändert: ${e.message}`);
+    return;
+  }
   mainFile = path;
   refreshTreeHighlight();
   refreshVisualContext();

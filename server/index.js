@@ -25,7 +25,7 @@ const { WebSocketServer } = require('ws');
 const { ZipArchive } = require('archiver');
 
 const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
-const { compile, findMainCandidate, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
+const { compile, findMainCandidate, mainPathError, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
 const { searchProject, collectRefs } = require('./lib/search');
@@ -46,17 +46,8 @@ const authMw = require('./lib/authMiddleware');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
 const legal = require('./lib/legal');
-
-const RAW_MIME = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.pdf': 'application/pdf',
-};
+const { rawMime, setUserContentHeaders } = require('./lib/userContent');
+const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 
 // compileMode 'individual' (default): every user compiles into their own
 // subfolder and only sees their own PDF; 'group': one shared output for all.
@@ -88,6 +79,9 @@ function activeMainPdfAbs(root, userId) {
 
 const PORT = process.env.PORT || 3077;
 const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..'), 'projects');
+// Files the host admin has to see (update request, one-time admin password). With the vault DATA_DIR is
+// tmpfs in the container -> VAULT_DIR, which the host sees (vault.js ignores files there that aren't entries).
+const HOST_DIR = process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..');
 
 const app = express();
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
@@ -100,12 +94,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Latex-IDE', '1');
   next();
 });
+// CSP, X-Frame-Options, nosniff, Referrer-Policy on every answer (#115); CSP_REPORT_ONLY=1 = only report.
+app.use(securityHeaders());
 // Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
 }
+// CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
+app.post(CSP_REPORT_PATH, ...cspReportHandler());
 app.use(express.json({ limit: '50mb' }));
 // Express 5 leaves req.body undefined without a body; the routes destructure it.
 app.use((req, res, next) => { req.body ??= {}; next(); });
@@ -476,7 +474,8 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = authMw.currentUser(req);
   if (!user) return res.status(401).json({ error: 'Nicht angemeldet.' });
-  res.json({ user: { ...auth.toPublicUser(user), localMode: authMw.LOCAL_MODE }, features: { pandoc: exporter.pandocAvailable() } });
+  const flags = { localMode: authMw.LOCAL_MODE, mustChangePassword: authMw.mustChangePassword(user) };
+  res.json({ user: { ...auth.toPublicUser(user), ...flags }, features: { pandoc: exporter.pandocAvailable() } });
 });
 
 app.post('/api/auth/forgot-password', notLocal, limitMail, ah(async (req, res) => {
@@ -506,6 +505,7 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
     // Clicking the mailed link proves the mailbox, so this also verifies the address.
     user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
+    initialPasswordDone();
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -608,9 +608,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
 // scripts/server-update.sh on the host; "button" only drops a request file it picks up.
 const UPDATE_MODE = process.env.UPDATE_MODE || 'notify';
 const { UPDATE_REPO } = legal; // env UPDATE_REPO, Standard felix-d-git/LaTeX-IDE
-// Mit Vault ist DATA_DIR tmpfs im Container → Marker in VAULT_DIR, das der Host sieht
-// (vault.js ignoriert dort Dateien, die kein Eintrag sind).
-const UPDATE_REQUEST = path.join(process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..'), '.update-request');
+const UPDATE_REQUEST = path.join(HOST_DIR, '.update-request');
 const APP_VERSION = require('../package.json').version;
 // INSTALL_KIND=windows (set by the Windows installer): no cron/server-update.sh, update = run the new Setup.
 const INSTALL_KIND = process.env.INSTALL_KIND || '';
@@ -669,7 +667,7 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved })));
+app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -720,6 +718,7 @@ app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    initialPasswordDone();
     // Every other session is now invalid; keep this one.
     if (req.session && req.session.userId) req.session.loginAt = Date.now();
     res.json({ ok: true });
@@ -1440,6 +1439,7 @@ app.get('/api/projects/download/zip', (req, res) => {
   }
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', 'attachment; filename="projekte.zip"');
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1513,6 +1513,7 @@ app.get('/api/projects/:name/download/zip', (req, res) => {
   if (!fs.existsSync(root)) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
   collab.flushRoot(root);
   res.attachment(`${req.params.name}.zip`); // RFC 5987 filename*: names outside Latin-1 no longer make setHeader throw
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -1536,6 +1537,7 @@ app.get('/api/projects/:name/download/pdf', (req, res) => {
   const pdfAbs = path.join(root, outRelFor(root, req.user.id), pdfNameFor(main));
   if (!fs.existsSync(pdfAbs)) return res.status(404).json({ error: 'Noch kein PDF für dieses Projekt kompiliert.' });
   res.attachment(`${req.params.name}.pdf`);
+  setUserContentHeaders(res, 'application/pdf');
   streamFile(res, pdfAbs);
 });
 
@@ -1708,12 +1710,24 @@ app.post('/api/tree/upload', (req, res) => {
 app.post('/api/main-file', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
+  // Empty = back to auto-detection. Otherwise an existing .tex file whose name latexmk
+  // can't misread as an option or shell command (#112); compile() checks it again.
+  const rel = typeof req.body.path === 'string' ? req.body.path : '';
+  if (rel) {
+    const bad = mainPathError(rel);
+    if (bad) return res.status(400).json({ error: bad });
+    try {
+      if (!fs.statSync(safeResolve(root, rel)).isFile()) throw new Error();
+    } catch {
+      return res.status(400).json({ error: 'Datei nicht gefunden.' });
+    }
+  }
   const prev = state.getMainFile(root);
-  state.setMainFile(root, req.body.path);
+  state.setMainFile(root, rel || null);
   // main.tex and thesis/main.tex both write main.pdf: drop the other file's
   // output so download/SyncTeX don't serve it until the next compile. Queued
   // behind running compiles so it doesn't pull the directory from under latexmk.
-  if (prev && req.body.path && prev !== req.body.path && pdfNameFor(prev) === pdfNameFor(req.body.path)) {
+  if (prev && rel && prev !== rel && pdfNameFor(prev) === pdfNameFor(rel)) {
     compileChain = compileChain.then(() => fs.rmSync(path.join(root, OUT_DIR), { recursive: true, force: true })).catch(() => {});
   }
   res.json({ ok: true });
@@ -1841,6 +1855,7 @@ app.get('/api/pdf', (req, res) => {
   try {
     const abs = safeResolve(root, req.query.path);
     res.setHeader('Content-Type', 'application/pdf');
+    setUserContentHeaders(res, 'application/pdf'); // any project file, always typed as PDF; nosniff as an extra safeguard
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1850,14 +1865,16 @@ app.get('/api/pdf', (req, res) => {
 
 // Raw byte stream for previewing arbitrary project files (images, reference
 // PDFs) in a tab - unlike /api/file (base64 JSON), this is a direct stream
-// so <img>/<iframe> can point straight at the URL.
+// so <img>/<iframe> can point straight at the URL. Sandboxed (#113): opened
+// directly, an uploaded SVG must not run script in the app's origin.
 app.get('/api/raw', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
     const abs = safeResolve(root, req.query.path);
-    const ext = path.extname(abs).toLowerCase();
-    res.setHeader('Content-Type', RAW_MIME[ext] || 'application/octet-stream');
+    const type = rawMime(abs);
+    res.setHeader('Content-Type', type);
+    setUserContentHeaders(res, type);
     res.setHeader('Cache-Control', 'no-store');
     streamFile(res, abs);
   } catch (e) {
@@ -1879,6 +1896,7 @@ app.get('/api/export', ah(async (req, res) => {
     const name = `${path.basename(root) || 'dokument'}.${fmt.ext}`;
     res.setHeader('Content-Type', fmt.mime);
     res.setHeader('Content-Disposition', `attachment; filename="export.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    setUserContentHeaders(res, fmt.mime); // HTML export = the user's document: never as a page of the app
     res.send(data);
   } catch (e) {
     res.status(e.code === 'ENOENT' ? 501 : 400).json({ error: e.message.slice(0, 500) });
@@ -1891,6 +1909,7 @@ app.get('/api/download/zip', (req, res) => {
   const name = path.basename(root) || 'project';
   collab.flushRoot(root);
   res.attachment(`${name}.zip`);
+  setUserContentHeaders(res, 'application/zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err) => res.status(500).end(err.message));
   archive.pipe(res);
@@ -2253,33 +2272,92 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Without ADMIN_PASSWORD the first admin gets a random one-time password. It only goes into this file
+// (0600, for whoever runs the host), never into the log (docker logs keep it); with the vault it lies in
+// VAULT_DIR next to the encrypted data, because DATA_DIR is tmpfs inside the container there.
+const INITIAL_PASSWORD_FILE = path.join(HOST_DIR, 'initial-admin-password.txt');
+// The former hard-coded fallback and the old .env.example value are public -> treated as "not set".
+const { PUBLIC_PASSWORDS } = auth;
+
+function writeInitialPassword() {
+  const password = crypto.randomBytes(12).toString('base64url');
+  fs.mkdirSync(HOST_DIR, { recursive: true });
+  fs.rmSync(INITIAL_PASSWORD_FILE, { force: true }); // mode only applies to a newly created file
+  fs.writeFileSync(INITIAL_PASSWORD_FILE, password + '\n', { mode: 0o600 });
+  return password;
+}
+
+function initialPasswordHint(user) {
+  console.warn(
+    `[auth] Admin "${user.username}" (${user.email}) hat ein zufälliges Einmal-Passwort, es steht in ${INITIAL_PASSWORD_FILE} ` +
+      '(Docker: im eingebundenen Datenordner auf dem Host). Bis es nach dem ersten Login geändert ist, ist das Konto gesperrt; ' +
+      'danach wird die Datei gelöscht. Eigenes Passwort stattdessen: ADMIN_PASSWORD in .env (wirkt nur beim allerersten Start).'
+  );
+}
+
+// Called after every password change: once no account has to change its one-time password, the file goes.
+function initialPasswordDone() {
+  if (auth.users.some((u) => u.mustChangePassword)) return;
+  try {
+    fs.rmSync(INITIAL_PASSWORD_FILE, { force: true });
+  } catch (e) {
+    console.error(`[auth] ${INITIAL_PASSWORD_FILE} nicht löschbar, bitte von Hand entfernen:`, e.message);
+  }
+}
+
+// Later starts: an admin still on a public password (installs from before #116 that never changed the
+// fallback) gets a one-time password instead. A pending one-time password is pointed to again, or
+// replaced if its file is gone (otherwise the account could never be unlocked).
+async function checkInitialPassword() {
+  if (authMw.LOCAL_MODE) return;
+  for (const u of auth.users) {
+    if (!u.isAdmin || u.passwordChangedAt || u.mustChangePassword) continue; // only never-changed admins
+    for (const pw of PUBLIC_PASSWORDS) {
+      if (!(await auth.verifyPassword(u, pw))) continue;
+      const revoked = await auth.resetInitialPassword(u, writeInitialPassword());
+      console.warn(
+        `[auth] Admin "${u.username}" hatte noch ein öffentlich bekanntes Passwort - durch ein Einmal-Passwort ersetzt, ` +
+          `alle Sitzungen beendet und ${revoked} Desktop-/MCP-Token widerrufen.`
+      );
+      break;
+    }
+  }
+  const pending = auth.users.find((u) => u.mustChangePassword);
+  if (!pending) return initialPasswordDone();
+  if (!fs.existsSync(INITIAL_PASSWORD_FILE)) await auth.resetInitialPassword(pending, writeInitialPassword());
+  initialPasswordHint(pending);
+}
+
 // Creates the admin account on first boot (no users.json yet) from
 // ADMIN_EMAIL/ADMIN_PASSWORD, and migrates the old single-user
 // activeRoot/recentRoots from workspace.json onto that admin so they keep
 // their previously open project instead of starting from an empty dashboard.
 async function bootstrapAdmin() {
-  if (auth.users.length > 0) return;
+  if (auth.users.length > 0) return checkInitialPassword();
   const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
+  let password = process.env.ADMIN_PASSWORD;
+  if (password && PUBLIC_PASSWORDS.has(password)) {
+    console.warn('[auth] ADMIN_PASSWORD ist ein öffentlich bekannter Beispielwert und wird ignoriert.');
+    password = '';
+  }
   if (authMw.LOCAL_MODE && !password) {
     // Lokal meldet sich niemand an → zufälliges Passwort statt des bekannten Fallbacks.
     await auth.createUser({ email: 'lokal@local.host', password: crypto.randomBytes(24).toString('hex'), username: 'lokal', isAdmin: true });
     return;
   }
-  if (!email || !password) {
-    console.warn(
-      '[auth] ADMIN_EMAIL/ADMIN_PASSWORD nicht gesetzt - lege Fallback-Admin admin@local.host / bitte-sofort-aendern an. ' +
-        'UNBEDINGT direkt nach dem ersten Login das Passwort im Profil ändern. ADMIN_* wirken nur beim allerersten Start (leerer Datenordner).'
-    );
-  }
+  const generated = !password;
+  if (generated) password = writeInitialPassword();
+  if (!email) console.warn('[auth] ADMIN_EMAIL nicht gesetzt - der Admin bekommt die Adresse admin@local.host.');
   const adminUser = await auth.createUser({
     email: email || 'admin@local.host',
-    password: password || 'bitte-sofort-aendern',
+    password,
     username: process.env.ADMIN_USERNAME || 'admin',
     isAdmin: true,
+    mustChangePassword: generated,
   });
   state.migrateLegacyGlobalState(adminUser.id);
   console.log(`[auth] Admin-Konto angelegt: ${adminUser.email}`);
+  if (generated) initialPasswordHint(adminUser);
 }
 
 // Re-arm a watcher for every user's project that was still open before a

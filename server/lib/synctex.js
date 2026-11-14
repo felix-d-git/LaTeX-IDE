@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const { execFile } = require('child_process');
+const { childEnv } = require('./childEnv');
 const fs = require('fs');
 const path = require('path');
 
@@ -24,7 +25,7 @@ function forward(pdfAbs, texAbs, line, cwd) {
     execFile(
       'synctex',
       ['view', '-i', `${line}:0:${texAbs}`, '-o', pdfAbs],
-      { cwd },
+      { cwd, env: childEnv() },
       (err, stdout) => {
         if (err) return reject(err);
         const parsed = parseBlocks(stdout);
@@ -51,7 +52,7 @@ function inverse(pdfAbs, page, x, y, cwd) {
     execFile(
       'synctex',
       ['edit', '-o', `${page}:${x}:${y}:${pdfAbs}`],
-      { cwd },
+      { cwd, env: childEnv() },
       (err, stdout) => {
         if (err) return reject(err);
         // Alle Treffer (je Block einer), der erste liegt am nächsten am Klick.

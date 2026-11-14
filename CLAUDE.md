@@ -26,7 +26,7 @@
 
 ## Tests gegen den laufenden Server
 - Projekt gilt pro Fenster (`X-Project-Id` / `?pid=`, ws `subscribe`); „zuletzt geöffnet" liegt pro Benutzer in `workspace.json` und gilt nur für Clients ohne pid. Läuft eine echte Browsersitzung, trotzdem nie auf 3077 Projekte öffnen oder kompilieren → Wegwerf-Instanz nutzen.
-- Stattdessen Wegwerf-Instanz: `client/`, `server/`, `package.json`, `build.js` nach `%LOCALAPPDATA%\Temp\latex-wegwerf\` kopieren, `node_modules` als Junction, pro Lauf frisches `DATA_DIR`, `PORT=3099`. Ohne `.env` greift der Fallback-Admin `admin` / `bitte-sofort-aendern`. Tests: `t_server.js` (API/Yjs), `t_desktop.js` (Desktop-Proxy), `t_browser.js` (Playwright, 2 Nutzer, Offline-Konflikt).
+- Stattdessen Wegwerf-Instanz: `client/`, `server/`, `package.json`, `build.js` nach `%LOCALAPPDATA%\Temp\latex-wegwerf\` kopieren, `node_modules` als Junction, pro Lauf frisches `DATA_DIR`, `PORT=3099`, Zugang per `ADMIN_PASSWORD=<Testpasswort>` in der Umgebung (Login `admin`). Ohne `ADMIN_PASSWORD` gibt es nur ein Einmal-Passwort in `DATA_DIR/initial-admin-password.txt`, und bis zur Änderung antwortet die API mit 403. `npm test` setzt das selbst (`test/_server.js`). Tests: `t_server.js` (API/Yjs), `t_desktop.js` (Desktop-Proxy), `t_browser.js` (Playwright, 2 Nutzer, Offline-Konflikt).
 - Login-Limiter (10/15 min pro IP) schlägt bei wiederholten Testläufen zu → Wegwerf-Server neu starten.
 - Aufräumen: **zuerst** die Junction per `cmd /c rmdir …\node_modules` entfernen, dann den Ordner löschen, sonst geht das echte `node_modules` mit.
 - Playwright-Output (`.playwright-cli/`) nur im Temp-Ordner erzeugen (dort `cd`, dann `playwright-cli`).

@@ -1,14 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const { childEnv } = require('./childEnv');
+const { detectProjectEngine } = require('./detectEngine');
 
 const OUT_DIR = '.latex-ide-out';
 
+// The main file name reaches latexmk as an argument and from there a shell command line
+// (pdflatex … "<name>"): "-x=…" is read as a latexmk option, `…` runs as a command
+// inside the double quotes (#112). $ % \ ~ are refused by latexmk itself, " by treeOps.
+const UNSAFE_MAIN_CHARS = /[\x00-\x1f\x7f`$%\\~"]/;
+
+// null = usable as main file, otherwise the reason (German, shown in the UI).
+function mainPathError(relPath) {
+  const s = String(relPath || '').split(path.sep).join('/');
+  if (!/\.tex$/i.test(s)) return 'Die Hauptdatei muss eine .tex-Datei sein.';
+  if (path.isAbsolute(s) || s.split('/').includes('..')) return 'Die Hauptdatei muss im Projekt liegen.';
+  if (UNSAFE_MAIN_CHARS.test(s)) return 'Der Pfad der Hauptdatei enthält ein nicht erlaubtes Zeichen (` $ % \\ ~ " oder Steuerzeichen). Bitte umbenennen.';
+  if (s.startsWith('&') || s.split('/').some((seg) => seg.startsWith('-'))) return 'Datei- und Ordnernamen im Pfad der Hauptdatei dürfen nicht mit - beginnen (die Datei nicht mit &). Bitte umbenennen.';
+  return null;
+}
+
 function findMainCandidate(root) {
   // Prefer main.tex, else first .tex at project root containing \documentclass.
-  const rootFiles = fs.readdirSync(root).filter((f) => f.toLowerCase().endsWith('.tex'));
+  const rootFiles = fs.readdirSync(root).filter((f) => f.toLowerCase().endsWith('.tex') && !mainPathError(f));
   if (rootFiles.includes('main.tex')) return 'main.tex';
   for (const f of rootFiles) {
     const content = fs.readFileSync(path.join(root, f), 'utf8');
@@ -28,14 +46,43 @@ const ENGINE_FLAG = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualate
 // the PDF<->source jump; SwiftLaTeX would be a browser-side (WASM) swap instead.
 const BACKEND = process.env.TEX_BACKEND === 'tectonic' ? 'tectonic' : 'latexmk';
 
+// latexmk runs latexmkrc/.latexmkrc from the project folder (plus system/user rc files) as
+// Perl code. Project files are untrusted (collaborators, zip import, TeX's own \openout),
+// so never load them (#111). Opt-in for single-user setups only; the desktop app ignores it.
+const RC_ARGS = process.env.LATEXMK_ALLOW_RC === '1' ? [] : ['-norc'];
+
+// LuaLaTeX (#119): openin_any=p (see compile()) also blocks Lua's io.open since TeX Live
+// 2023, so luaotfload cannot read texmf-dist and every run aborts; older versions check
+// nothing in Lua at all. luaSandbox.lua runs first (lualatex --lua=…) and applies the same
+// rule to everything Lua can open, read-only access to the TeX/font folders included.
+const LUA_SANDBOX = path.join(__dirname, 'luaSandbox.lua');
+
+// latexmk runs the engine command through the shell (sh / cmd.exe) and replaces %S, %O … in
+// it (%% = %). null: the path cannot be passed safely (cmd.exe expands %VAR% even in quotes).
+function luaLatexCommand(file = LUA_SANDBOX, win = isWin) {
+  let p = String(file);
+  if (/[\x00-\x1f\x7f]/.test(p)) return null;
+  if (win) {
+    p = p.replace(/\\/g, '/'); // LuaTeX takes forward slashes on Windows too
+    if (/["%]/.test(p)) return null;
+    p = `"${p}"`;
+  } else {
+    p = `'${p.replace(/'/g, `'\\''`)}'`.replace(/%/g, '%%');
+  }
+  return `lualatex --lua=${p} %O %S`;
+}
+
 function texCommand(mainRelPath, settings, outDir) {
   if (BACKEND === 'tectonic') {
     return ['tectonic', ['-X', 'compile', '--untrusted', '--synctex', '--keep-logs', '--keep-intermediates', '--outdir', outDir, mainRelPath]];
   }
+  const lua = settings.compiler === 'lualatex';
   return [
     'latexmk',
     [
+      ...RC_ARGS, // first: latexmk reads the rc files before it looks at the other options
       ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex,
+      ...(lua ? [`-lualatex=${luaLatexCommand()}`] : []),
       '-g', // force a real rerun even if latexmk thinks nothing changed since the last (possibly failed) run
       '-interaction=nonstopmode', // skip past recoverable errors instead of blocking on stdin
       // Default: keep producing a best-effort PDF past errors.
@@ -80,18 +127,100 @@ function pdfNameFor(mainRelPath) {
   return String(mainRelPath).split(/[\\/]/).pop().replace(/\.tex$/i, '.pdf');
 }
 
-// outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
-function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs = COMPILE_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    const outDir = path.join(root, outRel);
-    fs.mkdirSync(outDir, { recursive: true });
+// luaotfload needs a writable cache. The one in TEXMFVAR is shared by all projects, so the
+// sandbox keeps it read-only (a document could otherwise plant Lua code that other
+// projects' runs load); each output folder gets its own instead.
+const FONT_CACHE_DIR = 'texmf-cache';
+const FONT_NAMES_DIR = ['luatex-cache', 'generic', 'names'];
+const FONT_NAMES_FILES = ['luaotfload-names.lua.gz', 'luaotfload-names.lua', 'luaotfload-names.luc.gz', 'luaotfload-names.luc'];
 
+// Cache folders of the TeX installation ($TEXMFSYSVAR, $TEXMFVAR …), asked once.
+let fontCacheDirs = null;
+function sharedFontCacheDirs() {
+  if (!fontCacheDirs) {
+    fontCacheDirs = new Promise((resolve) => {
+      execFile('kpsewhich', ['-var-value=TEXMFCACHE'], { env: childEnv(), cwd: os.tmpdir(), timeout: 20000, windowsHide: true }, (err, stdout) => {
+        resolve(err ? [] : String(stdout).trim().split(path.delimiter).filter((d) => d && path.isAbsolute(d)));
+      });
+    });
+  }
+  return fontCacheDirs;
+}
+
+// The font name database (\setmainfont{Name}) lives only in luaotfload's writable cache.
+// Building it scans every TeX and system font (7 s with BasicTeX on a fast Mac, far longer
+// with texlive-full on a Pi), so an output folder starts with a copy of one built
+// beforehand (luaotfload-tool -u) if the installation has one. Never overwrites, never
+// follows a planted file (COPYFILE_EXCL).
+async function seedFontNames(outDir, dirs) {
+  const dest = path.join(outDir, FONT_CACHE_DIR, ...FONT_NAMES_DIR);
+  if (FONT_NAMES_FILES.some((f) => fs.existsSync(path.join(dest, f)))) return false;
+  for (const dir of dirs || (await sharedFontCacheDirs())) {
+    const src = path.join(dir, ...FONT_NAMES_DIR);
+    const found = FONT_NAMES_FILES.filter((f) => fs.existsSync(path.join(src, f)));
+    if (!found.length) continue;
+    fs.mkdirSync(dest, { recursive: true });
+    for (const f of found) fs.copyFileSync(path.join(src, f), path.join(dest, f), fs.constants.COPYFILE_EXCL);
+    return true;
+  }
+  return false;
+}
+
+// Extra environment for lualatex: font cache per output folder (relative to the project
+// root = cwd, so special characters in the project path cannot break the path list),
+// the installation's caches stay readable behind it.
+function luaEnv(env, outRel) {
+  const out = outRel.split(path.sep).join('/');
+  return {
+    // luaSandbox.lua refuses Lua every hidden folder in the project except the run's own
+    // output folder (and the font cache in it).
+    LATEX_IDE_OUT: out,
+    TEXMFCACHE: [`${out}/${FONT_CACHE_DIR}`, env.TEXMFCACHE || ['$TEXMFSYSVAR', '$TEXMFVAR'].join(path.delimiter)].join(path.delimiter),
+  };
+}
+
+function failed(message, file = '') {
+  const error = { file, line: null, message, hint: '', raw: '' };
+  return { success: false, hasErrors: true, log: message, errors: [error], warnings: [], infos: [], pdfPath: null };
+}
+
+// outRel: output dir relative to root (per-user subdir of OUT_DIR on the server).
+async function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs = COMPILE_TIMEOUT_MS) {
+  // Every caller (web, desktop, MCP, autocompile) passes through here before latexmk runs.
+  const bad = mainPathError(mainRelPath);
+  if (bad) return failed(bad, String(mainRelPath || ''));
+  // Engine from the document itself when the project setting can't work (see detectEngine.js).
+  // Before the LuaLaTeX check, so an automatic switch to lualatex still gets sandbox + font cache.
+  let note = '';
+  if (BACKEND === 'latexmk') {
+    const { engine, reason, warning, changed } = detectProjectEngine(root, mainRelPath, settings.compiler);
+    if (changed) {
+      settings = { ...settings, compiler: engine };
+      note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})\n`;
+    }
+    if (warning) note += `[LaTeX-IDE] ${warning}\n`;
+  }
+  const lua = BACKEND === 'latexmk' && settings.compiler === 'lualatex';
+  if (lua && !(fs.existsSync(LUA_SANDBOX) && luaLatexCommand())) {
+    return failed('LuaLaTeX ist hier nicht verfügbar: Das Sandbox-Skript fehlt oder der Installationspfad enthält " oder %. Bitte pdfLaTeX oder XeLaTeX wählen.');
+  }
+  const outDir = path.join(root, outRel);
+  fs.mkdirSync(outDir, { recursive: true });
+  if (lua) {
+    try {
+      await seedFontNames(outDir);
+    } catch {} // without a copy luaotfload builds the database itself
+  }
+  return new Promise((resolve) => {
     const [cmd, args] = texCommand(mainRelPath, settings, outRel.split(path.sep).join('/'));
 
     // openin_any=p: a document may not \input absolute paths or ../ outside the
     // project (other users' projects, auth-data.json). No -shell-escape either.
     // max_print_line & Co.: kein harter Umbruch der Log-Zeilen nach 79 Zeichen (Pfade/Warnungen bleiben ganz).
-    const env = { ...process.env, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir, max_print_line: '10000', error_line: '254', half_error_line: '238' };
+    // Restricted \write18 (TeX Live default: repstopdf for EPS, makeindex …) stays on.
+    const base = childEnv();
+    const env = { ...base, openin_any: 'p', openout_any: 'p', TEXMFOUTPUT: outDir, max_print_line: '10000', error_line: '254', half_error_line: '238' };
+    if (lua) Object.assign(env, luaEnv(base, outRel));
     // \input/\includegraphics relative to a main file in a subfolder (cwd stays the
     // root, see pdfNameFor). "./" keeps log paths in the "(./x.tex" form parseLog
     // reads; the trailing separator appends TeX's default search path.
@@ -118,7 +247,7 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
       settled = true;
       clearTimeout(timer);
       running.delete(proc);
-      resolve(r);
+      resolve({ ...r, log: note + r.log });
     };
     // Resolve right away instead of waiting for 'close': a grandchild holding the
     // pipe open would delay it forever. No pdfPath - the PDF may be half-written,
@@ -246,4 +375,4 @@ function parseLog(log, root) {
   return { errors, warnings, infos };
 }
 
-module.exports = { compile, findMainCandidate, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS };
+module.exports = { compile, findMainCandidate, mainPathError, OUT_DIR, parseLog, BACKEND, pdfNameFor, COMPILE_TIMEOUT_MS, texCommand, luaLatexCommand, luaEnv, seedFontNames, LUA_SANDBOX, FONT_CACHE_DIR };

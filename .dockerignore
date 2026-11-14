@@ -20,6 +20,7 @@ desktop-data
 desktop
 .update-request
 .update-status
+initial-admin-password.txt
 .latex-ide-yjs
 backups
 .session-secret

@@ -10,7 +10,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const SOURCE = /\.(js|mjs|cjs|css|html|svg|py|sh|command|ps1|yml|vbs|cmd|bat|iss)$/;
+const SOURCE = /\.(js|mjs|cjs|css|html|svg|py|sh|command|ps1|yml|vbs|cmd|bat|iss|lua)$/;
 const git = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
 
 test('SPDX: jede Quelldatei hat Lizenz- und Copyright-Kopf', { skip: git.status !== 0 && 'kein Git-Checkout' }, () => {
