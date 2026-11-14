@@ -3,7 +3,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { detectEngine } = require('./detectEngine');
+const { detectProjectEngine } = require('./detectEngine');
 
 const OUT_DIR = '.latex-ide-out';
 
@@ -90,14 +90,12 @@ function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeoutMs =
     // Engine from the document itself when the project setting can't work (see detectEngine.js).
     let note = '';
     if (BACKEND === 'latexmk') {
-      let source = '';
-      try { source = fs.readFileSync(path.join(root, mainRelPath), 'utf8'); } catch {}
-      const { engine, reason } = detectEngine(source, settings.compiler);
-      if (engine !== (settings.compiler || 'pdflatex')) {
+      const { engine, reason, warning, changed } = detectProjectEngine(root, mainRelPath, settings.compiler);
+      if (changed) {
         settings = { ...settings, compiler: engine };
-        note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})
-`;
+        note = `[LaTeX-IDE] Compiler automatisch: ${engine} (erkannt: ${reason})\n`;
       }
+      if (warning) note += `[LaTeX-IDE] ${warning}\n`;
     }
     const [cmd, args] = texCommand(mainRelPath, settings, outRel.split(path.sep).join('/'));
 
