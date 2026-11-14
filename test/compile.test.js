@@ -56,6 +56,21 @@ test('Kompilieren: Hauptdatei im Unterordner -> PDF gefunden, \\input relativ da
   assert.deepStrictEqual(r.errors.map((e) => [e.file, e.line]), [['thesis/kapitel.tex', 2]]);
 });
 
+// TeX writes kap/x.aux below -outdir but creates no folders (#136).
+test('Kompilieren: \\include aus Unterordnern, auch bei Hauptdatei im Unterordner (#136)', { skip: !hasTex && 'latexmk fehlt' }, async () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'kap'));
+  fs.mkdirSync(path.join(root, 'thesis', 'teil'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'main.tex'), '\\documentclass{article}\n\\begin{document}\n\\include{kap/zwei}\n\\end{document}\n');
+  fs.writeFileSync(path.join(root, 'kap', 'zwei.tex'), 'Zwei\n');
+  fs.writeFileSync(path.join(root, 'thesis', 'main.tex'), '\\documentclass{article}\n\\begin{document}\n\\include{teil/drei}\n\\end{document}\n');
+  fs.writeFileSync(path.join(root, 'thesis', 'teil', 'drei.tex'), 'Drei\n');
+  for (const main of ['main.tex', 'thesis/main.tex']) {
+    const r = await compile(root, main, {}, '.latex-ide-out', 120000);
+    assert.ok(r.success && r.pdfPath, `${main}: ${r.log.slice(-1500)}`);
+  }
+});
+
 // openin_any=p kept luaotfload from its own files in texmf-dist: every lualatex run aborted (#119).
 test('Kompilieren mit LuaLaTeX: fontspec und \\directlua -> PDF (#119)', { skip: !hasLua && 'latexmk/lualatex fehlt', timeout: 900000 }, async () => {
   const root = tmp();
