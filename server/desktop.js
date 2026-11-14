@@ -22,6 +22,7 @@ const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
+const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 const os = require('os');
 const { Readable, pipeline } = require('stream');
 const { spawn, execFileSync } = require('child_process');
@@ -179,6 +180,10 @@ const app = express();
 // Express 4 does not catch rejected promises from async handlers (crash in Node >= 15).
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Same security headers as the server (#115), on every answer: own pages, local routes and the
+// /api proxy (it only forwards content-type/-disposition/cache-control, never the server's headers).
+app.use(securityHeaders());
+
 // DNS rebinding / other local sites: only our own origin may talk to us.
 app.use((req, res, next) => {
   if (!LOCAL_HOSTS.has(req.headers.host)) return res.status(421).end('Falscher Host.');
@@ -193,6 +198,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// CSP violation reports of the local pages (outside /api: no CSRF token needed).
+app.post(CSP_REPORT_PATH, ...cspReportHandler());
 
 // --- login via the server's web UI ---
 
