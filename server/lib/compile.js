@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { childEnv } = require('./childEnv');
 const { detectProjectEngine } = require('./detectEngine');
+const { isIgnored } = require('./fsTree');
 
 const OUT_DIR = '.latex-ide-out';
 
@@ -152,6 +153,26 @@ function sharedFontCacheDirs() {
 // with texlive-full on a Pi), so an output folder starts with a copy of one built
 // beforehand (luaotfload-tool -u) if the installation has one. Never overwrites, never
 // follows a planted file (COPYFILE_EXCL).
+// \include{kap/x} writes kap/x.aux relative to -outdir, and TeX creates no folders (#136):
+// mirror the project's folders into the output folder, also relative to a main file in a
+// subfolder (\include{kap/x} from thesis/main.tex = thesis/kap/x.tex -> outDir/kap/).
+// ponytail: walks the whole tree each run, cap if projects ever get thousands of folders.
+function mirrorDirs(root, outDir, mainDir, rel = '') {
+  let entries;
+  try {
+    entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || isIgnored(e.name)) continue; // no symlinks: isDirectory() is false for them
+    const sub = path.join(rel, e.name);
+    const fromMain = path.relative(mainDir, sub);
+    for (const d of [sub, fromMain]) if (!d.startsWith('..') && !path.isAbsolute(d)) fs.mkdirSync(path.join(outDir, d), { recursive: true });
+    mirrorDirs(root, outDir, mainDir, sub);
+  }
+}
+
 async function seedFontNames(outDir, dirs) {
   const dest = path.join(outDir, FONT_CACHE_DIR, ...FONT_NAMES_DIR);
   if (FONT_NAMES_FILES.some((f) => fs.existsSync(path.join(dest, f)))) return false;
@@ -206,6 +227,7 @@ async function compile(root, mainRelPath, settings = {}, outRel = OUT_DIR, timeo
   }
   const outDir = path.join(root, outRel);
   fs.mkdirSync(outDir, { recursive: true });
+  mirrorDirs(root, outDir, path.dirname(mainRelPath));
   if (lua) {
     try {
       await seedFontNames(outDir);
