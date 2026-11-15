@@ -104,7 +104,12 @@ if (authMw.LOCAL_MODE) {
 }
 // CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
-app.use(express.json({ limit: '50mb' }));
+// #150: kleines Limit vor Session/CSRF/Auth (sonst Pre-Auth-DoS per 50-MB-Bodies). Die wenigen Routen
+// mit großen JSON-Bodies parsen selbst per bigJson, erst nach der Anmeldung.
+const BIG_JSON_PATHS = new Set(['/mcp', '/api/tree/upload', '/api/dictionary', '/api/languagetool']);
+const smallJson = express.json({ limit: '256kb' });
+const bigJson = express.json({ limit: '50mb' });
+app.use((req, res, next) => (BIG_JSON_PATHS.has(req.path) ? next() : smallJson(req, res, next)));
 // Express 5 leaves req.body undefined without a body; the routes destructure it.
 app.use((req, res, next) => { req.body ??= {}; next(); });
 app.use(cookieParser());
@@ -667,7 +672,13 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword })));
+// Token vor dem großen Body prüfen (die eigentliche Prüfung macht lib/mcp.js noch einmal).
+const mcpTokenFirst = (req, res, next) => {
+  const h = req.headers.authorization || '';
+  if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
+  res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
+};
+app.post('/mcp', limitMcp, mcpTokenFirst, bigJson, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword })));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -1207,7 +1218,7 @@ app.post('/api/zotero', (req, res) => {
 
 // Eigenes Wörterbuch je Konto (statt je Browser). Ganze Liste ersetzen; der Client führt zusammen.
 app.get('/api/dictionary', (req, res) => res.json({ words: req.user.dictionary || [] }));
-app.post('/api/dictionary', (req, res) => {
+app.post('/api/dictionary', bigJson, (req, res) => {
   const { words } = req.body;
   if (!Array.isArray(words) || words.length > 20000 || words.some((w) => typeof w !== 'string' || !w || w.length > 100 || /\s/.test(w))) {
     return res.status(400).json({ error: 'Ungültiges Wörterbuch.' });
@@ -1255,7 +1266,7 @@ app.post('/api/import/zotero', limitImport, ah(async (req, res) => {
 // Grammatik über einen selbst betriebenen LanguageTool-Server (LANGUAGETOOL_URL).
 app.get('/api/languagetool', (req, res) => res.json({ enabled: !!process.env.LANGUAGETOOL_URL }));
 
-app.post('/api/languagetool', ah(async (req, res) => {
+app.post('/api/languagetool', bigJson, ah(async (req, res) => {
   const ltUrl = process.env.LANGUAGETOOL_URL;
   if (!ltUrl) return res.status(501).json({ error: 'LanguageTool ist auf diesem Server nicht eingerichtet.' });
   const data = String(req.body.data || '');
@@ -1692,7 +1703,7 @@ app.delete('/api/tree', (req, res) => {
 
 // Drag&drop upload from the OS file explorer into a folder in the tree -
 // bytes arrive base64-encoded in the JSON body (client reads via FileReader).
-app.post('/api/tree/upload', (req, res) => {
+app.post('/api/tree/upload', bigJson, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
