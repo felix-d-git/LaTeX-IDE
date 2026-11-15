@@ -302,6 +302,8 @@ function readSyncReadOnly(dec, enc, ydoc, ws) {
   ws.close(4403, 'read only');
 }
 
+// readOnly: boolean, or a function re-checked on every message (rights can change while
+// the socket is open: share revoked, demoted to reviewer, account deleted). null = no access.
 function handleConnection(ws, root, rel, epoch, readOnly = false) {
   // First, before any early close: without a listener a socket error (e.g. message > maxPayload)
   // is an uncaught exception that ends the whole server. Cleanup happens in 'close'.
@@ -321,13 +323,15 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
   ws.binaryType = 'arraybuffer';
   entry.conns.set(ws, new Set());
   ws.on('message', (data) => {
+    const ro = typeof readOnly === 'function' ? readOnly() : readOnly;
+    if (ro == null) return ws.close(1008, 'access revoked');
     try {
       const dec = decoding.createDecoder(new Uint8Array(data));
       const type = decoding.readVarUint(dec);
       if (type === MSG_SYNC) {
         const enc = encoding.createEncoder();
         encoding.writeVarUint(enc, MSG_SYNC);
-        if (readOnly) readSyncReadOnly(dec, enc, entry.ydoc, ws);
+        if (ro) readSyncReadOnly(dec, enc, entry.ydoc, ws);
         else syncProtocol.readSyncMessage(dec, enc, entry.ydoc, ws);
         if (encoding.length(enc) > 1) send(entry, ws, encoding.toUint8Array(enc));
       } else if (type === MSG_AWARENESS) {

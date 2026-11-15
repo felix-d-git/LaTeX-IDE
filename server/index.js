@@ -138,6 +138,13 @@ function streamFile(res, abs) {
 }
 
 let wss = null;
+let yjsWss = null;
+
+// Rights changed (password changed/reset, account deleted): drop all of the user's sockets;
+// the current, still valid session reconnects by itself.
+function closeUserSockets(userId) {
+  for (const s of [wss, yjsWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
+}
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
 const AUTOCOMPILE_THROTTLE_MS = 5000;
 const wordCountByOut = new Map(); // abs output dir -> { words, headers, mathInline, mathDisplay }, refreshed on each successful compile
@@ -197,6 +204,8 @@ function kickRoot(root, userId) {
     if (c.readyState === 1) c.send(data);
     wsSubscribe(c, null);
   });
+  // Live text sync of the removed user stops too (otherwise it keeps receiving/sending updates).
+  if (userId && yjsWss) yjsWss.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
 }
 
 // onlyUserId: restrict to one user's connections (per-user compile events).
@@ -510,6 +519,7 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
     // Clicking the mailed link proves the mailbox, so this also verifies the address.
     user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
+    closeUserSockets(user.id);
     initialPasswordDone();
     res.json({ ok: true });
   } catch (e) {
@@ -729,6 +739,7 @@ app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    closeUserSockets(req.user.id);
     initialPasswordDone();
     // Every other session is now invalid; keep this one.
     if (req.session && req.session.userId) req.session.loginAt = Date.now();
@@ -778,7 +789,7 @@ function removeAccount(userId) {
     }
   }
   closeWatchers();
-  if (wss) wss.clients.forEach((c) => c.userId === userId && c.close());
+  closeUserSockets(userId);
   state.purgeUser(userId, ownDir);
   auth.deleteUser(userId);
   if (moved) {
@@ -2179,7 +2190,7 @@ app.use((err, req, res, next) => {
 
 const server = http.createServer(app);
 wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
-const yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
+yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 
 collab.setHooks({
   markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
@@ -2243,8 +2254,16 @@ async function handleUpgrade(req, socket, head) {
   const user = userId && auth.findUserById(userId);
   if (!user) return rejectUpgrade(socket, 401, 'Unauthorized');
   if (!canAccessRoot(user, root) || !isTextFile(rel) || !fs.existsSync(root)) return rejectUpgrade(socket, 403, 'Forbidden');
-  const readOnly = roleOf(user, root) === 'reviewer';
-  yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly));
+  // Re-checked per message: revoked/demoted/deleted users lose access on the open socket too.
+  const readOnly = () => {
+    const u = auth.findUserById(userId);
+    return u && canAccessRoot(u, root) ? roleOf(u, root) === 'reviewer' : null;
+  };
+  yjsWss.handleUpgrade(req, socket, head, (ws) => {
+    ws.userId = userId;
+    ws.root = path.resolve(root);
+    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly);
+  });
 }
 
 wss.on('connection', (ws, req) => {
