@@ -73,6 +73,17 @@ function assertValidName(name) {
   return trimmed;
 }
 
+// Bestehender Eintrag (Projekt/Papierkorb/Archiv) als Quelle: genau ein Pfadsegment direkt unter dir,
+// keine internen Ordner. Schützt alle Quell-Operationen vor Path-Traversal (#144).
+function childOf(dir, name) {
+  const bad = typeof name !== 'string' || !name || name !== path.basename(name) || INVALID_NAME_RE.test(name)
+    || ['.', '..', TRASH_DIRNAME, ARCHIVE_DIRNAME].includes(name) || name.toLowerCase() === 'users';
+  const base = path.resolve(dir);
+  const abs = bad ? null : path.resolve(base, name);
+  if (!abs || path.dirname(abs) !== base) throw new Error('Ungültiger Projektname.');
+  return abs;
+}
+
 function createProject(projectsDir, name) {
   const safeName = assertValidName(name);
   const root = path.join(projectsDir, safeName);
@@ -128,7 +139,7 @@ function importZip(projectsDir, zipName, buf) {
 }
 
 function trashProject(projectsDir, name) {
-  const src = path.join(projectsDir, name);
+  const src = childOf(projectsDir, name);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
   const trashDir = path.join(projectsDir, TRASH_DIRNAME);
   fs.mkdirSync(trashDir, { recursive: true });
@@ -138,8 +149,8 @@ function trashProject(projectsDir, name) {
 }
 
 function trashArchivedProject(projectsDir, name) {
-  const src = path.join(projectsDir, ARCHIVE_DIRNAME, name || '');
-  if (!name || path.basename(name) !== name || !fs.existsSync(src)) throw new Error('Projekt im Archiv nicht gefunden.');
+  const src = childOf(path.join(projectsDir, ARCHIVE_DIRNAME), name);
+  if (!fs.existsSync(src)) throw new Error('Projekt im Archiv nicht gefunden.');
   const trashDir = path.join(projectsDir, TRASH_DIRNAME);
   fs.mkdirSync(trashDir, { recursive: true });
   const dest = uniqueDest(trashDir, name);
@@ -148,7 +159,7 @@ function trashArchivedProject(projectsDir, name) {
 }
 
 function restoreProject(projectsDir, name) {
-  const src = path.join(projectsDir, TRASH_DIRNAME, name);
+  const src = childOf(path.join(projectsDir, TRASH_DIRNAME), name);
   if (!fs.existsSync(src)) throw new Error('Projekt im Papierkorb nicht gefunden.');
   const dest = uniqueDest(projectsDir, name);
   fs.renameSync(src, dest);
@@ -156,14 +167,14 @@ function restoreProject(projectsDir, name) {
 }
 
 function deleteProjectPermanently(projectsDir, name) {
-  const target = path.join(projectsDir, TRASH_DIRNAME, name);
+  const target = childOf(path.join(projectsDir, TRASH_DIRNAME), name);
   if (!fs.existsSync(target)) throw new Error('Projekt im Papierkorb nicht gefunden.');
   fs.rmSync(target, { recursive: true, force: true });
 }
 
 function renameProject(projectsDir, oldName, newName) {
   const safeName = assertValidName(newName);
-  const src = path.join(projectsDir, oldName);
+  const src = childOf(projectsDir, oldName);
   const dest = path.join(projectsDir, safeName);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
   // Nur Groß-/Kleinschreibung geändert: dest = src auf case-insensitiven Dateisystemen.
@@ -176,7 +187,7 @@ function renameProject(projectsDir, oldName, newName) {
 // Without an explicit newName, auto-suffixes "<name> (Copy)" / "(Copy 2)" / ...
 // (dashboard quick-action); with one (Copy-project modal), uses that name exactly.
 function copyProject(projectsDir, name, newName) {
-  const src = path.join(projectsDir, name);
+  const src = childOf(projectsDir, name);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
   let dest;
   if (newName) {
@@ -200,7 +211,7 @@ function copyProject(projectsDir, name, newName) {
 }
 
 function archiveProject(projectsDir, name) {
-  const src = path.join(projectsDir, name);
+  const src = childOf(projectsDir, name);
   if (!fs.existsSync(src)) throw new Error('Projekt nicht gefunden.');
   const archiveDir = path.join(projectsDir, ARCHIVE_DIRNAME);
   fs.mkdirSync(archiveDir, { recursive: true });
@@ -210,7 +221,7 @@ function archiveProject(projectsDir, name) {
 }
 
 function unarchiveProject(projectsDir, name) {
-  const src = path.join(projectsDir, ARCHIVE_DIRNAME, name);
+  const src = childOf(path.join(projectsDir, ARCHIVE_DIRNAME), name);
   if (!fs.existsSync(src)) throw new Error('Projekt im Archiv nicht gefunden.');
   const dest = uniqueDest(projectsDir, name);
   fs.renameSync(src, dest);
