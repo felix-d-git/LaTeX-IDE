@@ -84,6 +84,8 @@ const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '
 const HOST_DIR = process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..');
 
 const app = express();
+// #146: routes match case-sensitively, so path checks in middleware (REVIEWER_BLOCKED) see exactly what the routes serve.
+app.set('case sensitive routing', true);
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
@@ -695,7 +697,7 @@ app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error:
 app.use('/api', authMw.requireAuth);
 
 // Reviewers may read, compile and comment, but not change the project.
-const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
+const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/i;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
   const { root } = windowRoot(req); // errors are answered by the route itself
