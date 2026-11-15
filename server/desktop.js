@@ -21,6 +21,7 @@ const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
+const { checkUrl } = require('./lib/desktopAssets');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 const os = require('os');
@@ -305,6 +306,7 @@ app.post('/api/desktop/update/install', ah(async (req, res) => {
   if (installing) return res.status(409).json({ error: 'Update wird bereits installiert.' });
   installing = true;
   try {
+    checkUrl(REMOTE); // never run code fetched over plain http (#147)
     const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
       headers: { Authorization: `Bearer ${config.token}` },
       signal: AbortSignal.timeout(900000),
