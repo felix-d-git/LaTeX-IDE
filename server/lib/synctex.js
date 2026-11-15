@@ -4,6 +4,22 @@ const { execFile } = require('child_process');
 const { childEnv } = require('./childEnv');
 const fs = require('fs');
 const path = require('path');
+const { isUtf8 } = require('buffer');
+
+// pdfTeX/XeTeX on Windows store file names in the ANSI code page (cp1252), LuaTeX in
+// UTF-8, and synctex prints the bytes as they are (#137) - decode each line on its own.
+// ponytail: assumes cp1252 (western Windows); other code pages would need the system's.
+const cp1252 = new TextDecoder('windows-1252');
+function decodeOutput(buf) {
+  return buf
+    .toString('latin1')
+    .split('\n')
+    .map((l) => {
+      const b = Buffer.from(l, 'latin1');
+      return isUtf8(b) ? b.toString('utf8') : cp1252.decode(b);
+    })
+    .join('\n');
+}
 
 // Parses the "Key:value" line blocks the synctex CLI prints between
 // "SyncTeX result begin"/"end". Several matches can appear for one query
@@ -20,6 +36,8 @@ function parseBlocks(output) {
   return result;
 }
 
+// Known limit (#137): synctex.exe gets its arguments in the ANSI code page, so on Windows
+// it finds no LuaTeX (UTF-8) input whose name has non-ASCII characters.
 function forward(pdfAbs, texAbs, line, cwd) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -52,9 +70,10 @@ function inverse(pdfAbs, page, x, y, cwd) {
     execFile(
       'synctex',
       ['edit', '-o', `${page}:${x}:${y}:${pdfAbs}`],
-      { cwd, env: childEnv() },
-      (err, stdout) => {
+      { cwd, env: childEnv(), encoding: 'buffer' },
+      (err, out) => {
         if (err) return reject(err);
+        const stdout = decodeOutput(out);
         // Alle Treffer (je Block einer), der erste liegt am nächsten am Klick.
         const hits = stdout
           .split(/Output:/)
@@ -112,4 +131,4 @@ function inverseInProject(root, pdfAbs, page, x, y, cwd = root) {
   });
 }
 
-module.exports = { forward, inverse, inverseInProject, toProjectPath };
+module.exports = { forward, inverse, inverseInProject, toProjectPath, decodeOutput };
