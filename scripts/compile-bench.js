@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 // Performance-Test der Compiler (#121): ruft compile() aus server/lib/compile.js direkt auf.
 // Nur Wegwerf-Projekte unter os.tmpdir(), nie echte Projekte.
 //
