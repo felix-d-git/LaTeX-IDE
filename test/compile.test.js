@@ -44,6 +44,16 @@ test('parseLog: Hauptdatei im Unterordner liefert baumrelative Pfade (#36)', () 
   assert.deepStrictEqual(infos.map((i) => [i.file, i.line]), [['thesis/kapitel.tex', 4]]);
 });
 
+test('parseLog: TeX-Abschlusszeilen keine eigenen Fehler, lange Zeilen ohne Folgezeile (#138)', () => {
+  const root = path.join(os.tmpdir(), 'proj');
+  const long = './main.tex:5: Font TU/X(0)/m/n/10="Noto Serif CJK SC/OT" at 10.0pt not loadable: Metric (TFM) file or installed font not found.';
+  const log = ['./main.tex:4: Undefined control sequence.', 'l.4 \\undefinedA', '', long, '<to be read again>', './main.tex:4:  ==> Fatal error occurred, no output PDF file produced!'].join('\n');
+  const { errors } = parseLog(log, root);
+  assert.deepStrictEqual(errors.map((e) => e.message), ['Undefined control sequence.', long.replace('./main.tex:5: ', '')]);
+  // ohne anderen Fehler bleibt die Abschlusszeile stehen (sonst wäre die Liste leer)
+  assert.strictEqual(parseLog('./main.tex:3: Emergency stop.', root).errors.length, 1);
+});
+
 test('Kompilieren: Hauptdatei im Unterordner -> PDF gefunden, \\input relativ dazu, Fehler mit Pfad (#36)', { skip: !hasTex && 'latexmk fehlt' }, async () => {
   const root = tmp();
   fs.mkdirSync(path.join(root, 'thesis'));
