@@ -116,3 +116,17 @@ test('prune löscht nicht mehr referenzierte Blobs und Legacy-Ordner (#37)', () 
   assert.ok(!fs.existsSync(path.join(root, H, 'snapshots', 'weg')));
   assert.ok(!fs.readdirSync(path.join(root, H)).some((f) => f.endsWith('.tmp')));
 });
+
+test('Diff gegen "aktuell" liest keine Dateien ausserhalb des Projekts (#145)', () => {
+  const root = project({ 'main.tex': 'v1' });
+  const secret = path.join(path.dirname(root), path.basename(root) + '-geheim.tex');
+  fs.writeFileSync(secret, 'GEHEIM');
+  test.after(() => fs.rmSync(secret, { force: true }));
+  const { id } = history.snapshot(root, { trigger: 'manual' });
+  const leaks = (file) => {
+    try { return JSON.stringify(history.diffBetween(root, id, 'current', file)).includes('GEHEIM'); } catch { return false; }
+  };
+  assert.strictEqual(leaks(`../${path.basename(secret)}`), false, 'relativer Pfad ausserhalb');
+  assert.strictEqual(leaks(secret), false, 'absoluter Pfad');
+  assert.ok(JSON.stringify(history.diffBetween(root, id, 'current', 'main.tex')).includes('v1'));
+});

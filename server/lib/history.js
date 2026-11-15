@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { diffLines } = require('diff');
-const { isIgnored, isTextFile } = require('./fsTree');
+const { isIgnored, isTextFile, safeResolve } = require('./fsTree');
 
 const HISTORY_DIR = '.latex-ide-history';
 const INDEX_FILE = 'index.json';
@@ -233,7 +233,7 @@ function readSnapshotBuffer(root, id, relPath, entry = getEntry(root, id)) {
     if (!Object.hasOwn(entry.hashes, relPath)) return null; // file did not exist yet at this snapshot
     abs = path.join(historyRoot(root), BLOBS_DIR, entry.hashes[relPath]);
   } else {
-    abs = path.join(historyRoot(root), SNAPSHOTS_DIR, id, relPath);
+    abs = safeResolve(path.join(historyRoot(root), SNAPSHOTS_DIR, id), relPath); // wirft bei ../ (#145)
   }
   return fs.existsSync(abs) ? fs.readFileSync(abs) : null;
 }
@@ -244,7 +244,8 @@ function readSnapshotFile(root, id, relPath, entry) {
 }
 
 function readCurrentFile(root, relPath) {
-  const abs = path.join(root, relPath);
+  if (typeof relPath !== 'string' || !isTextFile(relPath) || isIgnored(relPath.split(/[\\/]/)[0])) return null;
+  const abs = safeResolve(root, relPath); // wirft bei Pfaden ausserhalb des Projekts (#145)
   if (!fs.existsSync(abs)) return null;
   return fs.readFileSync(abs, 'utf8');
 }
