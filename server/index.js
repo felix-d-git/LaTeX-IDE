@@ -667,7 +667,8 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
-app.post('/mcp', limitMcp, ah(createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword })));
+const mcp = createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
+app.post('/mcp', limitMcp, ah(mcp));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
@@ -682,6 +683,48 @@ app.use((req, res, next) => {
     return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
   }
   next();
+});
+
+// --- Built-in AI chat: the model runs in the browser (user's own key), tools run here with the
+// MCP implementation, rights = user's role in the window's project ∩ the chat mode.
+const AI_MODES = { ask: ['read'], suggest: ['read', 'comment'], agent: ['read', 'comment', 'edit', 'create', 'delete', 'move'] };
+const AI_CONFIRM = new Set(['create', 'delete', 'move', 'compile']); // only after the user clicked "Ausführen"
+const limitAi = authMw.rateLimit('ai', 300, 60 * 1000, (req) => req.user.id);
+function aiPerms(req, root) {
+  const role = roleOf(req.user, root);
+  const mode = role === 'reviewer' && req.body.mode === 'agent' ? 'suggest' : AI_MODES[req.body.mode] ? req.body.mode : 'ask';
+  const perms = AI_MODES[mode].concat(mode === 'agent' && req.body.allowCompile === true ? ['compile'] : []);
+  return { mode, perms: role === 'reviewer' ? perms.filter((p) => p === 'read' || p === 'comment') : perms };
+}
+app.post('/api/ai/tools', limitAi, (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const { mode, perms } = aiPerms(req, root);
+  res.json({ mode, tools: mcp.toolList(perms) });
+});
+app.post('/api/ai/tool', limitAi, ah(async (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  const { perms } = aiPerms(req, root);
+  const name = String(req.body.name || '');
+  const t = mcp.toolList(perms).find((x) => x.name === name);
+  if (!t) return res.json({ isError: true, text: `Werkzeug ${name} ist in diesem Modus nicht erlaubt.` });
+  if (AI_CONFIRM.has(t.perm) && name !== 'compile_status' && req.body.confirmed !== true) return res.json({ isError: true, text: `${name} braucht die Bestätigung des Nutzers.` });
+  const pid = projectIdOf(root);
+  const args = { ...(req.body.arguments && typeof req.body.arguments === 'object' ? req.body.arguments : {}), project: pid };
+  const who = req.user.username || req.user.email;
+  const a = { user: req.user, perms, projects: { [pid]: perms }, name: `KI-Assistent (${who})`, tracked: { id: `ai:${req.user.id}`, name: `KI-Assistent (${who})`, color: '#8e44ad' } };
+  const r = await mcp.callTool(a, { name, arguments: args });
+  res.json({ isError: !!r.isError, text: r.content.map((c) => c.text).join('\n') });
+}));
+// "vor KI: <prompt>" before each agent run: one click back to the state before.
+app.post('/api/ai/snapshot', limitAi, (req, res) => {
+  const root = requireRoot(req, res);
+  if (!root) return;
+  if (roleOf(req.user, root) === 'reviewer') return res.status(403).json({ error: 'Du hast in diesem Projekt nur Kommentarrechte.' });
+  collab.flushRoot(root);
+  const entry = safeSnapshot(root, { trigger: 'ai', label: `vor KI: ${String(req.body.label || '').slice(0, 60)}` });
+  res.json({ ok: !!entry, id: entry && entry.id });
 });
 
 // --- Desktop installers with this server's address built in (also the desktop apps' update source) ---

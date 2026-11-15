@@ -18,6 +18,7 @@ import { setupCommentsPanel } from './commentsPanel.js';
 import { createPreviewManager, fileKind } from './previewManager.js';
 import { setupSyncTex } from './syncTex.js';
 import { setupErrorPanel } from './errorPanel.js';
+import { setupAiPanel } from './aiPanel.js';
 import { setupHotkeySettings, setupShortcutsReference } from './hotkeySettings.js';
 import { setupShareDialog } from './shareDialog.js';
 import { setupHistoryView } from './historyView.js';
@@ -93,6 +94,7 @@ let currentTree = null;
 let mainFile = null;
 let mainPreamble = '';
 let activeProjectRoot = '';
+let aiPanel = null; // KI-Chat (#125), nach dem Einstellungsdialog erzeugt
 let commentsPanel = null; // set once setupCommentsPanel runs (needs editorMgr first)
 let reviewPanel = null; // set once setupReviewPanel runs (needs editorMgr first)
 let syncTex = null; // set once setupSyncTex runs (needs pdfViewer first)
@@ -619,6 +621,7 @@ async function loadTree() {
     pdfViewer.clear();
     els.pdfLogView.textContent = '';
     errorPanel.setLog({});
+    lastCompileResult = null;
     editorMgr.setCompileDiagnostics({});
     if (outline) outline.render();
   }
@@ -668,6 +671,7 @@ async function applyRole() {
   const reviewer = role === 'reviewer';
   editorMgr.setReadOnly(reviewer);
   document.body.classList.toggle('role-reviewer', reviewer);
+  if (aiPanel) aiPanel.syncMode();
   els.activeProjectLabel.title = reviewer ? 'Nur kommentieren' : '';
 }
 
@@ -731,6 +735,7 @@ els.downloadPdfBtn.addEventListener('click', async () => {
   URL.revokeObjectURL(url);
 });
 
+let lastCompileResult = null; // für den Kontext des KI-Chats
 els.compileBtn.addEventListener('click', async () => {
   els.compileBtn.disabled = true;
   els.compileBtn.textContent = 'Kompiliere…';
@@ -739,6 +744,7 @@ els.compileBtn.addEventListener('click', async () => {
     const result = await api.compile(isDesktop ? openTexts() : undefined);
     els.pdfLogView.textContent = result.log;
     errorPanel.setLog(result);
+    lastCompileResult = result;
     editorMgr.setCompileDiagnostics(result);
     if (result.success) {
       errorPanel.hide();
@@ -817,6 +823,7 @@ syncTex = setupSyncTex({
 
 const errorPanel = setupErrorPanel({
   onJumpTo: (file, line) => openFile(file, line),
+  onExplain: (e) => aiPanel.explainError(e),
 });
 
 const hotkeySettings = setupHotkeySettings();
@@ -829,6 +836,13 @@ const settingsDialog = setupSettingsDialog({
   onPdfViewer: (mode) => pdfViewer.setNative(mode === 'browser'),
   onBreadcrumbs: (on) => document.getElementById('editor-breadcrumbs').classList.toggle('hidden', !on),
   onShowAccount: () => profileDialog.show(),
+});
+aiPanel = setupAiPanel({
+  editorMgr,
+  getRole: () => myRole,
+  getFiles: treeFiles,
+  getLastResult: () => lastCompileResult,
+  onShowSettings: () => settingsDialog.show('ki'),
 });
 const adminDialog = setupAdminDialog({ currentUser, onUpdateRequested: () => checkServerUpdate() });
 const profileDialog = setupProfileDialog({
@@ -949,6 +963,7 @@ document.addEventListener('keydown', (e) => {
 registerAction('compile', () => els.compileBtn.click());
 registerAction('toggleAllProjects', () => projectsView.toggle());
 registerAction('toggleComments', () => commentsPanel.toggle());
+registerAction('toggleAi', () => aiPanel.toggle());
 registerAction('toggleErrors', () => errorPanel.toggle());
 registerAction('toggleSearch', () => searchPanelApi.toggle());
 // Strg+F: Suchen/Ersetzen-Leiste unten im Editor, in beiden Scopes registriert

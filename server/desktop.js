@@ -370,6 +370,29 @@ app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (re
   }
 }));
 
+// KI-Chat: der Browser darf per CSP nur localhost erreichen, Cloud-Anbieter gehen über diesen
+// Proxy (Key kommt vom Client und wird nur durchgereicht). Nur die zwei OpenAI-kompatiblen Pfade.
+app.post('/api/ai-local', express.json({ limit: '8mb' }), ah(async (req, res) => {
+  let u;
+  try { u = new URL(String(req.body.url || '')); } catch { return res.status(400).json({ error: 'Ungültige Adresse.' }); }
+  if (!/^https?:$/.test(u.protocol) || !/\/(chat\/completions|models)$/.test(u.pathname)) return res.status(400).json({ error: 'Nur /chat/completions und /models erlaubt.' });
+  const ac = new AbortController();
+  res.on('close', () => ac.abort()); // Abbrechen im Chat beendet auch die Anfrage beim Anbieter
+  try {
+    const r = await fetch(u, {
+      method: req.body.body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', ...(req.body.key ? { Authorization: `Bearer ${req.body.key}` } : {}) },
+      body: req.body.body ? JSON.stringify(req.body.body) : undefined,
+      signal: ac.signal,
+    });
+    res.status(r.status).set('Content-Type', r.headers.get('content-type') || 'application/json');
+    if (!r.body) return res.end();
+    pipeline(Readable.fromWeb(r.body), res, () => {});
+  } catch (e) {
+    if (!res.headersSent) res.status(502).json({ error: e.message });
+  }
+}));
+
 app.use('/api', (req, res, next) => {
   if (!config.token) return res.status(401).json({ error: 'Desktop-App nicht angemeldet.', desktopLogin: true });
   next();
