@@ -84,6 +84,8 @@ const PROJECTS_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, '
 const HOST_DIR = process.env.DATA_KEY && process.env.VAULT_DIR ? process.env.VAULT_DIR : process.env.DATA_DIR || path.join(__dirname, '..');
 
 const app = express();
+// #146: routes match case-sensitively, so path checks in middleware (REVIEWER_BLOCKED) see exactly what the routes serve.
+app.set('case sensitive routing', true);
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
@@ -104,7 +106,12 @@ if (authMw.LOCAL_MODE) {
 }
 // CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
-app.use(express.json({ limit: '50mb' }));
+// #150: kleines Limit vor Session/CSRF/Auth (sonst Pre-Auth-DoS per 50-MB-Bodies). Die wenigen Routen
+// mit großen JSON-Bodies parsen selbst per bigJson, erst nach der Anmeldung.
+const BIG_JSON_PATHS = new Set(['/mcp', '/api/ai/tool', '/api/tree/upload', '/api/dictionary', '/api/languagetool']);
+const smallJson = express.json({ limit: '256kb' });
+const bigJson = express.json({ limit: '50mb' });
+app.use((req, res, next) => (BIG_JSON_PATHS.has(req.path) ? next() : smallJson(req, res, next)));
 // Express 5 leaves req.body undefined without a body; the routes destructure it.
 app.use((req, res, next) => { req.body ??= {}; next(); });
 app.use(cookieParser());
@@ -133,6 +140,13 @@ function streamFile(res, abs) {
 }
 
 let wss = null;
+let yjsWss = null;
+
+// Rights changed (password changed/reset, account deleted): drop all of the user's sockets;
+// the current, still valid session reconnects by itself.
+function closeUserSockets(userId) {
+  for (const s of [wss, yjsWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
+}
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
 const AUTOCOMPILE_THROTTLE_MS = 5000;
 const wordCountByOut = new Map(); // abs output dir -> { words, headers, mathInline, mathDisplay }, refreshed on each successful compile
@@ -192,6 +206,8 @@ function kickRoot(root, userId) {
     if (c.readyState === 1) c.send(data);
     wsSubscribe(c, null);
   });
+  // Live text sync of the removed user stops too (otherwise it keeps receiving/sending updates).
+  if (userId && yjsWss) yjsWss.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
 }
 
 // onlyUserId: restrict to one user's connections (per-user compile events).
@@ -505,6 +521,7 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
     // Clicking the mailed link proves the mailbox, so this also verifies the address.
     user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
+    closeUserSockets(user.id);
     initialPasswordDone();
     res.json({ ok: true });
   } catch (e) {
@@ -667,15 +684,21 @@ function mcpProjects(user) {
   const shared = sharedRootsOf(user.id).filter((r) => fs.existsSync(r));
   return [...own, ...shared].map((r) => ({ id: projectIdOf(r), name: path.basename(r), shared: shared.includes(r) }));
 }
+// Token vor dem großen Body prüfen (die eigentliche Prüfung macht lib/mcp.js noch einmal).
+const mcpTokenFirst = (req, res, next) => {
+  const h = req.headers.authorization || '';
+  if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
+  res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
+};
 const mcp = createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
-app.post('/mcp', limitMcp, ah(mcp));
+app.post('/mcp', limitMcp, mcpTokenFirst, bigJson, ah(mcp));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
 
 // Reviewers may read, compile and comment, but not change the project.
-const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/;
+const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/i;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
   const { root } = windowRoot(req); // errors are answered by the route itself
@@ -702,7 +725,7 @@ app.post('/api/ai/tools', limitAi, (req, res) => {
   const { mode, perms } = aiPerms(req, root);
   res.json({ mode, tools: mcp.toolList(perms) });
 });
-app.post('/api/ai/tool', limitAi, ah(async (req, res) => {
+app.post('/api/ai/tool', limitAi, bigJson, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { perms } = aiPerms(req, root);
@@ -761,6 +784,7 @@ app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    closeUserSockets(req.user.id);
     initialPasswordDone();
     // Every other session is now invalid; keep this one.
     if (req.session && req.session.userId) req.session.loginAt = Date.now();
@@ -810,7 +834,7 @@ function removeAccount(userId) {
     }
   }
   closeWatchers();
-  if (wss) wss.clients.forEach((c) => c.userId === userId && c.close());
+  closeUserSockets(userId);
   state.purgeUser(userId, ownDir);
   auth.deleteUser(userId);
   if (moved) {
@@ -1250,7 +1274,7 @@ app.post('/api/zotero', (req, res) => {
 
 // Eigenes Wörterbuch je Konto (statt je Browser). Ganze Liste ersetzen; der Client führt zusammen.
 app.get('/api/dictionary', (req, res) => res.json({ words: req.user.dictionary || [] }));
-app.post('/api/dictionary', (req, res) => {
+app.post('/api/dictionary', bigJson, (req, res) => {
   const { words } = req.body;
   if (!Array.isArray(words) || words.length > 20000 || words.some((w) => typeof w !== 'string' || !w || w.length > 100 || /\s/.test(w))) {
     return res.status(400).json({ error: 'Ungültiges Wörterbuch.' });
@@ -1298,7 +1322,7 @@ app.post('/api/import/zotero', limitImport, ah(async (req, res) => {
 // Grammatik über einen selbst betriebenen LanguageTool-Server (LANGUAGETOOL_URL).
 app.get('/api/languagetool', (req, res) => res.json({ enabled: !!process.env.LANGUAGETOOL_URL }));
 
-app.post('/api/languagetool', ah(async (req, res) => {
+app.post('/api/languagetool', bigJson, ah(async (req, res) => {
   const ltUrl = process.env.LANGUAGETOOL_URL;
   if (!ltUrl) return res.status(501).json({ error: 'LanguageTool ist auf diesem Server nicht eingerichtet.' });
   const data = String(req.body.data || '');
@@ -1735,7 +1759,7 @@ app.delete('/api/tree', (req, res) => {
 
 // Drag&drop upload from the OS file explorer into a folder in the tree -
 // bytes arrive base64-encoded in the JSON body (client reads via FileReader).
-app.post('/api/tree/upload', (req, res) => {
+app.post('/api/tree/upload', bigJson, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
@@ -2211,7 +2235,7 @@ app.use((err, req, res, next) => {
 
 const server = http.createServer(app);
 wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
-const yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
+yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 
 collab.setHooks({
   markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
@@ -2275,8 +2299,16 @@ async function handleUpgrade(req, socket, head) {
   const user = userId && auth.findUserById(userId);
   if (!user) return rejectUpgrade(socket, 401, 'Unauthorized');
   if (!canAccessRoot(user, root) || !isTextFile(rel) || !fs.existsSync(root)) return rejectUpgrade(socket, 403, 'Forbidden');
-  const readOnly = roleOf(user, root) === 'reviewer';
-  yjsWss.handleUpgrade(req, socket, head, (ws) => collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly));
+  // Re-checked per message: revoked/demoted/deleted users lose access on the open socket too.
+  const readOnly = () => {
+    const u = auth.findUserById(userId);
+    return u && canAccessRoot(u, root) ? roleOf(u, root) === 'reviewer' : null;
+  };
+  yjsWss.handleUpgrade(req, socket, head, (ws) => {
+    ws.userId = userId;
+    ws.root = path.resolve(root);
+    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly);
+  });
 }
 
 wss.on('connection', (ws, req) => {

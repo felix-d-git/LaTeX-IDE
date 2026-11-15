@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 
@@ -43,7 +44,7 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
       const assets = {};
       for (const [os, re] of Object.entries(ASSETS)) {
         const a = (rel.assets || []).find((x) => re.test(x.name));
-        if (a) assets[os] = a.url;
+        if (a) assets[os] = { url: a.url, digest: a.digest };
       }
       meta = { at: Date.now(), assets, error: null };
       return assets;
@@ -60,12 +61,22 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
     if (fs.existsSync(file)) return Promise.resolve(file);
     if (!downloads.has(os)) {
       const p = (async () => {
-        const url = (await releaseAssets())[os];
-        if (!url) throw new Error(`Release v${version} enthält kein Paket für ${os}.`);
-        const r = await fetch(url, { headers: headers('application/octet-stream'), signal: AbortSignal.timeout(900000) });
+        const asset = (await releaseAssets())[os];
+        if (!asset) throw new Error(`Release v${version} enthält kein Paket für ${os}.`);
+        // GitHub's own SHA-256 of the asset: a manipulated download is never cached or served (#147).
+        const want = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest || '');
+        if (!want) throw new Error(`Release v${version}: keine SHA-256-Prüfsumme für ${os}.`);
+        const r = await fetch(asset.url, { headers: headers('application/octet-stream'), signal: AbortSignal.timeout(900000) });
         if (!r.ok) throw new Error(`GitHub HTTP ${r.status} (Download)`);
         fs.mkdirSync(dir, { recursive: true });
-        await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(`${file}.part`));
+        const hash = crypto.createHash('sha256');
+        await pipeline(Readable.fromWeb(r.body), async function* (src) {
+          for await (const chunk of src) yield (hash.update(chunk), chunk);
+        }, fs.createWriteStream(`${file}.part`));
+        if (hash.digest('hex') !== want[1].toLowerCase()) {
+          fs.rmSync(`${file}.part`, { force: true });
+          throw new Error(`Prüfsumme des Pakets für ${os} stimmt nicht (Release v${version}).`);
+        }
         fs.renameSync(`${file}.part`, file);
         // Only the current version is ever served.
         for (const old of fs.readdirSync(path.dirname(dir))) {
@@ -108,8 +119,10 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
   return { available, assetFile, send };
 }
 
+// https only; plain http just for this machine (otherwise token + installer travel unprotected, #147).
 function checkUrl(url) {
-  if (!/^https?:\/\/[^\s"\\]+$/.test(url) || MARKER.length + url.length > TRAILER) throw new Error(`Ungültige Server-Adresse: ${url}`);
+  const ok = /^https:\/\/[^\s"\\]+$/.test(url) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s"\\]*)?$/.test(url);
+  if (!ok || MARKER.length + url.length > TRAILER) throw new Error(`Ungültige Server-Adresse: ${url}`);
 }
 
 function exeTrailer(url) {
@@ -177,4 +190,4 @@ function zipAppendParts(file, name, content) {
   }
 }
 
-module.exports = { createDesktopAssets, exeTrailer, zipAppendParts };
+module.exports = { createDesktopAssets, checkUrl, exeTrailer, zipAppendParts };
