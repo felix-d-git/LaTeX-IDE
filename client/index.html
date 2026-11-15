@@ -23,6 +23,7 @@
       <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
       <symbol id="i-review" viewBox="0 0 24 24"><path d="M4 4.5h16v12H9l-5 4z"/><path d="M8 9h8M8 12.5h5"/></symbol>
       <symbol id="i-comment" viewBox="0 0 24 24"><path d="M4 4.5h16v12H9l-5 4z"/></symbol>
+      <symbol id="i-robot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.8" r=".9" fill="currentColor" stroke="none"/><circle cx="9.2" cy="13" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.8" cy="13" r="1.1" fill="currentColor" stroke="none"/><path d="M9.5 16.2h5M2.5 12.5v2.5M21.5 12.5v2.5"/></symbol>
       <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 1 1 2.9 2.6v1.4"/><circle cx="12.6" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.4"/><path stroke-width="3" stroke-linecap="butt" d="M12 2.5v3.6M12 17.9v3.6M2.5 12h3.6M17.9 12h3.6M5.3 5.3l2.5 2.5M16.2 16.2l2.5 2.5M18.7 5.3l-2.5 2.5M7.8 16.2l-2.5 2.5"/></symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20.5c0-3.9 3.1-6.6 7-6.6s7 2.7 7 6.6"/></symbol>
@@ -121,6 +122,9 @@
           </button>
           <button id="btn-comments" class="rail-tab" data-pane="comments-panel" data-tip="Kommentare">
             <svg class="ui-icon"><use href="#i-comment"></use></svg>
+          </button>
+          <button id="btn-ai" class="rail-tab" data-pane="ai-panel" data-tip="KI-Assistent (Strg+Alt+I)">
+            <svg class="ui-icon"><use href="#i-robot"></use></svg>
           </button>
         </div>
         <div id="rail-footer">
@@ -223,6 +227,33 @@
           <div id="comments-panel-body">
             <button id="btn-add-comment" class="primary">Kommentar zur Auswahl</button>
             <div id="comments-list"></div>
+          </div>
+        </div>
+
+        <div id="ai-panel" class="rail-pane hidden">
+          <div class="rail-panel-header">
+            <strong>KI-Assistent</strong>
+            <select id="ai-mode" autocomplete="off" title="Fragen: nur lesen · Vorschlagen: Vorschläge zum Annehmen · Agent: ändert selbst (nachverfolgt)"></select>
+            <button id="ai-new" class="panel-close" title="Neuer Chat">+</button>
+            <button id="btn-close-ai" class="panel-close" title="Schließen">
+              <svg class="ui-icon"><use href="#i-close"></use></svg>
+            </button>
+          </div>
+          <div id="ai-log" aria-live="polite"></div>
+          <div id="ai-compose">
+            <div id="ai-ctx">
+              <label><input type="checkbox" data-ai-ctx="excerpt" checked> Ausschnitt</label>
+              <label><input type="checkbox" data-ai-ctx="whole"> Ganze Datei</label>
+              <label><input type="checkbox" data-ai-ctx="selection" checked> Auswahl</label>
+              <label><input type="checkbox" data-ai-ctx="errors" checked> Fehler</label>
+              <label><input type="checkbox" data-ai-ctx="files"> Dateiliste</label>
+            </div>
+            <div id="ai-budget"></div>
+            <textarea id="ai-input" rows="3" placeholder="Frage oder Auftrag …"></textarea>
+            <div id="ai-actions">
+              <button id="ai-stop" class="btn-secondary hidden">Stopp</button>
+              <button id="ai-send" class="primary">Senden</button>
+            </div>
           </div>
         </div>
       </aside>
@@ -532,6 +563,7 @@
             <button class="tab-btn" data-settings-tab="compiler">Compiler</button>
             <button class="tab-btn" data-settings-tab="references">References</button>
             <button class="tab-btn" data-settings-tab="appearance">Appearance</button>
+            <button class="tab-btn" data-settings-tab="ki">KI</button>
             <button class="tab-btn" data-settings-tab="mcp">MCP</button>
             <button class="tab-btn" data-settings-link="account">Konto ↗</button>
           </div>

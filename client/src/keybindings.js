@@ -14,6 +14,8 @@ export const DEFAULT_BINDINGS = {
   compile: { label: 'Kompilieren', scope: 'global', combos: ['ctrl+enter', 'ctrl+s'] },
   toggleAllProjects: { label: 'Alle Projekte umschalten', scope: 'global', combos: ['ctrl+shift+o'] },
   toggleComments: { label: 'Kommentare umschalten', scope: 'global', combos: ['ctrl+shift+k'] },
+  // Nicht Strg+Umschalt+I: das öffnet die Entwicklertools des Browsers.
+  toggleAi: { label: 'KI-Assistent umschalten', scope: 'global', combos: ['ctrl+alt+i'] },
   toggleErrors: { label: 'Fehler umschalten', scope: 'global', combos: ['ctrl+shift+e'] },
   // Strg+F gehört wieder der Suchen/Ersetzen-Leiste unten IM Editor (arbeitet
   // auf der offenen .tex-Datei). Sie ist in beiden Scopes gebunden, damit sie

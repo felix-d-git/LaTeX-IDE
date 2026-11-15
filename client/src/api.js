@@ -87,6 +87,7 @@ export const adminApi = {
 };
 
 export const api = {
+  aiPost: (url, body) => req('POST', url, body), // KI-Chat: /api/ai/tools|tool|snapshot
   listProjects: () => req('GET', '/api/projects/list'),
   openProject: (root) => req('POST', '/api/projects/open', { root }),
   createProject: (name) => req('POST', '/api/projects/create', { name }),

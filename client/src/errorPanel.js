@@ -11,7 +11,7 @@ import { fixHint } from './fixHint.js';
 // der PDF-Toolbar. Der rote Zähler sitzt als Badge auf dem Logs-Button.
 const LEVELS = { error: 'Errors', warning: 'Warnings', info: 'Info' };
 
-export function setupErrorPanel({ onJumpTo }) {
+export function setupErrorPanel({ onJumpTo, onExplain }) {
   const panel = document.getElementById('log-panel');
   const btnToggle = document.getElementById('btn-errors');
   const btnBack = document.getElementById('btn-close-errors');
@@ -123,6 +123,13 @@ export function setupErrorPanel({ onJumpTo }) {
       f.className = 'log-card-fix';
       f.textContent = `Vermutlicher Fix: ${fix}`;
       el.appendChild(f);
+    }
+    if (onExplain && e.level !== 'info') {
+      const ai = document.createElement('button');
+      ai.className = 'log-card-ai btn-secondary';
+      ai.textContent = 'Mit KI erklären';
+      ai.addEventListener('click', () => onExplain(e));
+      el.appendChild(ai);
     }
     return el;
   }
