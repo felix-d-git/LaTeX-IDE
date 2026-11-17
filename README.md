@@ -147,7 +147,7 @@ Kein offenes Registrierungsformular - neue Konten entstehen ausschließlich
 erzeugt und manuell verschickt (WhatsApp/Mail/…). Details:
 
 - **Erster Start:** `.env` aus `.env.example` kopieren, `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungslinks; ohne: Adresse der Anfrage) setzen.
+  `ADMIN_PASSWORD` und `PUBLIC_URL` (Adresse für Einladungs-/Reset-Links; ohne: Links nur für localhost und die Hosts in `ALLOWED_HOSTS`, sonst keine Mail-Links) setzen.
   Ohne `ADMIN_PASSWORD` legt der Server den Admin `admin` mit einem zufälligen Einmal-Passwort an und
   schreibt es nur in die Datei `initial-admin-password.txt` im Datenordner (bei verschlüsselten Daten
   in `VAULT_DIR`, Docker: im eingebundenen Ordner auf dem Host); die Konsole nennt nur den Pfad. Bis

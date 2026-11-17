@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const http = require('http');
+const path = require('path');
 const { startServer, client } = require('./_server');
 
 test('Mail-/Token-Routen sind nur im lokalen Modus gesperrt', async () => {
@@ -25,6 +28,60 @@ test('Mail-/Token-Routen sind nur im lokalen Modus gesperrt', async () => {
     assert.strictEqual(await post(), 401);
     for (let i = 0; i < 299; i++) await post();
     assert.strictEqual(await post(), 429);
+  } finally {
+    await srv.stop();
+  }
+});
+
+// #151: fetch kann den Host-Header nicht setzen -> http.request.
+function forgotWithHost(srv, c, host, login) {
+  const body = JSON.stringify({ login });
+  const cookie = Object.entries(c.jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  const headers = { Host: host, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), Cookie: cookie, 'X-CSRF-Token': c.jar.csrfToken || '' };
+  return new Promise((resolve, reject) => {
+    const r = http.request({ host: '127.0.0.1', port: srv.port, method: 'POST', path: '/api/auth/forgot-password', headers }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    r.on('error', reject);
+    r.end(body);
+  });
+}
+const outbox = async (srv) => {
+  await new Promise((r) => setTimeout(r, 300)); // Mail wird nicht abgewartet
+  try {
+    return fs.readFileSync(path.join(srv.dataDir, 'mail-outbox.log'), 'utf8');
+  } catch {
+    return '';
+  }
+};
+
+test('Reset-Link folgt nie einem gefälschten Host-Header (#151)', async () => {
+  const evil = 'evil.example:80';
+  let srv = await startServer({ PUBLIC_URL: undefined, ALLOWED_HOSTS: undefined });
+  try {
+    const c = client(srv.base);
+    await c.call('GET', '/api/auth/me');
+    // Ohne PUBLIC_URL: fremder Host -> kein Link, gleiche Antwort mit und ohne Konto.
+    assert.strictEqual(await forgotWithHost(srv, c, evil, 'admin'), 503);
+    assert.strictEqual(await forgotWithHost(srv, c, evil, 'niemand'), 503);
+    assert.doesNotMatch(await outbox(srv), /reset=/);
+    // Eigene Loopback-Adresse bleibt erlaubt.
+    assert.strictEqual(await forgotWithHost(srv, c, `127.0.0.1:${srv.port}`, 'admin'), 200);
+    const log = await outbox(srv);
+    assert.match(log, new RegExp(`http://127\\.0\\.0\\.1:${srv.port}/\\?reset=`));
+    assert.doesNotMatch(log, /evil\.example/);
+  } finally {
+    await srv.stop();
+  }
+  srv = await startServer({ PUBLIC_URL: 'https://ide.test/' });
+  try {
+    const c = client(srv.base);
+    await c.call('GET', '/api/auth/me');
+    assert.strictEqual(await forgotWithHost(srv, c, evil, 'admin'), 200);
+    const log = await outbox(srv);
+    assert.match(log, /https:\/\/ide\.test\/\?reset=/);
+    assert.doesNotMatch(log, /evil\.example/);
   } finally {
     await srv.stop();
   }

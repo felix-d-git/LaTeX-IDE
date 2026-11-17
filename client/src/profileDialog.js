@@ -338,7 +338,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
         if (!invite.usedByEmail && !invite.expired) {
           const copyBtn = el('button', null, 'Link kopieren');
           copyBtn.addEventListener('click', async () => {
-            const link = `${baseUrl}/?invite=${invite.token}`;
+            const link = `${baseUrl || location.origin}/?invite=${invite.token}`;
             if (!(await copyText(link))) prompt('Einladungslink (zum Kopieren markieren):', link);
           });
           const revokeBtn = el('button', 'danger', 'Widerrufen');
@@ -352,7 +352,8 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       }
     }
     createBtn.addEventListener('click', async () => {
-      const { url } = await adminApi.createInvite();
+      const { token, url: serverUrl } = await adminApi.createInvite();
+      const url = serverUrl || `${location.origin}/?invite=${token}`; // #151: server without PUBLIC_URL
       await navigator.clipboard.writeText(url);
       alert('Einladungslink wurde in die Zwischenablage kopiert:\n' + url);
       refresh();
