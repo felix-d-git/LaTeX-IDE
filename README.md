@@ -244,6 +244,13 @@ der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
   läuft ein Checkout mit lokalen Änderungen oder einem Commit, der auf keinem
   GitHub-Remote liegt, ohne `SOURCE_URL`, warnen Server-Log und ein Hinweis für
   Admins.
+- TeX, Pandoc und andere GPL-Programme laufen als externe Prozesse (bloße
+  Zusammenstellung). Ausnahme: `server/lib/luaSandbox.lua` ist ein Startskript,
+  das LuaLaTeX in seinen eigenen Lua-Interpreter lädt (`lualatex --lua=…`),
+  also im selben Prozess wie LuaTeX (GPL-2.0-or-later) und luaotfload
+  (GPL-2.0-only). Es ist ein eigenständiges Werk, nutzt nur deren öffentliche
+  Lua-Schnittstelle und wird als getrennte Datei ausgeliefert, nie in ein
+  Format eingebacken.
 - Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md), Urheber: [AUTHORS](AUTHORS).
 
 ## Marken
