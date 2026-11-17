@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 # Standard A: seit dem letzten Release nur Dependabot-Commits -> Patch-Release (der Pi zieht es nachts).
-# Sobald auch eigene Commits dabei sind, wird nicht automatisch released.
+# Sobald auch eigene Commits dabei sind, wird nicht automatisch released. Frische Merges warten
+# MIN_AGE_H Stunden (Dependabot-cooldown + diese Wartezeit = Abkuehlphase vor der Auslieferung).
 name: Auto-Release
 on:
   schedule: [{cron: "30 0 * * *"}]
@@ -18,11 +19,16 @@ jobs:
           fetch-depth: 0
       - env:
           GH_TOKEN: ${{ github.token }}
+          MIN_AGE_H: 48
         run: |
           last=$(gh release view --json tagName -q .tagName) || { echo "noch kein Release"; exit 0; }
           authors=$(git log "$last"..HEAD --format=%an | sort -u)
           [ -n "$authors" ] || { echo "nichts Neues seit $last"; exit 0; }
           [ "$authors" = "dependabot[bot]" ] || { echo "eigene Commits seit $last -> manuelles Release"; exit 0; }
+          # Wartezeit (#177): erst releasen, wenn der juengste Commit MIN_AGE_H Stunden alt ist -
+          # Zeit, eine kompromittierte Version zu entdecken, bevor der Server sie einspielt.
+          age_h=$(( ($(date +%s) - $(git log -1 --format=%ct)) / 3600 ))
+          [ "$age_h" -ge "$MIN_AGE_H" ] || { echo "juengster Commit erst ${age_h} h alt (< $MIN_AGE_H h) -> spaeter"; exit 0; }
           IFS=. read -r ma mi pa <<< "${last#v}"
           next="v$ma.$mi.$((${pa%%[!0-9]*}+1))"
           # release.yml verlangt Tag == package.json, master ist PR-geschützt -> Bump-Commit nur am Tag

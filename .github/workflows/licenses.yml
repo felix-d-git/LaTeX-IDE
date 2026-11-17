@@ -29,7 +29,8 @@ jobs:
           node-version: 26
 
       - name: Abhaengigkeiten installieren
-        run: npm ci
+        # Keine Lifecycle-Scripts fremder Pakete (#177); nur esbuild braucht seins.
+        run: npm ci --ignore-scripts && npm rebuild esbuild
 
       - name: THIRD_PARTY_NOTICES.md pruefen
         run: node scripts/licenses.js --check

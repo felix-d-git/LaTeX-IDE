@@ -13,7 +13,8 @@ FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
-RUN npm ci
+# No lifecycle scripts of third-party packages (#177); only esbuild needs its own.
+RUN npm ci --ignore-scripts && npm rebuild esbuild
 COPY . .
 # Bundle banner (build.js, server/lib/legal.js): same source link as /source in the final image.
 # .git is not in the build context, so without SOURCE_URL both fall back to the version tag.
