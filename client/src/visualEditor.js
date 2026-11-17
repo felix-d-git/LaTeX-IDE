@@ -189,7 +189,7 @@ async function pdfThumb(url) {
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      pdf.destroy();
+      pdf.loadingTask.destroy();
       return canvas.toDataURL('image/png');
     })().catch((e) => { pdfThumbs.delete(url); throw e; }));
   }

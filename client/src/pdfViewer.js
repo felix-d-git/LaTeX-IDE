@@ -38,7 +38,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     container.querySelectorAll('.pdf-native-frame').forEach((f) => f.remove());
     // Beim Wechsel in beide Richtungen das PDF.js-Dokument freigeben; der
     // nächste load() lädt neu (#46).
-    if (pdfDoc) pdfDoc.destroy();
+    if (pdfDoc) pdfDoc.loadingTask.destroy(); // pdf.js v6: Dokument hat kein destroy() mehr
     pdfDoc = null;
     renderToken++; // laufendes renderAll auf dem zerstörten Dokument beendet sich still
     rendering = false;
@@ -113,12 +113,12 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
       }
     }
     if (native || pendingPath || gen !== loadGen) {
-      doc.destroy(); // überholt: nächster Pfad lädt gleich
+      doc.loadingTask.destroy(); // überholt: nächster Pfad lädt gleich
       return;
     }
     const oldDoc = pdfDoc;
     pdfDoc = doc;
-    if (oldDoc && oldDoc !== doc) oldDoc.destroy();
+    if (oldDoc && oldDoc !== doc) oldDoc.loadingTask.destroy();
     if (emptyEl && emptyEl.parentNode) emptyEl.remove();
     if (!samePdf) currentPage = 1;
     await renderAll(keep);
@@ -308,7 +308,7 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     lastStable = null;
     currentPath = null;
     currentPage = 1;
-    if (pdfDoc) pdfDoc.destroy();
+    if (pdfDoc) pdfDoc.loadingTask.destroy(); // pdf.js v6: Dokument hat kein destroy() mehr
     pdfDoc = null;
     container.querySelectorAll('.pdf-page, .pdf-native-frame').forEach((c) => c.remove());
     pageWrappers.clear();
