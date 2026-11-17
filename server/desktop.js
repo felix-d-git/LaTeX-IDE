@@ -21,7 +21,7 @@ const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
 const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
 const legal = require('./lib/legal');
-const { checkUrl } = require('./lib/desktopAssets');
+const { checkUrl, verifyDownload } = require('./lib/desktopAssets');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 const os = require('os');
@@ -309,10 +309,12 @@ app.post('/api/desktop/update/install', ah(async (req, res) => {
     checkUrl(REMOTE); // never run code fetched over plain http (#147)
     const r = await fetch(`${REMOTE}/api/desktop/download/${UPDATE_OS}`, {
       headers: { Authorization: `Bearer ${config.token}` },
+      redirect: 'error', // only from REMOTE itself, never a redirect target
       signal: AbortSignal.timeout(900000),
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
+    verifyDownload(buf, r.headers.get('x-content-sha256')); // corrupt/truncated/swapped → abort before writing (#147)
     if (process.platform === 'darwin') {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'latexide-update-'));
       const zip = path.join(tmp, 'update.zip');

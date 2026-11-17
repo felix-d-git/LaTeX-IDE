@@ -7,7 +7,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { createDesktopAssets, checkUrl } = require('../server/lib/desktopAssets');
+const { PassThrough } = require('stream');
+const { createDesktopAssets, checkUrl, verifyDownload } = require('../server/lib/desktopAssets');
 
 const PAYLOAD = Buffer.from('echtes Setup');
 const sha = (b) => 'sha256:' + crypto.createHash('sha256').update(b).digest('hex');
@@ -45,3 +46,18 @@ test('Server-Adresse: https oder nur lokal http', () => {
   for (const ok of ['https://latex.example.org', 'http://localhost:3077', 'http://127.0.0.1:3099/x']) checkUrl(ok);
   for (const bad of ['http://rechner:3077', 'http://192.168.1.5', 'http://localhost.evil.org', 'ftp://x']) assert.throws(() => checkUrl(bad), /Ungültige/);
 });
+
+test('Desktop-App prüft das ausgelieferte Paket gegen X-Content-SHA256', withFetch(sha(PAYLOAD), PAYLOAD, async (assets) => {
+  const res = new PassThrough();
+  res.set = (h) => (res.headers = h);
+  const chunks = [];
+  res.on('data', (c) => chunks.push(c));
+  await assets.send('windows', 'https://latex.example.org', res);
+  const body = Buffer.concat(chunks);
+  assert.strictEqual(body.length, PAYLOAD.length + 1024);
+  verifyDownload(body, res.headers['X-Content-SHA256']);
+  const bad = Buffer.from(body);
+  bad[0] ^= 1;
+  assert.throws(() => verifyDownload(bad, res.headers['X-Content-SHA256']), /stimmt nicht/);
+  assert.throws(() => verifyDownload(body, undefined), /ohne Prüfsumme/);
+}));
