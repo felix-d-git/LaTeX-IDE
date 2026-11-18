@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const vault = require('./vault');
 
 const DATA_PATH = path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), 'auth-data.json');
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
@@ -40,9 +41,20 @@ function save(data) {
   const tmp = DATA_PATH + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, DATA_PATH);
+  vault.writeThrough(DATA_PATH); // synchron, kein 500-ms-Debounce (#161)
 }
 
 const data = load();
+
+// Persist-then-swap (#161): mutate a copy, persist it, only then make it the live state. If save() throws,
+// the old state stays live and the caller gets the error.
+function commit(mutate) {
+  const next = structuredClone(data);
+  const result = mutate(next);
+  save(next);
+  Object.assign(data, next);
+  return result;
+}
 
 function randomToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -162,11 +174,12 @@ async function resetInitialPassword(user, password) {
   user.passwordHash = await bcrypt.hash(password, 12);
   user.passwordChangedAt = new Date().toISOString();
   user.mustChangePassword = true;
-  const before = data.apiTokens.length + data.mcpTokens.length;
-  data.apiTokens = data.apiTokens.filter((t) => t.userId !== user.id);
-  data.mcpTokens = data.mcpTokens.filter((t) => t.userId !== user.id);
-  save(data);
-  return before - data.apiTokens.length - data.mcpTokens.length;
+  return commit((d) => {
+    const before = d.apiTokens.length + d.mcpTokens.length;
+    d.apiTokens = d.apiTokens.filter((t) => t.userId !== user.id);
+    d.mcpTokens = d.mcpTokens.filter((t) => t.userId !== user.id);
+    return before - d.apiTokens.length - d.mcpTokens.length;
+  });
 }
 
 // --- Invites: admin generates a link, the recipient uses it once to self-register ---
@@ -282,8 +295,7 @@ function listApiTokens(userId) {
 }
 
 function revokeApiToken(userId, id) {
-  data.apiTokens = data.apiTokens.filter((t) => !(t.userId === userId && t.id === id));
-  save(data);
+  commit((d) => { d.apiTokens = d.apiTokens.filter((t) => !(t.userId === userId && t.id === id)); });
 }
 
 // --- MCP tokens (external AI tools): single rights, for all projects (perms) or per selected project (projects), stored hashed ---
@@ -367,8 +379,7 @@ function listMcpTokens(userId) {
 }
 
 function revokeMcpToken(userId, id) {
-  data.mcpTokens = data.mcpTokens.filter((t) => !(t.userId === userId && t.id === id));
-  save(data);
+  commit((d) => { d.mcpTokens = d.mcpTokens.filter((t) => !(t.userId === userId && t.id === id)); });
 }
 
 // Removes the account and everything keyed to it (tokens, invites it used stay as history).
@@ -412,9 +423,10 @@ function listUsers() {
 }
 
 function deleteUser(id) {
-  data.users = data.users.filter((u) => u.id !== id);
-  for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
-  save(data);
+  commit((d) => {
+    d.users = d.users.filter((u) => u.id !== id);
+    for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) d[k] = d[k].filter((t) => t.userId !== id);
+  });
 }
 
 module.exports = {
