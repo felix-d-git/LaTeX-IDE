@@ -181,6 +181,14 @@ function start() {
       try { sweep(); } catch (e) { console.error('[vault] Abschluss-Sync fehlgeschlagen:', e.message); }
       return watcher.close();
     },
+    // Synchroner Write-Through fuer sicherheitskritische Dateien (#161): wirft, wenn der Spiegel fehlschlaegt.
+    writeThrough(abs) {
+      const r = rel(abs);
+      clearTimeout(timers.get(r)); timers.delete(r);
+      const st = fs.statSync(abs);
+      v.put(r, fs.readFileSync(abs), st.mtimeMs);
+      seen.set(r, st.mtimeMs);
+    },
   };
   return true;
 }
@@ -188,6 +196,11 @@ function start() {
 // Fuer den Graceful Shutdown: ausstehende Schreibvorgaenge sofort erledigen.
 function flush() {
   return active ? active.flush() : undefined;
+}
+
+// Ohne aktiven Vault No-op; sonst sofort verschluesselt spiegeln (kein Debounce), Fehler gehen an den Aufrufer.
+function writeThrough(abs) {
+  if (active) active.writeThrough(abs);
 }
 
 // Einmal-Migration: Klartextordner -> VAULT_DIR (ohne Ausnahmen, Klartext bleibt).
@@ -210,7 +223,7 @@ function encryptDir(src) {
   return n;
 }
 
-module.exports = { start, flush, makeVault, restore };
+module.exports = { start, flush, writeThrough, makeVault, restore };
 
 if (require.main === module) {
   const [cmd, arg] = process.argv.slice(2);

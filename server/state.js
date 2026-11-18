@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const fs = require('fs');
 const path = require('path');
+const vault = require('./lib/vault');
 
 const CONFIG_PATH = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'workspace.json');
 
@@ -21,6 +22,7 @@ function loadWorkspace() {
 function saveWorkspace(ws) {
   fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), 'utf8');
   fs.renameSync(CONFIG_PATH + '.tmp', CONFIG_PATH);
+  vault.writeThrough(CONFIG_PATH); // synchron, kein 500-ms-Debounce (#161)
 }
 
 const workspace = loadWorkspace();
@@ -35,6 +37,14 @@ if (!workspace.labelsByUser) workspace.labelsByUser = {};
 if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root -> [{ ms, at, estimateMs? }], letzte 10 Läufe
 
 // Every root key is absolute + normalized; a relative DATA_DIR (./data) used to store relative ones.
+// Persist-then-swap (#161): mutate a copy, persist it, only then make it the live state; on a save error the old state stays.
+function commitWs(mutate) {
+  const next = structuredClone(workspace);
+  mutate(next);
+  saveWorkspace(next);
+  Object.assign(workspace, next);
+}
+
 const rk = (r) => (r ? path.resolve(r) : r);
 const ROOT_MAPS = ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot'];
 
@@ -153,9 +163,10 @@ function getShares(root) {
 
 function setShares(root, userIds) {
   root = rk(root);
-  if (userIds.length) workspace.sharesByRoot[root] = userIds;
-  else delete workspace.sharesByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (userIds.length) w.sharesByRoot[root] = userIds;
+    else delete w.sharesByRoot[root];
+  });
 }
 
 function getRole(root, userId) {
@@ -167,9 +178,10 @@ function setRole(root, userId, role) {
   const m = { ...(workspace.rolesByRoot[root] || {}) };
   if (role === 'reviewer') m[userId] = role;
   else delete m[userId];
-  if (Object.keys(m).length) workspace.rolesByRoot[root] = m;
-  else delete workspace.rolesByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (Object.keys(m).length) w.rolesByRoot[root] = m;
+    else delete w.rolesByRoot[root];
+  });
 }
 
 // Link je Rolle: { token, maxUses (0 = unbegrenzt), uses }. Alte Einträge waren nur der Token-String.
@@ -186,9 +198,10 @@ function setShareLink(root, role, link) {
   const m = { ...getShareLinks(root) };
   if (link) m[role] = link;
   else delete m[role];
-  if (Object.keys(m).length) workspace.shareLinksByRoot[root] = m;
-  else delete workspace.shareLinksByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (Object.keys(m).length) w.shareLinksByRoot[root] = m;
+    else delete w.shareLinksByRoot[root];
+  });
 }
 
 function findShareLink(token) {
