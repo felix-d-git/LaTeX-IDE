@@ -22,6 +22,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           MIN_AGE_H: 48
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           last=$(gh release view --json tagName -q .tagName) || { echo "noch kein Release"; exit 0; }
           authors=$(git log "$last"..HEAD --format=%an | sort -u)
@@ -38,5 +39,11 @@ jobs:
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           npm version "${next#v}" --no-git-tag-version
           git commit -qam "Release $next"
-          git tag "$next" && git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$next"
+          # Signierter Tag (#172): der Server prueft ihn per git verify-tag. Kein Secret -> laut scheitern.
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::Secret RELEASE_SIGNING_KEY fehlt - kein unsignierter Release-Tag"; exit 1; }
+          keyfile="$RUNNER_TEMP/release_signing_key"
+          (umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$keyfile")
+          git config gpg.format ssh
+          git config user.signingkey "$keyfile"
+          git tag -s "$next" -m "Release $next" && rm -f "$keyfile" && git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$next"
           gh workflow run release.yml --ref "$next" -f tag="$next"
