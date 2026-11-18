@@ -16,14 +16,17 @@ on:
       - .github/workflows/synctex-windows.yml
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   synctex:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:

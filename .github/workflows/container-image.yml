@@ -30,13 +30,14 @@ on:
         type: string
         required: true
 
-permissions:
-  contents: write   # Paketliste als Release-Asset
-  packages: write
+permissions: {}
 
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Paketliste als Release-Asset
+      packages: write   # Push nach ghcr
     env:
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
       # nicht-leer = Lauf gehoert zu einem Release (Event "release" oder Aufruf aus release.yml)
@@ -46,6 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || '' }}
+          persist-credentials: false
 
       - name: Image bauen
         run: |
