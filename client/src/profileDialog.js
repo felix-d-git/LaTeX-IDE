@@ -268,7 +268,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     const user = field('Benutzer');
     const pass = field('Passwort', 'password');
     const from = field('Absender', 'text', 'wide');
-    const secure = field('SSL/TLS von Anfang an (Port 465)', 'checkbox', 'wide');
+    const secure = field('SSL/TLS von Anfang an (Port 465; sonst setzt Port 587 STARTTLS voraus)', 'checkbox', 'wide');
     const mode = el('select');
     for (const [v, t] of [['mail', 'per Mail (Bestätigungslink)'], ['admin', 'Admin bestätigt manuell'], ['auto', 'automatisch bei Einladung']]) {
       const o = el('option', null, t);

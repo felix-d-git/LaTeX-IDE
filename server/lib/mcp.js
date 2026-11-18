@@ -204,10 +204,12 @@ function createMcp(ctx) {
         if (running && !running.done) return 'Es läuft bereits ein Lauf für dieses Projekt.\n' + jobStatus(running);
         const main = ctx.state.getMainFile(root) || findMainCandidate(root);
         if (!main) throw new Error('Keine .tex-Hauptdatei gefunden.');
+        if (!ctx.compileAllowed(a.user)) throw new Error('Zu viele Compile-Anfragen. Bitte später erneut probieren.');
         const est = estimate(root);
         const job = { startedAt: Date.now(), estimateMs: est.ms, basis: est.basis, done: false };
+        const p = ctx.runCompile(root, main, a.user.id, { estimateMs: est.ms, via: 'mcp' }); // throws on the per-user cap (429)
         jobs.set(root, job);
-        ctx.runCompile(root, main, a.user.id, { estimateMs: est.ms, via: 'mcp' }).then(
+        p.then(
           (result) => Object.assign(job, { result, text: summarize(result), actualMs: result.durationMs }),
           (e) => Object.assign(job, { text: `Kompilierung abgebrochen: ${e.message}` })
         ).finally(() => {
