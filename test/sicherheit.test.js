@@ -41,7 +41,7 @@ test('Passwortwechsel/-Reset widerruft Desktop- und MCP-Token', async () => {
     await c.login('admin', ADMIN_PASSWORD);
     const tokens = async () => [
       (await c.call('POST', '/api/auth/desktop-token', { label: 'Test' })).body.token,
-      (await c.call('POST', '/api/auth/mcp-token', { name: 'Test', perms: ['read'] })).body.token,
+      (await c.call('POST', '/api/auth/mcp-token', { name: 'Test', perms: ['read'], allProjects: true })).body.token,
     ];
     const status = async ([desktop, mcp]) => [
       (await fetch(srv.base + '/api/auth/me', { headers: { Authorization: `Bearer ${desktop}` } })).status,
@@ -136,7 +136,7 @@ test('XFF-Spoofing, Konto-Login-Limit und MCP-Batch-Limit (#154)', async () => {
     for (let i = 0; i < 20; i++) assert.strictEqual(await login(srv.base, ' Opfer ', i), 401);
     assert.strictEqual(await login(srv.base, 'opfer', 21), 429);
     // MCP: Batch > 20 -> 400, Auth zuerst geprüft.
-    const t = (await (async () => { const c = client(srv.base); await c.login('admin', ADMIN_PASSWORD); return (await c.call('POST', '/api/auth/mcp-token', { name: 'T', perms: ['read'] })).body.token; })());
+    const t = (await (async () => { const c = client(srv.base); await c.login('admin', ADMIN_PASSWORD); return (await c.call('POST', '/api/auth/mcp-token', { name: 'T', perms: ['read'], allProjects: true })).body.token; })());
     const post = (n) => fetch(srv.base + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${t}` }, body: JSON.stringify(Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: i, method: 'ping' }))) });
     assert.strictEqual((await post(21)).status, 400);
     const ok = await post(20);
