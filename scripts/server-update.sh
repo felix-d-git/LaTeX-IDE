@@ -18,6 +18,7 @@
 # .env, .update.env and anything not in the release stay untouched. Progress goes to
 # .update-status next to .update-request, where the web UI shows it to admins.
 set -euo pipefail
+umask 077  # backups hold the whole data dir incl. secrets (#168)
 
 # Everything runs inside main(): bash parses the whole function before running it.
 # Step 2 copies the new release over this very file (same inode); without main()
@@ -96,6 +97,7 @@ status running
 
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz" --exclude="$BACKUP_SRC/desktop" \
   --exclude="$BACKUP_SRC/.update-request" --exclude="$BACKUP_SRC/.update-status" --exclude="$BACKUP_SRC/initial-admin-password.txt" \
   --exclude='*/.latex-ide-out' \

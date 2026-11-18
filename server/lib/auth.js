@@ -39,7 +39,7 @@ function load() {
 // tmp + rename: a crash mid-write must never leave a truncated auth file behind.
 function save(data) {
   const tmp = DATA_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, DATA_PATH);
   vault.writeThrough(DATA_PATH); // synchron, kein 500-ms-Debounce (#161)
 }
