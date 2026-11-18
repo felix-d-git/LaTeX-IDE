@@ -417,6 +417,13 @@ const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
+const limitSearch = authMw.rateLimit('search', 30, 60 * 1000, (req) => req.user.id);
+// Dieselbe Begrenzung für das MCP-Werkzeug search (Aufruf ohne echten req/res).
+function searchAllowed(user) {
+  let ok = true;
+  limitSearch({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
+  return ok;
+}
 // Local mode has no mail and only one login-free account: these routes have nothing to do there.
 const notLocal = (req, res, next) => (authMw.LOCAL_MODE ? res.status(404).json({ error: 'Im lokalen Modus nicht verfügbar.' }) : next());
 
@@ -711,7 +718,7 @@ const mcpTokenFirst = (req, res, next) => {
   if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
   res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
 };
-const mcp = createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
+const mcp = createMcp({ searchAllowed, PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
 app.post('/mcp', limitMcp, mcpTokenFirst, bigJson, ah(mcp));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
@@ -2211,12 +2218,12 @@ app.get('/api/refs', (req, res) => {
   res.json(collectRefs(root));
 });
 
-app.get('/api/search', (req, res) => {
+app.get('/api/search', limitSearch, async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { q, regex, caseSensitive, wholeWord } = req.query;
   try {
-    const results = searchProject(root, q, {
+    const results = await searchProject(root, String(q || ''), {
       regex: regex === 'true',
       caseSensitive: caseSensitive === 'true',
       wholeWord: wholeWord === 'true',
