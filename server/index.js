@@ -509,7 +509,10 @@ app.post('/api/auth/resend-verification', notLocal, limitMail, requireBaseUrl, a
 app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) => {
   const { password, rememberMe } = req.body;
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
-  const ok = user && (await auth.verifyPassword(user, password));
+  // TOCTOU (#153): stamp before the slow bcrypt compare; a password change meanwhile voids the result.
+  const startedAt = Date.now();
+  const hashAtStart = user && user.passwordHash;
+  const ok = user && (await auth.verifyPassword(user, password)) && user.passwordHash === hashAtStart;
   if (!ok) return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
   if (!auth.isVerified(user)) {
     return res.status(403).json({ error: verifyMode() === 'mail' ? 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).' : 'Dein Konto wartet noch auf die Bestätigung durch einen Admin.', unverified: true });
@@ -517,7 +520,7 @@ app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) =
   req.session.regenerate((err) => {
     if (err) return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
     req.session.userId = user.id;
-    req.session.loginAt = Date.now();
+    req.session.loginAt = startedAt;
     authMw.applyRememberMe(req, !!rememberMe);
     res.json({ user: auth.toPublicUser(user) });
   });
@@ -827,7 +830,8 @@ app.get('/api/desktop/download/:os', ah(async (req, res) => {
 
 app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  if (!(await auth.verifyPassword(req.user, currentPassword))) {
+  const hashAtStart = req.user.passwordHash;
+  if (!(await auth.verifyPassword(req.user, currentPassword)) || req.user.passwordHash !== hashAtStart) {
     return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
   }
   try {
