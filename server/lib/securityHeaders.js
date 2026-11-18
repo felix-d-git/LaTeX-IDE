@@ -59,6 +59,8 @@ function securityHeaders({ reportOnly = envFlag(process.env.CSP_REPORT_ONLY), co
     // Not part of the report-only rollout: clickjacking protection is on from the start.
     res.setHeader('X-Frame-Options', framed ? 'SAMEORIGIN' : 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
+    // HSTS only over HTTPS; no includeSubDomains/preload (would affect other hosts of the domain) (#165)
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     res.setHeader(cspHeader, framed ? framedPolicy : policy);
     next();
   };
