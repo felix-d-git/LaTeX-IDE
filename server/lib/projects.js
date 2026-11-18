@@ -125,12 +125,12 @@ function uniqueDest(dir, name) {
 }
 
 // Neues Projekt aus Zip-Bytes; Name = Zip-Name ohne .zip, bei Kollision Suffix _2, _3 ...
-function importZip(projectsDir, zipName, buf) {
+function importZip(projectsDir, zipName, buf, onTotal) {
   const base = (zipName || '').replace(/\.zip$/i, '').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim() || 'Import';
   const root = uniqueDest(projectsDir, base);
   fs.mkdirSync(root, { recursive: true });
   try {
-    extractZip(buf, root);
+    extractZip(buf, root, onTotal);
   } catch (e) {
     fs.rmSync(root, { recursive: true, force: true });
     throw e;

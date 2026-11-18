@@ -313,6 +313,49 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     return box;
   }
 
+  const LIMIT_LABELS = {
+    userQuotaMb: 'Speicherkontingent pro Konto (MB, Admins ausgenommen)',
+    zipLimitMb: 'Max. Größe eines Zip-Uploads (MB)',
+    freeReserveMb: 'Freie-Speicher-Reserve des Servers (MB; darunter werden Schreib- und Compile-Vorgänge abgelehnt)',
+    commentMaxChars: 'Kommentar: max. Zeichen',
+    labelMaxChars: 'Verlauf-Bezeichnung: max. Zeichen',
+    maxLabeledEntries: 'Verlauf: max. geschützte Einträge (benannt/Wiederherstellung) pro Projekt',
+  };
+
+  function renderLimitsSection() {
+    const box = el('div');
+    const form = el('div', 'admin-form');
+    box.append(el('h4', null, 'Limits'), note('Werte wirken sofort ohne Neustart. Vorgabe = Wert aus der Server-.env bzw. eingebauter Standard.'), form);
+    const inputs = {};
+    for (const [key, text] of Object.entries(LIMIT_LABELS)) {
+      const i = el('input');
+      i.type = 'number';
+      i.min = '1';
+      i.step = '1';
+      inputs[key] = i;
+      const l = el('label', 'settings-field wide');
+      l.append(text, i);
+      form.appendChild(l);
+    }
+    const saveBtn = el('button', 'primary', 'Speichern');
+    const actions = el('div', 'admin-actions');
+    actions.appendChild(saveBtn);
+    box.appendChild(actions);
+    const apply = ({ limits }) => {
+      for (const [k, i] of Object.entries(inputs)) { i.value = limits[k].value; i.max = limits[k].max; i.title = `Vorgabe: ${limits[k].default}`; }
+    };
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const body = {};
+        for (const [k, i] of Object.entries(inputs)) body[k] = i.value;
+        apply(await adminApi.saveLimits(body));
+        alert('Gespeichert.');
+      } catch (e) { alert(e.message); }
+    });
+    adminApi.getLimits().then(apply).catch((e) => box.appendChild(note(e.message)));
+    return box;
+  }
+
   function renderInviteSection() {
     const box = el('div');
     const createBtn = el('button', 'primary', '+ Neue Einladung erstellen');
@@ -372,6 +415,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     update: () => [renderUpdateSection()],
     users: () => [renderUserSection(), renderInviteSection()],
     mail: () => [renderMailSection()],
+    limits: () => [renderLimitsSection()],
   };
   const tabsBar = document.getElementById('admin-tabs');
   let activeTab = 'update';
