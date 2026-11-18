@@ -64,7 +64,14 @@ jobs:
       - name: Inno Setup
         shell: pwsh
         run: |
-          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) {
+            # Feste Version + SHA-256 des Pakets (#175): nupkg selbst laden, pruefen, dann lokal installieren.
+            $dir = Join-Path $env:RUNNER_TEMP 'innosetup-pkg'
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Invoke-WebRequest 'https://community.chocolatey.org/api/v2/package/innosetup/6.7.1' -OutFile "$dir\innosetup.6.7.1.nupkg"
+            if ((Get-FileHash "$dir\innosetup.6.7.1.nupkg" -Algorithm SHA256).Hash -ne 'a0dad33db33099d9cd2b89ac2d08b5d70c589b15118ced3b95f469f044f99950'.ToUpper()) { throw 'Inno Setup nupkg: SHA-256 stimmt nicht' }
+            choco install innosetup --version 6.7.1 --source $dir -y --no-progress
+          }
 
       # npm ci laeuft darin mit --ignore-scripts + npm rebuild esbuild (installer/build-release.ps1).
       - name: Pakete bauen
@@ -121,6 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write       # Attestation (#174)
+      attestations: write
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
@@ -143,6 +152,16 @@ jobs:
           name: macos-zip
           path: assets
 
+      # Pruefsummen + Provenienz (#174): SHA256SUMS am Release, Build-Attestation fuer beide Pakete.
+      - name: SHA256SUMS erzeugen
+        run: (cd assets && sha256sum LatexIDE-Setup.exe LatexIDE-macOS.zip > SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            assets/LatexIDE-Setup.exe
+            assets/LatexIDE-macOS.zip
+
       - name: Release-Entwurf anlegen
         run: |
           if rel=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null); then
@@ -152,7 +171,7 @@ jobs:
           fi
 
       - name: An Release haengen
-        run: gh release upload "$TAG" assets/LatexIDE-Setup.exe assets/LatexIDE-macOS.zip --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" assets/LatexIDE-Setup.exe assets/LatexIDE-macOS.zip assets/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
 
       # Download overview from .github/release-template.md under the release text (once).
       - name: Download-Uebersicht in den Release-Text
@@ -167,7 +186,7 @@ jobs:
       - name: Release veroeffentlichen
         run: |
           assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
-          for a in LatexIDE-Setup.exe LatexIDE-macOS.zip; do echo "$assets" | grep -qx "$a" || { echo "Asset $a fehlt"; exit 1; }; done
+          for a in LatexIDE-Setup.exe LatexIDE-macOS.zip SHA256SUMS; do echo "$assets" | grep -qx "$a" || { echo "Asset $a fehlt"; exit 1; }; done
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
   # Container-Image: container-image.yml haengt sonst nur am release-Event, das GITHUB_TOKEN nicht ausloest.
@@ -179,3 +198,4 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write   # keyless cosign (#174)
