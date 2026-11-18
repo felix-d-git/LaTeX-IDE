@@ -375,7 +375,7 @@ app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (re
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ data: String(req.body.data || ''), language }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(60000),
     });
     if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
     res.json({ matches: (await r.json()).matches || [] });
