@@ -37,6 +37,15 @@ const sessionStore = new FileStore({
   ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
+// COOKIE_SECURE=true: always Secure; false: never; unset: Secure when the request came in over
+// HTTPS (req.secure, honours TRUST_PROXY / X-Forwarded-Proto) (#165).
+function cookieSecureFor(req) {
+  const v = String(process.env.COOKIE_SECURE || '').trim().toLowerCase();
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return !!req.secure;
+}
+
 function createSessionMiddleware() {
   return session({
     name: SESSION_COOKIE_NAME,
@@ -47,7 +56,9 @@ function createSessionMiddleware() {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: ['true', 'false'].includes(String(process.env.COOKIE_SECURE || '').trim().toLowerCase())
+        ? String(process.env.COOKIE_SECURE).trim().toLowerCase() === 'true'
+        : 'auto',
       // no maxAge here = regular session cookie (expires on browser close);
       // login sets an explicit maxAge on req.session.cookie when "Angemeldet bleiben" is checked.
     },
@@ -61,7 +72,7 @@ function ensureCsrfCookie(req, res, next) {
     res.cookie(CSRF_COOKIE_NAME, token, {
       httpOnly: false, // client JS must read this to echo it back in the X-CSRF-Token header
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: cookieSecureFor(req),
     });
   }
   req.csrfToken = token;

@@ -399,6 +399,7 @@ function userProjectsDir(user) {
 // ALLOWED_HOSTS (comma/space separated host[:port]) or the server itself on loopback; local mode
 // already rejects every other host (DNS-rebinding check above). Otherwise null = no link.
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+if (/^https/i.test(PUBLIC_URL) && String(process.env.COOKIE_SECURE).trim().toLowerCase() === 'false') console.warn('[security] PUBLIC_URL ist https, aber COOKIE_SECURE=false: Cookies ohne Secure-Attribut. COOKIE_SECURE entfernen oder auf true setzen.');
 const ALLOWED_HOSTS = new Set([
   ...String(process.env.ALLOWED_HOSTS || '').split(/[\s,]+/).filter(Boolean),
   ...['localhost', '127.0.0.1', '[::1]'].map((h) => `${h}:${PORT}`),
