@@ -11,6 +11,10 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 2: #159 → max. 2 eingereihte/laufende Compiles pro Nutzer (429), Rate-Limit pro Nutzer auf /api/compile + MCP compile, Reviewer kein clear-cache; Round-Robin + Timeout-Senkung verworfen
 - 18.11.2026 Wave 2: #154 → TRUST_PROXY-Env, Default loopback, Pi-Compose passend; Login-Limit pro Konto, MAX_KEYS für Limiter-Map, MCP-Batch ≤20 sequentiell; Logging (Punkt 5) → #176
 - 18.11.2026 Wave 2: #167 → requireTLS bei secure=false, TLS ≥1.2, Klartext nur mit SMTP_ALLOW_PLAIN=true (kein localhost-Automatismus), Hinweis im Admin-UI
+- 18.11.2026 Wave 3: #153 → nur TOCTOU-Fix (Zeitstempel + Hash vor verifyPassword, Hash-Gleichheit danach); Sitzungsübersicht verworfen (später)
+- 18.11.2026 Wave 3: #165 → COOKIE_SECURE auto/true/false (Default auto), CSRF-Cookie ebenso, HSTS nur bei req.secure ohne includeSubDomains, Start-Warnung; __Host--Präfix verworfen (meldet alle ab)
+- 18.11.2026 Wave 3: #166 → stdout nur maskierte Adresse + Betreff, Outbox 0600 + 48h-Trim, bei konfiguriertem SMTP + Fehler kein Outbox-Eintrag; Admin-UI-Linkanzeige verworfen
+- 18.11.2026 Wave 3: #170 → E-Mail nur für canManage + eigenen Eintrag, keine E-Mail bei Suche per Name, limitShare 30 Fehlversuche/15 min; Einladungs-Workflow verworfen
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
@@ -37,3 +41,15 @@ Base: master (tabu) · Second: staging/second-branch
 | #167 | 1 | agent-4 | DONE |
 - Merges: agent-1 c0485d1, agent-4 b542f24 konfliktfrei; agent-2 + agent-3 erst Konflikt in test/sicherheit.test.js → Worker hat staging in seinen Branch gemergt, dann agent-2 28f63f6, agent-3 0ae8f9b
 - Suite: 286 Tests, 283 pass, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
+
+## Wave 3 (18.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #153 | 1 | agent-1 | DONE |
+| #165 | 1 | agent-2 | DONE |
+| #166 | 1 | agent-3 | DONE |
+| #170 | 1 | agent-4 | DONE |
+- Merges konfliktfrei: agent-1 8e67d71, agent-2 e9b2a97, agent-3 9a12ceb, agent-4 7722d3e
+- Erste Suite: neuer Fehler SPDX-Kopf in 2 neuen Testdateien → statt Revert Nachbesserung 21f8ce4 (nur Testdatei-Kopf)
+- Suite: 294 Tests, 291 pass, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
+- Zurückgestellt (Kollision mailer.js/auth.js): #169, #168
