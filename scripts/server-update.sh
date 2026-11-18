@@ -16,6 +16,8 @@
 #   VAULT        1 = encrypted setup, back up only $DATA_DIR/vault (set once; auto-added if vault/ exists)
 #   GITHUB_TOKEN only while the repo is private (read-only "Contents" token)
 #   UPDATE_REPO  default: felix-d-git/LaTeX-IDE
+#   ALLOW_INFRA_CHANGES  1 = accept a release that changes docker-compose*, Dockerfile or this script
+# Needs APP_DIR/.release-signers (ssh allowed signers of the release tags, host-owned, #172).
 # .env, .update.env and anything not in the release stay untouched. Progress goes to
 # .update-status next to .update-request, where the web UI shows it to admins.
 set -euo pipefail
@@ -111,6 +113,30 @@ fi
 say "Update $installed -> $tag"
 status running
 
+# 0. Signed tag only (#172): the tag must verify against the host's own APP_DIR/.release-signers
+# (ssh allowed-signers file, never part of a release, never overwritten). The source comes from
+# the verified tag via git archive, not from an unsigned tarball.
+SIGNERS="$APP_DIR/.release-signers"
+[ -f "$SIGNERS" ] || { say "ABBRUCH: $SIGNERS fehlt (Signierschluessel der Releases, siehe docs/UPDATES.md) - kein Update ohne Tag-Signatur"; false; }
+case "$tag" in *[!0-9A-Za-z.+-]*|"") say "ABBRUCH: ungueltiger Tag-Name"; false ;; esac
+GITAUTH=()
+[ -n "${GITHUB_TOKEN:-}" ] && GITAUTH=(-c "http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')")
+git init -q "$tmp/git"
+git -C "$tmp/git" ${GITAUTH[@]+"${GITAUTH[@]}"} fetch -q --depth 1 "https://github.com/$REPO.git" "refs/tags/$tag:refs/tags/$tag" >>"$RUNLOG" 2>&1 \
+  || { say "ABBRUCH: Tag $tag konnte nicht geladen werden"; false; }
+git -C "$tmp/git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$SIGNERS" verify-tag "$tag" >>"$RUNLOG" 2>&1 \
+  || { say "ABBRUCH: Signatur von Tag $tag ungueltig oder nicht von einem Schluessel aus $SIGNERS"; false; }
+mkdir "$tmp/src"
+git -C "$tmp/git" archive --format=tar "refs/tags/$tag" | tar -x -C "$tmp/src"
+# Infra files decide what runs with docker rights on the host: a change needs a human (#172).
+if [ "${ALLOW_INFRA_CHANGES:-}" != 1 ]; then
+  for f in $(cd "$tmp/src" && ls -1 docker-compose* Dockerfile scripts/server-update.sh 2>/dev/null); do
+    if ! cmp -s "$tmp/src/$f" "$APP_DIR/$f"; then
+      say "ABBRUCH: $f aendert sich in $tag. Pruefen, dann mit ALLOW_INFRA_CHANGES=1 erneut starten (siehe docs/UPDATES.md)"; false
+    fi
+  done
+fi
+
 # 1. Backup, keep the newest 3.
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
@@ -121,11 +147,8 @@ tar -czf "$BACKUP_DIR/data-$(date +%Y%m%d-%H%M%S)-${installed:-unbekannt}.tar.gz
 ls -1t "$BACKUP_DIR"/data-*.tar.gz | tail -n +4 | while IFS= read -r f; do rm -f -- "$f"; done
 say "Backup fertig"
 
-# 2. Unpack the release into a fresh dir, copy it over APP_DIR and delete files the
+# 2. Copy the verified release (unpacked in step 0) over APP_DIR and delete files the
 # previous release had but this one no longer has (.release-files = list of the last one).
-curl -fsSL ${AUTH[@]+"${AUTH[@]}"} -H 'Accept: application/vnd.github+json' -o "$tmp/src.tar.gz" "https://api.github.com/repos/$REPO/tarball/$tag" 2>>"$RUNLOG"
-mkdir "$tmp/src"
-tar -xzf "$tmp/src.tar.gz" -C "$tmp/src" --strip-components=1
 (cd "$tmp/src" && find . -type f | sed 's|^\./||' | sort) > "$tmp/files"
 cp -a "$tmp/src/." "$APP_DIR/"
 if [ -f "$APP_DIR/.release-files" ]; then
