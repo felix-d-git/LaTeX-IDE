@@ -103,9 +103,13 @@ app.use((req, res, next) => {
 app.use(securityHeaders());
 // Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
+const launchKey = require('./lib/launchKey');
+const LOCAL_KEY = launchKey.generate();
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
+  // #163: Start-Schlüssel (?k= im vom Server geöffneten Link -> HttpOnly-Cookie), sonst könnte jeder lokale Prozess/OS-Benutzer mit.
+  app.use(launchKey.middleware(LOCAL_KEY));
 }
 // CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
@@ -2346,7 +2350,7 @@ async function handleUpgrade(req, socket, head) {
     return rejectUpgrade(socket, 400, 'Bad Request');
   }
   // Cross-site WebSocket hijacking guard (cookies ride along on upgrades).
-  if (authMw.LOCAL_MODE && !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) return rejectUpgrade(socket, 403, 'Forbidden');
+  if (authMw.LOCAL_MODE && (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') || !launchKey.hasCookie(req, LOCAL_KEY))) return rejectUpgrade(socket, 403, 'Forbidden');
   const origin = req.headers.origin;
   if (origin) {
     let host = null;
@@ -2582,7 +2586,7 @@ bootstrapAdmin()
       // Zweiter Start, während schon einer läuft: nur den Browser öffnen.
       server.on('error', (e) => {
         if (e.code !== 'EADDRINUSE') throw e;
-        openBrowser(`http://localhost:${PORT}`);
+        launchKey.openRunning(path.dirname(PROJECTS_DIR), PORT);
         process.exit(0);
       });
       let idleSince = Date.now();
@@ -2595,7 +2599,10 @@ bootstrapAdmin()
       console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
       if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
       if (!authMw.LOCAL_MODE && !PUBLIC_URL) console.warn(`[auth] Warnung: PUBLIC_URL fehlt - Reset-/Bestätigungs-/Einladungslinks nur für ${[...ALLOWED_HOSTS].join(', ')} (ALLOWED_HOSTS), sonst keine.`);
-      if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
+      if (authMw.LOCAL_MODE) {
+        launchKey.save(path.dirname(PROJECTS_DIR), LOCAL_KEY);
+        return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}/?k=${LOCAL_KEY}`);
+      }
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});
     });
