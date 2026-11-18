@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 'use strict';
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
