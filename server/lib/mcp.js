@@ -431,10 +431,14 @@ function createMcp(ctx) {
     if (ctx.mustChangePassword && ctx.mustChangePassword(t.user)) return res.status(403).json({ error: 'Bitte zuerst das Einmal-Passwort des Kontos ändern.' });
     const body = req.body;
     if (Array.isArray(body) ? !body.length : !body || typeof body !== 'object') return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Ungültige Anfrage.' } });
-    const replies = (await Promise.all((Array.isArray(body) ? body : [body]).map((m) => rpc(t, m)))).filter(Boolean);
+    if (Array.isArray(body) && body.length > MAX_BATCH) return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: `Batch zu groß (max. ${MAX_BATCH}).` } });
+    const replies = [];
+    for (const m of Array.isArray(body) ? body : [body]) { const r = await rpc(t, m); if (r) replies.push(r); } // sequential
     if (!replies.length) return res.status(202).end();
     res.json(Array.isArray(body) ? replies : replies[0]);
   }
 }
+
+const MAX_BATCH = 20;
 
 module.exports = { createMcp };

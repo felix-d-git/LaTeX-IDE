@@ -124,6 +124,7 @@ function requireAuth(req, res, next) {
 
 // ponytail: in-memory fixed-window limiter, resets on restart - enough for a handful of users behind one Funnel.
 const hits = new Map();
+const RATE_LIMIT_MAX_KEYS = Number(process.env.RATE_LIMIT_MAX_KEYS) || 50000; // bounds heap against key flooding
 // countIf(res): only answers matching it use up the budget (e.g. failed logins). Counted up front so parallel
 // bursts stay limited; a non-matching answer gives the slot back.
 function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {}) {
@@ -132,6 +133,7 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {
     const now = Date.now();
     let e = hits.get(key);
     if (!e || now > e.resetAt) {
+      if (!e && hits.size >= RATE_LIMIT_MAX_KEYS) return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
       e = { count: 0, resetAt: now + windowMs };
       hits.set(key, e);
     }

@@ -88,8 +88,9 @@ const app = express();
 app.set('case sensitive routing', true);
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-// Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
-app.set('trust proxy', 'loopback, uniquelocal');
+// Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl. Only loopback by default;
+// other proxies (e.g. the Tailscale container in docker-compose.pi.yml) via TRUST_PROXY (express syntax). Never a whole LAN: X-Forwarded-For would be spoofable.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
 // Marks every answer as coming from the app itself: the desktop app treats 502-504 only without it
 // (= tunnel/proxy, server unreachable) as offline, not e.g. a LanguageTool failure.
 app.use((req, res, next) => {
@@ -418,6 +419,8 @@ function requireBaseUrl(req, res, next) {
 // Only failed attempts use up the budget (many users behind one IP); separate buckets per purpose.
 const failed = (res) => res.statusCode >= 400 && res.statusCode !== 429;
 const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000, undefined, { countIf: failed });
+// Per account (normalized login), independent of the IP: XFF/IP rotation cannot guess one password endlessly.
+const limitLoginAccount = authMw.rateLimit('login-acct', 20, 15 * 60 * 1000, (req) => String((req.body && (req.body.login || req.body.email)) || '').trim().toLowerCase(), { countIf: failed });
 const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
@@ -503,7 +506,7 @@ app.post('/api/auth/resend-verification', notLocal, limitMail, requireBaseUrl, a
   res.json({ ok: true, message: 'Falls ein unbestätigtes Konto existiert, wurde eine neue Bestätigungsmail verschickt.' });
 }));
 
-app.post('/api/auth/login', limitLogin, ah(async (req, res) => {
+app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) => {
   const { password, rememberMe } = req.body;
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   const ok = user && (await auth.verifyPassword(user, password));
