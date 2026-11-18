@@ -132,7 +132,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     prefs.autocomplete ? autocompletion() : [],
     prefs.closeBrackets ? closeBrackets() : [],
     prefs.dark ? Prec.high(oneDark) : [],
-    prefs.codeCheck || prefs.grammar ? [lintGutter(), linter(lintSource, { delay: 1500 })] : [],
+    prefs.codeCheck || prefs.grammar ? [lintGutter({ markerFilter: (d) => d.source !== 'LanguageTool' }), linter(lintSource, { delay: 1500 })] : [],
   ];
   let readOnly = false; // reviewer role: read + comment only
   const readOnlyExt = () => (readOnly ? reviewerReadOnly : []);
