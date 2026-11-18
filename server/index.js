@@ -48,7 +48,7 @@ const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
 const { audit, clip, recent: auditRecent, warning: auditWarning, TRAVERSAL } = require('./lib/audit');
 const collab = require('./lib/collab');
-const { createMcp } = require('./lib/mcp');
+const { createMcp, textPath } = require('./lib/mcp');
 const legal = require('./lib/legal');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
@@ -2178,6 +2178,7 @@ app.get('/api/synctex/forward', ah(async (req, res) => {
   if (!root) return;
   const { file, line } = req.query;
   if (!file || !line) return res.status(400).json({ error: 'file und line sind erforderlich.' });
+  try { synctex.checkForward(line); } catch { return res.status(400).json({ error: 'Ungültige Parameter.' }); }
   const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
@@ -2187,7 +2188,8 @@ app.get('/api/synctex/forward', ah(async (req, res) => {
     const result = await synctex.forward(pdfAbs, texAbs, line, root);
     res.json(result);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    if (!e.badInput) console.error('synctex:', e.message);
+    res.status(400).json({ error: e.badInput ? e.message : 'SyncTeX-Abfrage fehlgeschlagen.' });
   }
 }));
 
@@ -2198,6 +2200,7 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
   if (!page || x === undefined || y === undefined) {
     return res.status(400).json({ error: 'page, x und y sind erforderlich.' });
   }
+  try { synctex.checkInverse(page, x, y); } catch { return res.status(400).json({ error: 'Ungültige Parameter.' }); }
   const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
@@ -2205,7 +2208,8 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
   try {
     res.json(await synctex.inverseInProject(root, pdfAbs, page, x, y));
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    if (!e.badInput) console.error('synctex:', e.message);
+    res.status(400).json({ error: e.badInput ? e.message : 'SyncTeX-Abfrage fehlgeschlagen.' });
   }
 }));
 
@@ -2256,10 +2260,21 @@ app.post('/api/comments', (req, res) => {
   if (!relPath || typeof from !== 'number' || typeof to !== 'number') {
     return res.status(400).json({ error: 'path, from, to und text sind erforderlich.' });
   }
+  let canon;
+  try {
+    if (typeof relPath !== 'string') throw new Error();
+    canon = textPath(root, relPath);
+    if (!fs.statSync(path.join(root, canon)).isFile()) throw new Error();
+  } catch {
+    return res.status(400).json({ error: 'path muss eine Textdatei im Projekt sein.' });
+  }
+  if ([comments.ORPHANED, '__proto__', 'constructor', 'prototype'].includes(canon) || (anchorText !== undefined && (typeof anchorText !== 'string' || anchorText.length > 20000))) {
+    return res.status(400).json({ error: 'Ungültiger path oder anchorText.' });
+  }
   const text = commentText(req, res);
   if (!text) return;
-  const comment = comments.add(root, relPath, { from, to, anchorText, text, author: authorOf(req.user) });
-  broadcast(root, { type: 'commentsChanged', path: relPath });
+  const comment = comments.add(root, canon, { from, to, anchorText, text, author: authorOf(req.user) });
+  broadcast(root, { type: 'commentsChanged', path: canon });
   res.json({ comment });
 });
 
