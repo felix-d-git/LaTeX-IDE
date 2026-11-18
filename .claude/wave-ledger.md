@@ -19,6 +19,10 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 4: #168 → umask 077 (Server+Desktop, nicht Windows), 0600 für Secret-Dateien, einmaliges chmod beim Start, server-update.sh umask 077 + Backup 700, Start-Warnung bei world-readable DATA_DIR
 - 18.11.2026 Wave 4: #163 → Pro-Start-Schlüssel als HttpOnly-Cookie für Desktop-Proxy UND LOCAL_MODE (inkl. Starter), authView nur Port 3178; PKCE später
 - 18.11.2026 Wave 4: #158 → Zip eintragsweise, ZIP_LIMIT 50 MB, USER_QUOTA_MB 300 (Admins frei), Kommentar ≤20 000, Label ≤100, max 50 gelabelte/Restore-Einträge, statfs-Reserve; Projektanzahl-Limit verworfen; alle Limits im Admin-Menü änderbar (Env = Default)
+- 18.11.2026 Wave 5: #176 → audit.js (JSONL 0600, keine Secrets, Rotation 5 MB × 3, im Vault gespiegelt) + Hooks + Admin-Ansicht „Sicherheitsereignisse" + Banner-Warnung bei Schwellwert + optional AUDIT_SYSLOG
+- 18.11.2026 Wave 5: #162 → Dateiname als AAD + Namensprüfung beim Restore + Migration alter Einträge + signiertes Manifest mit Generationszähler; abgelehntes Manifest = Start-Abbruch (wie falscher Schlüssel)
+- 18.11.2026 Wave 5: #171 → atomares .update-status (tmp + mv), REQUEST nur reguläre Datei ohne Symlink, Vault-Modus aus `.update.env` VAULT=1 (einmalig automatisch gesetzt, wenn vault/ existiert); Nicht-Root nur dokumentiert, Cron unverändert
+- 18.11.2026 Wave 5: #173 → permissions {} + Minimalrechte pro Job, persist-credentials false, npm ci --ignore-scripts, Build/Upload-Job getrennt, statischer YAML-Test; environment release mit Pflicht-Reviewern verworfen (ein Maintainer)
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
