@@ -1,6 +1,7 @@
 # TODO
 
 ## GUI-Prüfpunkte
+- ⬜ #209 LanguageTool-Anzeige (staging/second-branch): Rechtschreibfehler → Wort dick, gerade rot unterstrichen; Grammatik/Stil-Treffer → ganzer Satz dick gelb unterstrichen, Rechtschreibfehler darin bleibt rot; am Rand keine LanguageTool-Marker, LaTeX-Fehler nach Kompilieren behalten ihren Randmarker; Hover auf Wort/Satz → Tooltip mit Meldung(en), Vorschlägen (Klick ersetzt korrekt) und „Zum Wörterbuch“; LanguageTool stoppen, tippen → rote Meldung erst nach dem 2. Fehlschlag (~30 s Abstand), LanguageTool wieder starten → Meldung verschwindet beim nächsten Erfolg von selbst; langes Dokument am Pi: keine Timeout-Meldung bei einer langsamen Antwort
 - ⬜ #211 Sprung zentriert: Doppelklick im PDF auf Text weit unten → Editor scrollt, Zielzeile mittig, Editor hat Fokus; dasselbe mit noch nicht geöffneter Zieldatei; Outline-Eintrag, Fehlerliste und Kommentar anklicken → Zeile jeweils mittig
 - ⬜ #210 PDF-Zoom Strg+Mausrad: Strg+Rad über PDF → nur PDF zoomt (~10 % pro Raste, 25–300 %, Label folgt, UI bleibt gleich groß); Stelle unter dem Mauszeiger bleibt stehen; schnelles Drehen rendert erst am Ende; Touchpad-Pinch; Doppelklick-SyncTeX nach Zoom springt korrekt; Strg+Rad außerhalb der PDF-Vorschau unverändert; Desktop-App und Web
 - ⬜ #167 SMTP-Hinweis (staging/second-branch): App starten → Profil-/Admin-Dialog → SMTP-Bereich öffnen → Hinweis „Port 587 setzt STARTTLS voraus“ sichtbar und lesbar (hell/dunkel)
