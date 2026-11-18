@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const auth = require('./auth');
+const { audit } = require('./audit');
 const collab = require('./collab');
 const comments = require('./comments');
 const treeOps = require('./treeOps');
@@ -433,7 +434,10 @@ function createMcp(ctx) {
     if (Array.isArray(body) ? !body.length : !body || typeof body !== 'object') return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Ungültige Anfrage.' } });
     if (Array.isArray(body) && body.length > MAX_BATCH) return res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: `Batch zu groß (max. ${MAX_BATCH}).` } });
     const replies = [];
-    for (const m of Array.isArray(body) ? body : [body]) { const r = await rpc(t, m); if (r) replies.push(r); } // sequential
+    for (const m of Array.isArray(body) ? body : [body]) {
+      if (m && m.method === 'tools/call') audit('mcp_call', req, { uid: t.user.id, tool: String((m.params && m.params.name) || '').slice(0, 64) });
+      const r = await rpc(t, m); if (r) replies.push(r);
+    } // sequential
     if (!replies.length) return res.status(202).end();
     res.json(Array.isArray(body) ? replies : replies[0]);
   }
