@@ -20,7 +20,8 @@ const MAX_FILES = 5000;
 // Liest die Central Directory eines Zips und schreibt es nach destDir.
 // Stdlib-only (zlib.inflateRaw); kein Zip64, keine Verschlüsselung.
 // Wirft bei Zip-Slip (.. / absolute Pfade), Limits oder kaputtem Zip - bevor etwas geschrieben wird.
-function extractZip(buf, destDir) {
+// onTotal(bytes): optional check (quota, free space) with the declared total, called before writing.
+function extractZip(buf, destDir, onTotal) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65535); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -62,21 +63,24 @@ function extractZip(buf, destDir) {
   const strip = entries.every((e) => e.name.includes('/') && e.name.split('/')[0] === first) ? first.length + 1 : 0;
 
   const base = path.resolve(destDir);
-  const out = entries.map((e) => {
+  // 1) all paths/headers first, nothing written yet
+  const todo = entries.map((e) => {
     const rel = e.name.slice(strip);
     const abs = path.resolve(base, rel);
     if (!rel || !abs.startsWith(base + path.sep)) throw new Error(`Unzulässiger Pfad im Zip: ${e.name}`);
     if (buf.readUInt32LE(e.lho) !== 0x04034b50) throw new Error('Zip beschädigt.');
+    if (e.method !== 0 && e.method !== 8) throw new Error('Nicht unterstützte Zip-Kompression.');
     const start = e.lho + 30 + buf.readUInt16LE(e.lho + 26) + buf.readUInt16LE(e.lho + 28);
-    const raw = buf.subarray(start, start + e.csize);
-    let data;
-    if (e.method === 0) data = raw;
-    else if (e.method === 8) data = zlib.inflateRawSync(raw, { maxOutputLength: Math.max(e.usize, 1) });
-    else throw new Error('Nicht unterstützte Zip-Kompression.');
-    if (data.length !== e.usize) throw new Error('Zip beschädigt (Größe).');
-    return { abs, data };
+    return { abs, e, raw: buf.subarray(start, start + e.csize) };
   });
-  for (const { abs, data } of out) {
+  if (onTotal) onTotal(total);
+  // 2) entry by entry (one inflated file in RAM at a time); running sum against the limit. The caller removes destDir on a throw.
+  let written = 0;
+  for (const { abs, e, raw } of todo) {
+    const data = e.method === 0 ? raw : zlib.inflateRawSync(raw, { maxOutputLength: Math.max(e.usize, 1) });
+    if (data.length !== e.usize) throw new Error('Zip beschädigt (Größe).');
+    written += data.length;
+    if (written > MAX_TOTAL || written > total) throw new Error('Zip entpackt zu groß (max. 200 MB).');
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, data);
   }

@@ -21,7 +21,7 @@ services:
         UPDATE_REPO: ${UPDATE_REPO:-}
     image: latex-ide
     restart: unless-stopped
-    env_file: .env
+    env_file: .env # darin optional ZIP_LIMIT, USER_QUOTA_MB, FREE_RESERVE_MB ... (Defaults: .env.example; Admin-Menue "Limits" hat Vorrang)
     environment:
       DATA_DIR: /app/data
     security_opt:

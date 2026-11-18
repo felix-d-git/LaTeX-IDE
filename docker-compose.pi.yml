@@ -40,6 +40,13 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL fehlt in .env}
       COOKIE_SECURE: "true"
+      # Limit-Vorgaben (#158), im Admin-Menue ueberschreibbar
+      ZIP_LIMIT: ${ZIP_LIMIT:-50}
+      USER_QUOTA_MB: ${USER_QUOTA_MB:-300}
+      FREE_RESERVE_MB: ${FREE_RESERVE_MB:-200}
+      COMMENT_MAX_CHARS: ${COMMENT_MAX_CHARS:-20000}
+      LABEL_MAX_CHARS: ${LABEL_MAX_CHARS:-100}
+      MAX_LABELED_ENTRIES: ${MAX_LABELED_ENTRIES:-50}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
