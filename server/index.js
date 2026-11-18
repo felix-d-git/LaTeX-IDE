@@ -24,7 +24,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const { ZipArchive } = require('archiver');
 
-const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
+const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, assertUserPath, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, mainPathError, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -1141,8 +1141,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
   if (!root) return;
   try {
     const rel = String(req.query.path || '');
-    if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
-    const abs = safeResolve(root, rel);
+    const abs = assertUserPath(root, rel);
     if (!checkSyncBase(req, root, abs)) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (isTextFile(rel)) state.markSelfWrite(abs, buf);
@@ -1160,7 +1159,7 @@ app.delete('/api/collab/raw', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
-    if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    assertUserPath(root, String(req.query.path || ''));
     collab.flushRoot(root);
     if (!checkSyncBase(req, root, safeResolve(root, String(req.query.path || '')))) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     treeOps.trashPath(root, req.query.path);
