@@ -23,6 +23,12 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 5: #162 → Dateiname als AAD + Namensprüfung beim Restore + Migration alter Einträge + signiertes Manifest mit Generationszähler; abgelehntes Manifest = Start-Abbruch (wie falscher Schlüssel)
 - 18.11.2026 Wave 5: #171 → atomares .update-status (tmp + mv), REQUEST nur reguläre Datei ohne Symlink, Vault-Modus aus `.update.env` VAULT=1 (einmalig automatisch gesetzt, wenn vault/ existiert); Nicht-Root nur dokumentiert, Cron unverändert
 - 18.11.2026 Wave 5: #173 → permissions {} + Minimalrechte pro Job, persist-credentials false, npm ci --ignore-scripts, Build/Upload-Job getrennt, statischer YAML-Test; environment release mit Pflicht-Reviewern verworfen (ein Maintainer)
+- 18.11.2026 Wave 6: #172 → SSH-signierte Tags, server-update.sh prüft per `git verify-tag` gegen host-eigene `APP_DIR/.release-signers` (nie vom Update überschrieben), auto-release.yml signiert mit Schlüssel aus Actions-Secret; zusätzlich Update-Stopp bei Änderung an docker-compose*/Dockerfile/server-update.sh (opt-in ALLOW_INFRA_CHANGES=1); 72-h-Verzögerung verworfen (Cooldown aus #204 reicht); Immutable Releases = Repo-Einstellung durch User
+- 18.11.2026 Wave 6: #164 → Default-Scope neuer Tokens = genau ein Projekt, „Alle Projekte" nur per Opt-in, delete/move nie Default; Admin-Universum = mcpProjects(user); Fremdinhalt als Daten markiert + Vertrauenshinweis in instructions + docs/MCP.md; Session-Taint verworfen; bestehende Tokens unverändert
+- 18.11.2026 Wave 6: #174 → nur kostenlose Teile: attest-build-provenance, SHA256SUMS-Asset, Hashprüfung in desktopAssets.js, keyless cosign + SBOM fürs Image; Authenticode/Apple-Notarisierung/Trailer-Ersatz später (Zertifikate fehlen)
+- 18.11.2026 Wave 6: #175 → feste SHA-512 aus offiziellen TUG-.sha512 nach GPG-Prüfung der .asc (keine Werte aus dem Audit-Bericht), pkgutil --check-signature mit Team-ID, kein Verzeichnis-Scraping; Inno Setup per choco mit fester Version + Checksumme
+- 18.11.2026 Wave 6: #211/#210 → wie in den Issues: Sprung vertikal zentriert für alle Sprung-Aufrufer (SyncTeX, Outline, Fehlerliste, Kommentare); Strg+Rad-Zoom um Mauszeiger, ~10 %/Raste, 25–300 %, entprellt; GUI-Abnahme als ⬜ in TODO.md
+- 18.11.2026 Wave 6: #174 + #175 bewusst ein Agent (beide release.yml)
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
@@ -87,3 +93,11 @@ Base: master (tabu) · Second: staging/second-branch
 - Offen aus #162: Crash zwischen Eintrag und Manifest → Start-Abbruch; Rollback-Schutz nur manifest-intern
 - Offen aus #176: mcp_auth_fail nur in mcpTokenFirst geloggt; GUI-Prüfpunkt ⬜ in TODO.md
 - Zurückgestellt für Wave 6: #172 (server-update.sh, Kollision #171), #164 (MCP, Kollision #176), #174 + #175 (Workflows, Kollision #173; #174 braucht Signier-Zertifikate)
+
+## Wave 6 (18.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #172 | 1 | agent-1 | IN_PROGRESS |
+| #164 | 1 | agent-2 | IN_PROGRESS |
+| #175, #174 | 1 | agent-3 | IN_PROGRESS |
+| #211, #210 | 2 | agent-4 | IN_PROGRESS |
