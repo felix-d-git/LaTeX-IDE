@@ -73,3 +73,17 @@ Base: master (tabu) · Second: staging/second-branch
 - Suite: 303 Tests, 299 pass, 2 skipped, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
 - Offen aus #158: Quota bei geteilten Projekten zählt den Hochladenden statt den Eigentümer; Yjs-WS und /mcp ohne Free-Space-Prüfung
 - Offen aus #163: PKCE-Tokenaustausch
+
+## Wave 5 (18.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #176 | 1 | agent-1 | DONE |
+| #162 | 1 | agent-2 | DONE |
+| #171 | 1 | agent-3 | DONE |
+| #173 | 1 | agent-4 | DONE |
+- Merges konfliktfrei: agent-2 766f1ba, agent-3 75e2d24, agent-4 ee359c5, agent-1 c70ac24
+- agent-4: Scope-Erweiterung auf test/macRelease.test.js + test/p12restE.test.js (neue Job-Struktur)
+- Suite: 342 Tests, 338 pass, 2 skipped, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert; licenses-/LuaLaTeX-Fehler nur in Worktrees (Junction-Artefakt)
+- Offen aus #162: Crash zwischen Eintrag und Manifest → Start-Abbruch; Rollback-Schutz nur manifest-intern
+- Offen aus #176: mcp_auth_fail nur in mcpTokenFirst geloggt; GUI-Prüfpunkt ⬜ in TODO.md
+- Zurückgestellt für Wave 6: #172 (server-update.sh, Kollision #171), #164 (MCP, Kollision #176), #174 + #175 (Workflows, Kollision #173; #174 braucht Signier-Zertifikate)
