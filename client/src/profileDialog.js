@@ -283,11 +283,16 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     actions.append(saveBtn, testBtn);
     box.append(el('h4', null, 'Kontobestätigung'), ml, actions);
     let loaded = null;
+    // Stored password is only reused for the same host/port/user (#169).
+    const needsPass = () => !!(loaded && loaded.smtp.passwordSet && host.value.trim() && (host.value.trim() !== loaded.smtp.host || (Number(port.value) || 587) !== (Number(loaded.smtp.port) || 587) || user.value.trim() !== loaded.smtp.user));
+    const syncPass = () => { pass.required = needsPass(); };
+    for (const i of [host, port, user]) i.addEventListener('input', syncPass);
     const apply = (st) => {
       loaded = st;
       host.value = st.smtp.host; port.value = st.smtp.port; secure.checked = st.smtp.secure;
       user.value = st.smtp.user; from.value = st.smtp.from; pass.value = '';
-      pass.placeholder = st.smtp.passwordSet ? '(gesetzt – leer lassen zum Beibehalten)' : '';
+      pass.placeholder = st.smtp.passwordSet ? '(gesetzt – leer lassen zum Beibehalten; bei neuem Host/Port/Benutzer Pflicht)' : '';
+      syncPass();
       mode.value = st.verifyMode;
       mode.querySelector('option[value="mail"]').disabled = !st.smtpConfigured;
       status.textContent = { ui: 'SMTP aus diesen Einstellungen.', env: 'SMTP aus der Server-.env (Host leeren/ausfüllen überschreibt).', none: 'Kein SMTP – Mails landen nur im mail-outbox.log; „per Mail“ nicht wählbar.' }[st.smtp.source];
@@ -296,6 +301,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       try {
         const smtp = { host: host.value, port: port.value, secure: secure.checked, user: user.value, from: from.value };
         if (pass.value) smtp.pass = pass.value;
+        else if (needsPass()) return alert('Host, Port oder Benutzer geändert: Bitte das SMTP-Passwort neu eingeben.');
         apply(await adminApi.saveMail({ smtp, verifyMode: mode.value }));
         alert('Gespeichert.');
       } catch (e) { alert(e.message); }
