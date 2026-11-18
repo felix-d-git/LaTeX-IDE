@@ -1026,10 +1026,15 @@ function mcpScope(req, existing) {
   if (sel) for (const id of Object.keys(sel)) if (!ids.has(id)) throw Object.assign(new Error('Kein Zugriff auf Projekt ' + id), { status: 403 });
   return { perms: req.body.perms, projects: sel };
 }
+// Neuer Token: Standard = ausgewählte Projekte; "alle Projekte" (projects null) nur mit ausdrücklichem allProjects: true.
+function newMcpScope(req) {
+  if (!req.body.projects && req.body.allProjects !== true) throw Object.assign(new Error('Projekte auswählen oder „Alle Projekte“ ausdrücklich bestätigen.'), { status: 400 });
+  return mcpScope(req);
+}
 
 app.post('/api/auth/mcp-token', (req, res) => {
   try {
-    const token = auth.createMcpToken(req.user.id, { name: req.body.name, ...mcpScope(req) });
+    const token = auth.createMcpToken(req.user.id, { name: req.body.name, ...newMcpScope(req) });
     audit('mcp_token_created', req, { name: clip(req.body.name, 64) });
     res.json({ token });
   } catch (e) {

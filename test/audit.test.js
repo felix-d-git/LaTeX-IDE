@@ -51,7 +51,7 @@ test('Server: Ereignisse, 0600, keine Secrets, Admin-Route nur für Admins', asy
     for (let i = 0; i < 2; i++) await bad.call('POST', '/api/auth/login', { login: 'bob' + '@' + 'example.test', password: 'falsches-passwort-xyz' });
     const inv = (await admin.call('POST', '/api/admin/invites')).body.token;
     await admin.call('DELETE', `/api/admin/invites/${inv}`);
-    const mcpTok = (await admin.call('POST', '/api/auth/mcp-token', { name: 'tok', perms: ['read'] })).body.token;
+    const mcpTok = (await admin.call('POST', '/api/auth/mcp-token', { name: 'tok', perms: ['read'], allProjects: true })).body.token;
     await admin.call('GET', '/api/history/diff?id=1&to=2&file=../../etc/passwd');
 
     const f = path.join(srv.dataDir, 'audit.log');
