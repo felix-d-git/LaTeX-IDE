@@ -119,6 +119,16 @@ function resolveEntry(root, relPath) {
   return abs;
 }
 
+// Schreibziel innerhalb des Projekts, nie interne Verwaltungsdateien: kanonischer Pfad, jedes
+// Segment gegen isIgnored und das .latex-ide-Präfix geprüft (#156, wie mcp.js anyPath).
+function assertUserPath(root, relPath, { allowRoot = false } = {}) {
+  const abs = safeResolve(root, String(relPath ?? ''));
+  const segs = path.relative(path.resolve(root), abs).split(path.sep).filter(Boolean);
+  if (!segs.length && !allowRoot) throw new Error('Die Projektwurzel kann nicht verändert werden.');
+  if (segs.some((s) => isIgnored(s) || s.toLowerCase().startsWith('.latex-ide'))) throw new Error('Pfad nicht erlaubt.');
+  return abs;
+}
+
 function sameEntry(a, b) {
   try {
     const x = fs.lstatSync(a, { bigint: true });
@@ -147,4 +157,4 @@ function dataDirError(dir) {
   }
 }
 
-module.exports = { canonRel, dataDirError, sameEntry, resolveEntry, buildTree, findByName, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
+module.exports = { canonRel, dataDirError, sameEntry, resolveEntry, assertUserPath, buildTree, findByName, pickStartFile, isIgnored, isTextFile, TEXT_EXTENSIONS, safeResolve, decodeText, readUtf8OrNull, toUtf8Text, NOT_UTF8_MSG };
