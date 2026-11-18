@@ -11,7 +11,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
 jobs:
   merge:
     # Herkunft pruefen (#148): actor/Branch-Name allein sind faelschbar (Fork-PR als Confused Deputy).
@@ -43,5 +42,4 @@ jobs:
           [ "$open" = 0 ] || { echo "$open Checks offen/rot -> warten"; exit 0; }
           case "$state" in success*|"pending 0") ;; *) echo "Status $state -> warten"; exit 0;; esac
           gh pr merge "$pr" --squash --delete-branch --match-head-commit "$SHA"
-          # Sofort releasen statt bis 00:30 warten: der Pi-Watchdog installiert es binnen einer Stunde.
-          gh workflow run auto-release.yml
+          # Kein Sofort-Release (#177): auto-release.yml released nachts erst nach einer Wartezeit.

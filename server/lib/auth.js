@@ -9,6 +9,9 @@ const DATA_PATH = path.join((process.env.DATA_DIR || path.join(__dirname, '..', 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 Stunde
 const VERIFY_TTL_MS = 48 * 60 * 60 * 1000; // 2 Tage
+// Desktop/MCP tokens expire after this long without use (sliding, so active installs never notice; #152).
+const TOKEN_IDLE_MS = Number(process.env.TOKEN_IDLE_DAYS || 180) * 24 * 60 * 60 * 1000;
+const tokenExpired = (t) => Date.now() - Date.parse(t.lastUsedAt || t.createdAt) > TOKEN_IDLE_MS;
 const USERNAME_RE = /^[A-Za-z0-9_.-]{3,32}$/;
 const MCP_PERMS = ['read', 'comment', 'edit', 'create', 'delete', 'move', 'compile'];
 const LEGACY_LEVEL_PERMS = { read: ['read'], review: ['read', 'comment'], edit: ['read', 'comment', 'edit'] }; // before load(): migration uses it
@@ -131,16 +134,24 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(password || '', user.passwordHash);
 }
 
+// A password change/reset is the reaction to a suspected compromise: desktop and MCP tokens minted
+// with the old login are revoked too (#152). Persist first, then apply in memory (#161): if save()
+// throws, the old state stays live and the caller gets the error.
 async function setPassword(user, newPassword) {
   validatePassword(newPassword);
   // Otherwise the lock could be lifted by "changing" the one-time password to itself.
   if (user.mustChangePassword && (await verifyPassword(user, newPassword))) {
     throw new Error('Bitte ein eigenes Passwort wählen, nicht das Einmal-Passwort.');
   }
-  user.passwordHash = await bcrypt.hash(newPassword, 12);
-  user.passwordChangedAt = new Date().toISOString();
+  const next = { ...user, passwordHash: await bcrypt.hash(newPassword, 12), passwordChangedAt: new Date().toISOString() };
+  delete next.mustChangePassword;
+  const apiTokens = data.apiTokens.filter((t) => t.userId !== user.id);
+  const mcpTokens = data.mcpTokens.filter((t) => t.userId !== user.id);
+  save({ ...data, users: data.users.map((u) => (u === user ? next : u)), apiTokens, mcpTokens });
+  Object.assign(user, next);
   delete user.mustChangePassword;
-  save(data);
+  data.apiTokens = apiTokens;
+  data.mcpTokens = mcpTokens;
 }
 
 // New one-time password for an admin that still has to change it (its file went missing, or a public
@@ -252,14 +263,16 @@ function findUserByApiToken(token) {
   if (!token || !token.startsWith('lide_')) return null;
   const tokenHash = hashToken(token);
   const entry = data.apiTokens.find((t) => t.tokenHash === tokenHash);
-  if (!entry) return null;
+  if (!entry || tokenExpired(entry)) return null;
+  const user = findUserById(entry.userId);
+  if (!user || !isVerified(user)) return null;
   entry.lastUsedAt = new Date().toISOString();
   // ponytail: lastUsedAt is persisted at most once a minute - exact to the minute is enough for "zuletzt benutzt".
   if (Date.now() - lastUsedSaveAt > 60000) {
     lastUsedSaveAt = Date.now();
     save(data);
   }
-  return findUserById(entry.userId);
+  return user;
 }
 
 function listApiTokens(userId) {
@@ -327,7 +340,7 @@ function findMcpToken(token) {
   if (!token || !token.startsWith('lmcp_')) return null;
   const tokenHash = hashToken(token);
   const entry = data.mcpTokens.find((t) => t.tokenHash === tokenHash);
-  const user = entry && findUserById(entry.userId);
+  const user = entry && !tokenExpired(entry) && findUserById(entry.userId);
   if (!user || !isVerified(user)) return null;
   entry.lastUsedAt = new Date().toISOString(); // in memory; persisted with the next save
   return { user, perms: entry.perms, projects: entry.projects, name: entry.name };
