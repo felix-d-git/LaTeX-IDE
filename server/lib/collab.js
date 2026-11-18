@@ -29,6 +29,9 @@ const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
 // Largest WebSocket message (/ws and /yjs); a bigger one closes only that connection with 1009.
 const WS_MAX_PAYLOAD = 64 * 1024 * 1024;
+// Reviewer sockets only carry tiny comment-anchor updates.
+const REVIEWER_MAX_PAYLOAD = 1024 * 1024;
+const REVIEWER_RATE = 20; // updates per second (token bucket, burst = same)
 const PERSIST_DELAY_MS = 500;
 
 const docs = new Map(); // key -> entry
@@ -275,27 +278,38 @@ function getEpoch(root, rel) {
   return epoch;
 }
 
-// Reviewers may only add comment anchors: an update is applied to a scratch
-// copy first and dropped if it touches the text or the tracked changes.
-function reviewerMayApply(ydoc, update) {
+// Allow-list: a reviewer update may only touch the "anchors" map, and there only the entries of
+// comments they wrote (ownsAnchor(id, isDelete)). It is applied to a scratch copy first; anything
+// else (text, review, meta, new root types, pending structs) is dropped.
+// ponytail: copies the whole doc per update; the rate limit bounds the cost.
+function reviewerMayApply(ydoc, update, ownsAnchor = () => false) {
   const tmp = new Y.Doc();
-  Y.applyUpdate(tmp, Y.encodeStateAsUpdate(ydoc));
-  const snap = () => tmp.getText('content').toString() + '\0' + JSON.stringify(tmp.getMap('review').toJSON());
-  const before = snap();
-  Y.applyUpdate(tmp, update);
-  const ok = snap() === before;
-  tmp.destroy();
-  return ok;
+  try {
+    Y.applyUpdate(tmp, Y.encodeStateAsUpdate(ydoc));
+    const anchors = tmp.getMap('anchors');
+    const hadPending = !!(tmp.store.pendingStructs || tmp.store.pendingDs);
+    let ok = true;
+    tmp.on('afterTransaction', (tr) => {
+      for (const [type, keys] of tr.changed) {
+        if (type !== anchors || keys.has(null)) { ok = false; return; }
+        for (const k of keys) if (!ownsAnchor(k, !anchors.has(k))) ok = false;
+      }
+    });
+    Y.applyUpdate(tmp, update);
+    return ok && (hadPending || !(tmp.store.pendingStructs || tmp.store.pendingDs));
+  } finally {
+    tmp.destroy();
+  }
 }
 
-function readSyncReadOnly(dec, enc, ydoc, ws) {
+function readSyncReadOnly(dec, enc, ydoc, ws, ownsAnchor) {
   const kind = decoding.readVarUint(dec);
   if (kind === syncProtocol.messageYjsSyncStep1) {
     syncProtocol.writeSyncStep2(enc, ydoc, decoding.readVarUint8Array(dec));
     return;
   }
   const update = decoding.readVarUint8Array(dec);
-  if (reviewerMayApply(ydoc, update)) return Y.applyUpdate(ydoc, update, ws);
+  if (reviewerMayApply(ydoc, update, ownsAnchor)) return Y.applyUpdate(ydoc, update, ws);
   // Not silently: the client would keep the phantom text, and its later updates
   // (comment anchors) would hang here as pending structs. 4403 = drop the cache.
   console.warn('[collab] Änderung eines Kommentierenden abgewiesen.');
@@ -304,7 +318,7 @@ function readSyncReadOnly(dec, enc, ydoc, ws) {
 
 // readOnly: boolean, or a function re-checked on every message (rights can change while
 // the socket is open: share revoked, demoted to reviewer, account deleted). null = no access.
-function handleConnection(ws, root, rel, epoch, readOnly = false) {
+function handleConnection(ws, root, rel, epoch, readOnly = false, ownsAnchor) {
   // First, before any early close: without a listener a socket error (e.g. message > maxPayload)
   // is an uncaught exception that ends the whole server. Cleanup happens in 'close'.
   ws.on('error', (e) => console.warn('[collab] WebSocket-Fehler', rel, e.code || e.message));
@@ -322,16 +336,25 @@ function handleConnection(ws, root, rel, epoch, readOnly = false) {
   }
   ws.binaryType = 'arraybuffer';
   entry.conns.set(ws, new Set());
+  let tokens = REVIEWER_RATE;
+  let last = Date.now();
   ws.on('message', (data) => {
     const ro = typeof readOnly === 'function' ? readOnly() : readOnly;
     if (ro == null) return ws.close(1008, 'access revoked');
+    if (ro) {
+      const now = Date.now();
+      tokens = Math.min(REVIEWER_RATE, tokens + ((now - last) / 1000) * REVIEWER_RATE);
+      last = now;
+      if (tokens < 1 || data.byteLength > REVIEWER_MAX_PAYLOAD) return ws.close(data.byteLength > REVIEWER_MAX_PAYLOAD ? 1009 : 1008, 'rate limit');
+      tokens -= 1;
+    }
     try {
       const dec = decoding.createDecoder(new Uint8Array(data));
       const type = decoding.readVarUint(dec);
       if (type === MSG_SYNC) {
         const enc = encoding.createEncoder();
         encoding.writeVarUint(enc, MSG_SYNC);
-        if (ro) readSyncReadOnly(dec, enc, entry.ydoc, ws);
+        if (ro) readSyncReadOnly(dec, enc, entry.ydoc, ws, ownsAnchor);
         else syncProtocol.readSyncMessage(dec, enc, entry.ydoc, ws);
         if (encoding.length(enc) > 1) send(entry, ws, encoding.toUint8Array(enc));
       } else if (type === MSG_AWARENESS) {
@@ -488,6 +511,8 @@ function flushAll() {
 module.exports = {
   STATE_DIR,
   WS_MAX_PAYLOAD,
+  REVIEWER_MAX_PAYLOAD,
+  reviewerMayApply,
   setHooks,
   getEpoch,
   handleConnection,

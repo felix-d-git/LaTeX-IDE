@@ -219,4 +219,10 @@ function remove(root, relPath, id, canDelete = () => true) {
   return true;
 }
 
-module.exports = { listAll, movePath, ORPHANED, add, edit, reply, removeReply, remove, COMMENTS_FILE };
+// Author id of one comment: undefined = no such comment, null = legacy comment without author.
+function authorIdOf(root, relPath, id) {
+  const c = find(load(root), relPath, id);
+  return c ? (c.author ? c.author.id : null) : undefined;
+}
+
+module.exports = { authorIdOf, listAll, movePath, ORPHANED, add, edit, reply, removeReply, remove, COMMENTS_FILE };
