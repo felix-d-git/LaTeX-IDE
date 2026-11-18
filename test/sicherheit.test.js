@@ -11,7 +11,7 @@ test('Mail-/Token-Routen sind nur im lokalen Modus gesperrt', async () => {
   const routes = ['verify', 'resend-verification', 'forgot-password', 'reset-password'];
   const local = await startServer({ LOCAL_MODE: '1', LOCAL_NO_BROWSER: '1' });
   try {
-    const c = client(local.base);
+    const c = client(local.base, local.localKey());
     await c.call('GET', '/api/auth/me');
     for (const r of routes) assert.strictEqual((await c.call('POST', `/api/auth/${r}`, {})).status, 404, r);
   } finally {
