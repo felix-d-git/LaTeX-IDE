@@ -61,7 +61,11 @@ Base: master (tabu) · Second: staging/second-branch
 ## Wave 4 (18.11.2026)
 | Issue | Prio | Agent | Status |
 |---|---|---|---|
-| #169 | 1 | agent-1 | IN_PROGRESS |
-| #168 | 1 | agent-2 | IN_PROGRESS |
-| #163 | 1 | agent-3 | IN_PROGRESS |
-| #158 | 1 | agent-4 | IN_PROGRESS |
+| #169 | 1 | agent-1 | DONE |
+| #168 | 1 | agent-2 | DONE |
+| #163 | 1 | agent-3 | DONE |
+| #158 | 1 | agent-4 | DONE |
+- Merges: agent-2 bf9a0ee, agent-1 6cc88d9, agent-3 d6a9312 konfliktfrei; agent-4 erst Konflikt in server/index.js (CONFLICT_RETRY) → Worker hat staging in seinen Branch gemergt (24e4fa1), dann c3d786e
+- Suite: 303 Tests, 299 pass, 2 skipped, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
+- Offen aus #158: Quota bei geteilten Projekten zählt den Hochladenden statt den Eigentümer; Yjs-WS und /mcp ohne Free-Space-Prüfung
+- Offen aus #163: PKCE-Tokenaustausch
