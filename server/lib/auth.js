@@ -111,6 +111,8 @@ const PUBLIC_PASSWORDS = new Set(['bitte-sofort-aendern', 'bitte-ein-echtes-pass
 
 function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+  // bcrypt only looks at the first 72 bytes (#180): reject longer ones instead of silently truncating.
+  if (Buffer.byteLength(pw, 'utf8') > 72) throw new Error('Passwort zu lang (max. 72 Byte).');
   if (PUBLIC_PASSWORDS.has(pw)) throw new Error('Dieses Passwort ist öffentlich bekannt, bitte ein anderes wählen.');
 }
 
@@ -146,10 +148,20 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
   return user;
 }
 
+// Dummy hash (same cost as real ones, built once) so unknown users / oversized input cost the same bcrypt time (#179).
+let dummyHash;
+const MAX_LOGIN_PASSWORD = 1024; // coarse cap only: existing accounts with long passwords must still log in (#180)
 async function verifyPassword(user, password) {
   // Malformed bodies (password: 123, {}) would make bcrypt throw.
-  if (typeof (password || '') !== 'string' || typeof user.passwordHash !== 'string') return false;
-  return bcrypt.compare(password || '', user.passwordHash);
+  const pw = password || '';
+  const real = !!user && typeof user.passwordHash === 'string';
+  if (typeof pw !== 'string' || (user && !real)) return false;
+  if (!real || pw.length > MAX_LOGIN_PASSWORD) {
+    dummyHash = dummyHash || bcrypt.hash('dummy-password', 12);
+    await bcrypt.compare(pw.slice(0, MAX_LOGIN_PASSWORD), await dummyHash);
+    return false;
+  }
+  return bcrypt.compare(pw, user.passwordHash);
 }
 
 // A password change/reset is the reaction to a suspected compromise: desktop and MCP tokens minted

@@ -538,7 +538,8 @@ app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) =
   // TOCTOU (#153): stamp before the slow bcrypt compare; a password change meanwhile voids the result.
   const startedAt = Date.now();
   const hashAtStart = user && user.passwordHash;
-  const ok = user && (await auth.verifyPassword(user, password)) && user.passwordHash === hashAtStart;
+  const pwOk = await auth.verifyPassword(user, password); // also runs bcrypt for unknown users (#179)
+  const ok = user && pwOk && user.passwordHash === hashAtStart;
   if (!ok) {
     audit('login_fail', req, { login: clip(req.body.login || req.body.email, 64), known: !!user });
     return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
