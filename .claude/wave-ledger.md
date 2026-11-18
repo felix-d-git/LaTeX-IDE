@@ -29,6 +29,9 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 6: #175 → feste SHA-512 aus offiziellen TUG-.sha512 nach GPG-Prüfung der .asc (keine Werte aus dem Audit-Bericht), pkgutil --check-signature mit Team-ID, kein Verzeichnis-Scraping; Inno Setup per choco mit fester Version + Checksumme
 - 18.11.2026 Wave 6: #211/#210 → wie in den Issues: Sprung vertikal zentriert für alle Sprung-Aufrufer (SyncTeX, Outline, Fehlerliste, Kommentare); Strg+Rad-Zoom um Mauszeiger, ~10 %/Raste, 25–300 %, entprellt; GUI-Abnahme als ⬜ in TODO.md
 - 18.11.2026 Wave 6: #174 + #175 bewusst ein Agent (beide release.yml)
+- 18.11.2026 Wave 7: #182 → Invite- + Share-Tokens nur gehasht (hashToken) + timingSafeEqual, bestehende Klartext-Tokens beim Laden einmalig hashen (alte Links gültig), Share-Links mit optionalem Ablaufdatum (Default ohne Ablauf); fester 30-Tage-Ablauf verworfen
+- 18.11.2026 Wave 7: #180 → Setzen (register/reset/change/initial) lehnt >72 Byte UTF-8 mit klarer Meldung ab; Login nur grobe Obergrenze 1024 Zeichen (bestehende Konten nicht aussperren); SHA-256-Prehash verworfen (Hash-Versionierung + Migration)
+- 18.11.2026 Wave 7: Zusammenstellung #178+#182, #179+#180, #184+#185, #209+#189; #183 nach #184 (Fehlermeldungs-Überschneidung)
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
@@ -103,3 +106,11 @@ Base: master (tabu) · Second: staging/second-branch
 | #211, #210 | 2 | agent-4 | DONE (78edd42) |
 
 Wave-6-Tests: 362 Tests, 358 pass, 2 skipped, 2 fail (nur bekannte: pandocCopyright CRLF, containerWorkflow Windows). Offen für User: Secret RELEASE_SIGNING_KEY + Host-Datei .release-signers anlegen (#172, Anleitung docs/UPDATES.md); Workflows #174/#175 erst beim nächsten Release real geprüft; GUI-⬜ in TODO.md (#164, #210, #211).
+
+## Wave 7 (18.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #178, #182 | 2 | agent-1 | IN_PROGRESS |
+| #179, #180 | 2 | agent-2 | IN_PROGRESS |
+| #184, #185 | 2 | agent-3 | IN_PROGRESS |
+| #209, #189 | 2 | agent-4 | IN_PROGRESS |
