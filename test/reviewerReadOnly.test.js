@@ -68,7 +68,7 @@ const syncMsg = (write) => {
 };
 
 // Fake y-websocket client (wie textIntegrity.test.js), hier als Kommentierender (readOnly).
-function connectReviewer(root, rel, doc) {
+function connectReviewer(root, rel, doc, ownsAnchor = () => true) {
   const ws = new EventEmitter();
   ws.readyState = 1;
   ws.closeCode = null;
@@ -89,7 +89,7 @@ function connectReviewer(root, rel, doc) {
     ws.emit('close');
   };
   doc.on('update', (u, origin) => origin !== 'server' && ws.readyState === 1 && ws.emit('message', syncMsg((e) => syncProtocol.writeUpdate(e, u))));
-  collab.handleConnection(ws, root, rel, collab.getEpoch(root, rel), true);
+  collab.handleConnection(ws, root, rel, collab.getEpoch(root, rel), true, ownsAnchor);
   if (ws.readyState === 1) ws.emit('message', syncMsg((e) => syncProtocol.writeSyncStep1(e, doc)));
   return ws;
 }
