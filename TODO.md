@@ -1,6 +1,7 @@
 # TODO
 
 ## GUI-Prüfpunkte
+- ⬜ #182 Einladungen/Share-Links gehasht: Admin → Einladung erstellen → Liste zeigt „Widerrufen“, aber keinen „Link kopieren“ mehr; Widerrufen entfernt den Eintrag. Projekt teilen → Link erstellen (optional „Ablauf in Tagen“ = 1) → Link wird angezeigt + „Kopieren“ klappt; Dialog schließen/öffnen → Feld zeigt „Link nur bei Erstellung sichtbar…“, Tooltip nennt Ablauf; „Deaktivieren“ + neu erstellen funktioniert; Beitritt per Link als anderer Nutzer klappt
 - ⬜ #211 Sprung zentriert: Doppelklick im PDF auf Text weit unten → Editor scrollt, Zielzeile mittig, Editor hat Fokus; dasselbe mit noch nicht geöffneter Zieldatei; Outline-Eintrag, Fehlerliste und Kommentar anklicken → Zeile jeweils mittig
 - ⬜ #210 PDF-Zoom Strg+Mausrad: Strg+Rad über PDF → nur PDF zoomt (~10 % pro Raste, 25–300 %, Label folgt, UI bleibt gleich groß); Stelle unter dem Mauszeiger bleibt stehen; schnelles Drehen rendert erst am Ende; Touchpad-Pinch; Doppelklick-SyncTeX nach Zoom springt korrekt; Strg+Rad außerhalb der PDF-Vorschau unverändert; Desktop-App und Web
 - ⬜ #167 SMTP-Hinweis (staging/second-branch): App starten → Profil-/Admin-Dialog → SMTP-Bereich öffnen → Hinweis „Port 587 setzt STARTTLS voraus“ sichtbar und lesbar (hell/dunkel)

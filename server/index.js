@@ -488,16 +488,18 @@ function sendVerifyMail(req, user) {
 // Registration stays invite-gated: without a valid admin token nobody gets an account.
 app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   const { token, username, email, password } = req.body;
-  const invite = auth.getValidInvite(token || '');
-  if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
+  if (!auth.getValidInvite(token || '')) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   // Check before the account exists: otherwise it would be created without a deliverable verify mail.
   if (verifyMode() === 'mail' && !(req.linkBase = baseUrl(req))) return res.status(503).json({ error: NO_BASE_URL });
+  // #178: claim synchronously BEFORE the bcrypt await, so parallel requests can't reuse the invite.
+  if (!auth.claimInvite(token)) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   let user;
   try {
     user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: verifyMode() === 'auto' });
     auth.consumeInvite(token, user.id);
     audit('invite_used', req, { uid: user.id });
   } catch (e) {
+    auth.releaseInvite(token);
     return res.status(400).json({ error: e.message });
   }
   if (verifyMode() === 'auto') return res.json({ ok: true, needsVerification: false, message: 'Konto angelegt. Du kannst dich jetzt anmelden.' });
@@ -621,7 +623,7 @@ app.post('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, re
 
 app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   const invites = auth.listInvites().map((i) => ({
-    token: i.token,
+    id: i.tokenHash,
     createdAt: i.createdAt,
     expiresAt: i.expiresAt,
     usedAt: i.usedAt || null,
@@ -632,7 +634,7 @@ app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res
 });
 
 app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
-  auth.revokeInvite(req.params.token);
+  auth.revokeInvite(req.params.token) /* id = tokenHash */;
   audit('admin_invite_revoked', req);
   res.json({ ok: true });
 });
@@ -1090,7 +1092,7 @@ function shareInfo(root, user, hideId) {
       .getShares(key)
       .map((id) => toMember(id) && { ...toMember(id), role: state.getRole(key, id) })
       .filter(Boolean),
-    links: canManage ? state.getShareLinks(key) : {},
+    links: canManage ? state.getShareLinksPublic(key) : {},
   };
 }
 
@@ -1148,9 +1150,13 @@ app.post('/api/share/link', (req, res) => {
   if (!root) return;
   if (!SHARE_ROLES.includes(req.body.role)) return res.status(400).json({ error: 'Ungültige Rolle.' });
   const maxUses = Math.max(0, Math.min(1000, parseInt(req.body.maxUses, 10) || 0));
-  state.setShareLink(path.resolve(root), req.body.role, { token: crypto.randomBytes(24).toString('base64url'), maxUses, uses: 0 });
-  audit('share_link_created', req, { pid: projectIdOf(root), role: req.body.role, maxUses });
-  res.json(shareInfo(root, req.user));
+  // Optional expiry (days, default none); the plaintext token is returned only here (#182).
+  const days = Number(req.body.expiresInDays);
+  const expiresAt = days > 0 ? new Date(Date.now() + Math.min(days, 3650) * 86400000).toISOString() : null;
+  const token = crypto.randomBytes(24).toString('base64url');
+  state.setShareLink(path.resolve(root), req.body.role, { tokenHash: state.hashShareToken(token), maxUses, uses: 0, expiresAt });
+  audit('share_link_created', req, { pid: projectIdOf(root), role: req.body.role, maxUses, expiresAt });
+  res.json({ ...shareInfo(root, req.user), newLink: { role: req.body.role, token } });
 });
 
 app.delete('/api/share/link/:role', (req, res) => {
