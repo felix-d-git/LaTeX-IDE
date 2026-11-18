@@ -1068,6 +1068,7 @@ async function checkServerUpdate() {
   const u = await adminApi.updateStatus().catch(() => null);
   if (!u) return;
   showSourceWarning(u.sourceWarning);
+  showSecurityWarning(u.securityWarning);
   const st = u.status;
   const running = st && st.state === 'running';
   if (!u.available && !running) return;
@@ -1176,6 +1177,18 @@ function showSourceWarning(text) {
   close.addEventListener('click', () => bar.remove());
   bar.appendChild(close);
   adminNotices().prepend(bar); // above the update banner
+}
+
+// Admins: audit log threshold exceeded (#176), same look as the source warning.
+function showSecurityWarning(text) {
+  document.getElementById('security-warning')?.remove();
+  if (!text) return;
+  const bar = Object.assign(document.createElement('div'), { id: 'security-warning', role: 'alert' });
+  bar.appendChild(Object.assign(document.createElement('div'), { textContent: `Sicherheitswarnung: ${text} – Admin-Menü → Sicherheitsereignisse` }));
+  const close = Object.assign(document.createElement('button'), { className: 'update-banner-close', textContent: '×', title: 'Ausblenden' });
+  close.addEventListener('click', () => bar.remove());
+  bar.appendChild(close);
+  adminNotices().prepend(bar);
 }
 
 // Desktop app: the local server asks GitHub for a newer release.

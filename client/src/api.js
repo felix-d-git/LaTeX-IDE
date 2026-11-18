@@ -84,6 +84,7 @@ export const adminApi = {
   getMail: () => req('GET', '/api/admin/mail'),
   saveMail: (body) => req('PUT', '/api/admin/mail', body),
   testMail: () => req('POST', '/api/admin/mail/test'),
+  getAudit: (event) => req('GET', '/api/admin/audit' + (event ? `?event=${encodeURIComponent(event)}` : '')),
   getLimits: () => req('GET', '/api/admin/limits'),
   saveLimits: (limits) => req('PUT', '/api/admin/limits', { limits }),
 };

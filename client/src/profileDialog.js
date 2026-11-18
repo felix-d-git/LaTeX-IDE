@@ -356,6 +356,35 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     return box;
   }
 
+  function renderSecuritySection() {
+    const box = el('div');
+    const filter = el('select');
+    const list = el('div', 'admin-list');
+    box.append(el('h4', null, 'Sicherheitsereignisse'), note('Letzte 200 Einträge des Audit-Logs (audit.log im Datenordner). Es enthält keine Passwörter oder Tokens.'), filter, list);
+    let known = new Set(['']);
+    const load = () => adminApi.getAudit(filter.value).then(({ entries }) => {
+      for (const e of entries) known.add(e.event);
+      if (filter.options.length !== known.size) {
+        const cur = filter.value;
+        filter.innerHTML = '';
+        for (const ev of known) filter.appendChild(Object.assign(el('option', null, ev || 'Alle Ereignisse'), { value: ev }));
+        filter.value = cur;
+      }
+      list.innerHTML = '';
+      if (!entries.length) return list.appendChild(note('Keine Einträge.'));
+      for (const e of entries) {
+        const row = el('div', 'admin-row');
+        const main = el('div', 'admin-row-main');
+        main.append(el('strong', null, e.event), el('span', 'admin-row-meta', [formatDate(e.t), e.ip, e.user && `Nutzer ${e.user}`, e.login, e.tool, e.path].filter(Boolean).join(' · ')));
+        row.appendChild(main);
+        list.appendChild(row);
+      }
+    }).catch((err) => { list.textContent = err.message; });
+    filter.addEventListener('change', load);
+    load();
+    return box;
+  }
+
   function renderInviteSection() {
     const box = el('div');
     const createBtn = el('button', 'primary', '+ Neue Einladung erstellen');
@@ -416,6 +445,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     users: () => [renderUserSection(), renderInviteSection()],
     mail: () => [renderMailSection()],
     limits: () => [renderLimitsSection()],
+    security: () => [renderSecuritySection()],
   };
   const tabsBar = document.getElementById('admin-tabs');
   let activeTab = 'update';
