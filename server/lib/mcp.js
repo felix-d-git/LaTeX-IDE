@@ -452,4 +452,4 @@ function createMcp(ctx) {
 
 const MAX_BATCH = 20;
 
-module.exports = { createMcp };
+module.exports = { createMcp, textPath };
