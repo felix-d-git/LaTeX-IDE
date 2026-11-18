@@ -38,8 +38,20 @@ function parseBlocks(output) {
 
 // Known limit (#137): synctex.exe gets its arguments in the ANSI code page, so on Windows
 // it finds no LuaTeX (UTF-8) input whose name has non-ASCII characters.
+// #184: strict numeric args (a ':' or '-' in them would shift synctex's field split / options).
+const posInt = (v, max) => /^\d{1,9}$/.test(String(v)) && Number(v) >= 1 && Number(v) <= max;
+const nonNeg = (v) => /^\d+(\.\d+)?$/.test(String(v)) && Number.isFinite(Number(v)) && Number(v) <= 1e7;
+const bad = () => Object.assign(new Error('Ungültige Parameter.'), { badInput: true });
+function checkForward(line) {
+  if (!posInt(line, 1e7)) throw bad();
+}
+function checkInverse(page, x, y) {
+  if (!posInt(page, 1e6) || !nonNeg(x) || !nonNeg(y)) throw bad();
+}
+
 function forward(pdfAbs, texAbs, line, cwd) {
   return new Promise((resolve, reject) => {
+    try { checkForward(line); } catch (e) { return reject(e); }
     execFile(
       'synctex',
       ['view', '-i', `${line}:0:${texAbs}`, '-o', pdfAbs],
@@ -67,6 +79,7 @@ function forward(pdfAbs, texAbs, line, cwd) {
 
 function inverse(pdfAbs, page, x, y, cwd) {
   return new Promise((resolve, reject) => {
+    try { checkInverse(page, x, y); } catch (e) { return reject(e); }
     execFile(
       'synctex',
       ['edit', '-o', `${page}:${x}:${y}:${pdfAbs}`],
@@ -127,8 +140,8 @@ function inverseInProject(root, pdfAbs, page, x, y, cwd = root) {
       const file = toProjectPath(root, h.input);
       if (file) return { file, line: h.line };
     }
-    throw new Error(`Die Stelle gehört zu keiner Projektdatei (${hits[0].input}).`);
+    throw new Error('Die Stelle gehört zu keiner Projektdatei.');
   });
 }
 
-module.exports = { forward, inverse, inverseInProject, toProjectPath, decodeOutput };
+module.exports = { checkForward, checkInverse, forward, inverse, inverseInProject, toProjectPath, decodeOutput };
