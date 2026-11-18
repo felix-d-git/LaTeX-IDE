@@ -110,7 +110,8 @@ Wave-6-Tests: 362 Tests, 358 pass, 2 skipped, 2 fail (nur bekannte: pandocCopyri
 ## Wave 7 (18.11.2026)
 | Issue | Prio | Agent | Status |
 |---|---|---|---|
-| #178, #182 | 2 | agent-1 | IN_PROGRESS |
-| #179, #180 | 2 | agent-2 | IN_PROGRESS |
-| #184, #185 | 2 | agent-3 | IN_PROGRESS |
-| #209, #189 | 2 | agent-4 | IN_PROGRESS |
+| #178, #182 | 2 | agent-1 | DONE (b73f11d) |
+| #179, #180 | 2 | agent-2 | DONE (c636a68) |
+| #184, #185 | 2 | agent-3 | DONE (f9d817d) |
+| #209, #189 | 2 | agent-4 | DONE (c829413, TODO.md-Konflikt: beide Einträge behalten) |
+Tests: 380 pass, 2 fail (bekannt: pandocCopyright, containerWorkflow)
