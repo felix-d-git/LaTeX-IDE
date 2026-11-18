@@ -426,6 +426,7 @@ const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitShare = authMw.rateLimit('share', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
 const limitCompile = authMw.rateLimit('compile', 20, 60 * 1000, (req) => req.user.id);
@@ -973,13 +974,17 @@ app.delete('/api/auth/desktop-tokens/:id', (req, res) => {
 
 // --- Sharing (of the active project) ---
 
-function shareInfo(root, user) {
-  const toMember = (id) => {
-    const u = auth.findUserById(id);
-    return u ? { id: u.id, username: auth.toPublicUser(u).username, email: u.email } : null;
-  };
+// E-Mail only for managers and the requester's own entry (#170); hideId = never (just-added target).
+function shareInfo(root, user, hideId) {
   const key = path.resolve(root);
   const canManage = canManageRoot(user, root);
+  const toMember = (id) => {
+    const u = auth.findUserById(id);
+    if (!u) return null;
+    const m = { id: u.id, username: auth.toPublicUser(u).username };
+    if ((canManage && id !== hideId) || id === user.id) m.email = u.email;
+    return m;
+  };
   return {
     canManage,
     myRole: roleOf(user, root),
@@ -1010,7 +1015,7 @@ app.get('/api/share', (req, res) => {
   res.json(shareInfo(root, req.user));
 });
 
-app.post('/api/share', (req, res) => {
+app.post('/api/share', limitShare, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   if (!canManageRoot(req.user, root)) return res.status(403).json({ error: 'Nur der Eigentümer kann das Projekt teilen.' });
@@ -1023,7 +1028,7 @@ app.post('/api/share', (req, res) => {
   const ids = state.getShares(key);
   if (!ids.includes(target.id)) state.setShares(key, [...ids, target.id]);
   state.setRole(key, target.id, role);
-  res.json(shareInfo(root, req.user));
+  res.json(shareInfo(root, req.user, target.id));
 });
 
 app.post('/api/share/role', (req, res) => {
