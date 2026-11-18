@@ -152,6 +152,7 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {
     if (countIf) res.on('finish', () => { if (!countIf(res) && e.count > 0) e.count -= 1; });
     if (e.count > max) {
       res.set('Retry-After', String(Math.ceil((e.resetAt - now) / 1000)));
+      if (e.count === max + 1) require('./audit').audit('rate_limit', req, { limiter: name }); // once per window, else an attacker floods the log
       return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
     }
     next();
