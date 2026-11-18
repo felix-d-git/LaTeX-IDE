@@ -538,7 +538,8 @@ app.post('/api/auth/forgot-password', notLocal, limitMail, requireBaseUrl, ah(as
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Always answer the same way, whether or not the account exists -
   // otherwise the endpoint would leak which e-mails/usernames are registered.
-  if (user) {
+  // Admin mode: unapproved accounts get no reset mail (the reset must not bypass approval).
+  if (user && (auth.isVerified(user) || verifyMode() !== 'admin')) {
     const token = auth.createResetToken(user.id);
     const link = `${req.linkBase}/?reset=${token}`;
     // Not awaited (see resend-verification); sendMailSafe never rejects.
@@ -558,8 +559,8 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
   const user = auth.consumeResetToken(token || '');
   if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
   try {
-    // Clicking the mailed link proves the mailbox, so this also verifies the address.
-    user.emailVerified = true;
+    // Clicking the mailed link proves the mailbox (mail/auto); in admin mode only an admin may approve.
+    if (verifyMode() !== 'admin') user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
     closeUserSockets(user.id);
     initialPasswordDone();
