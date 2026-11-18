@@ -414,17 +414,12 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
         main.append(title, el('span', 'admin-row-meta', meta));
         row.appendChild(main);
         if (!invite.usedByEmail && !invite.expired) {
-          const copyBtn = el('button', null, 'Link kopieren');
-          copyBtn.addEventListener('click', async () => {
-            const link = `${baseUrl || location.origin}/?invite=${invite.token}`;
-            if (!(await copyText(link))) prompt('Einladungslink (zum Kopieren markieren):', link);
-          });
           const revokeBtn = el('button', 'danger', 'Widerrufen');
           revokeBtn.addEventListener('click', async () => {
-            await adminApi.revokeInvite(invite.token);
+            await adminApi.revokeInvite(invite.id);
             refresh();
           });
-          row.append(copyBtn, revokeBtn);
+          row.append(revokeBtn);
         }
         list.appendChild(row);
       }
