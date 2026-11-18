@@ -3,6 +3,7 @@
 // Grammatik/Rechtschreibung über einen selbst betriebenen LanguageTool-Server
 // (LANGUAGETOOL_URL in der Server-.env; ohne Eintrag liefert /api/languagetool 501).
 import { api } from './api.js';
+import { sentenceRange, trackResult, LT_TIMEOUT_MS } from './ltLogic.js';
 
 // LaTeX-Markup als "markup" annotieren: LanguageTool prüft nur den Text,
 // Offsets der Treffer beziehen sich trotzdem auf das Original.
@@ -41,7 +42,8 @@ export function annotate(text) {
 
 let disabled = false; // Server ohne LanguageTool → nicht bei jedem Tastendruck neu fragen
 
-let failed = false; // letzter Versuch schlug fehl → genau ein Hinweis, bis es wieder klappt
+let fails = 0; // aufeinanderfolgende Fehlschläge → Hinweis erst ab 2, verschwindet beim nächsten Erfolg
+let errorToast = null;
 let retryAt = 0;
 let noProxy = false; // kein /api/languagetool-local (Web-Server) → Browser fragt direkt
 
@@ -77,9 +79,9 @@ async function checkLocal(url, data, language) {
   const [u, opts] = checkRequest(url, data, language);
   let r;
   try {
-    r = await fetch(u, { ...opts, signal: AbortSignal.timeout(20000) });
+    r = await fetch(u, { ...opts, signal: AbortSignal.timeout(LT_TIMEOUT_MS) });
   } catch (e) {
-    if (e && e.name === 'TimeoutError') throw new Error('keine Antwort innerhalb von 20 s');
+    if (e && e.name === 'TimeoutError') throw new Error('keine Antwort innerhalb von 60 s');
     throw new Error(await diagnoseFetchError(url));
   }
   if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
@@ -106,14 +108,14 @@ export async function testLanguageTool(url, lang = 'de') {
   return (matches || []).length;
 }
 
-function toastOnce(msg) {
-  if (typeof document === 'undefined') return;
+function showToast(msg) {
+  if (typeof document === 'undefined') return null;
   const el = document.createElement('div');
   el.textContent = msg;
   el.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;max-width:90vw;padding:10px 14px;border-radius:6px;background:#b3261e;color:#fff;font-size:13px;box-shadow:0 2px 8px #0006;cursor:pointer';
   el.addEventListener('click', () => el.remove());
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 12000);
+  return el;
 }
 
 // Letztes Ergebnis; veraltete Treffer werden nur behalten, solange der Text an ihrer Stelle gleich ist.
@@ -127,7 +129,8 @@ export function grammarDiagnostics(text, prefs, onAddWord, onFresh) {
     // Neue Adresse: alte Sperre/Fehlermeldung gelten nicht mehr.
     lastUrl = prefs.ltUrl;
     retryAt = 0;
-    failed = false;
+    fails = 0;
+    if (errorToast) errorToast.remove();
   }
   const key = JSON.stringify([text, prefs.lang, prefs.ltUrl, prefs.dictionary]);
   if (cache.key !== key && !inflight && !(prefs.ltUrl ? false : disabled) && text.trim() && Date.now() >= retryAt) {
@@ -148,28 +151,47 @@ async function fetchDiagnostics(text, { lang, dictionary = [], ltUrl = '' }, onA
   const data = JSON.stringify({ annotation: annotate(text) });
   try {
     ({ matches } = ltUrl ? await checkLocal(ltUrl, data, language) : await api.languageTool(data, language));
-    failed = false;
+    fails = trackResult(fails, true).fails;
+    if (errorToast) errorToast.remove();
+    errorToast = null;
   } catch (e) {
     if (e.status === 501) disabled = true;
     else {
       retryAt = Date.now() + 30000; // nicht bei jedem Tastendruck neu versuchen
-      if (!failed) toastOnce(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
-      failed = true;
+      const r = trackResult(fails, false);
+      fails = r.fails;
+      if (r.justShown) errorToast = showToast(ltUrl ? `LanguageTool nicht erreichbar (${ltUrl}): ${e.message}. Siehe Einstellungen → Rechtschreibung.` : `LanguageTool des Servers nicht erreichbar: ${e.message}.`);
     }
     return null;
   }
   const dict = new Set(dictionary);
   const out = [];
+  const sentences = new Map(); // "von-bis" → gelber Satz mit allen Treffern
   for (const m of matches || []) {
     const word = text.slice(m.offset, m.offset + m.length);
     const spelling = m.rule && m.rule.issueType === 'misspelling';
     if (spelling && dict.has(word)) continue;
+    const label = (r) => (spelling ? r.value || '∅' : `${word} → ${r.value || '∅'}`);
     const actions = (m.replacements || []).slice(0, 3).map((r) => ({
-      name: r.value || '∅',
-      apply: (view, from, to) => view.dispatch({ changes: { from, to, insert: r.value } }),
+      name: label(r),
+      apply: (view) => view.dispatch({ changes: { from: m.offset, to: m.offset + m.length, insert: r.value } }),
     }));
     if (spelling && onAddWord) actions.push({ name: 'Zum Wörterbuch', apply: () => onAddWord(word) });
-    out.push({ from: m.offset, to: m.offset + m.length, severity: spelling ? 'error' : 'warning', message: m.message, source: 'LanguageTool', actions });
+    if (spelling) {
+      out.push({ from: m.offset, to: m.offset + m.length, severity: 'error', markClass: 'cm-lt-spell', message: m.message, source: 'LanguageTool', actions });
+      continue;
+    }
+    const range = sentenceRange(text, m.offset) || [m.offset, m.offset + Math.max(m.length, 1)];
+    const k = range.join('-');
+    const s = sentences.get(k);
+    if (s) {
+      s.message += '\n' + m.message;
+      s.actions.push(...actions);
+    } else {
+      const d = { from: range[0], to: range[1], severity: 'warning', markClass: 'cm-lt-sentence', message: m.message, source: 'LanguageTool', actions };
+      sentences.set(k, d);
+      out.push(d);
+    }
   }
   return out;
 }

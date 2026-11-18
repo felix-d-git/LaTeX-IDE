@@ -1456,3 +1456,8 @@ body.pdf-native #pdf-prev, body.pdf-native #pdf-next, body.pdf-native #pdf-page-
 #ai-budget.is-over{ color: var(--ui-danger); }
 #ai-input{ width: 100%; resize: vertical; padding: 6px 8px; border: 1px solid var(--ui-border); border-radius: var(--ui-r-sm); font: 400 14px/20px var(--ui-font); color: var(--ui-text); background: var(--ui-surface); }
 #ai-actions{ display: flex; justify-content: flex-end; gap: 6px; }
+
+/* LanguageTool (#209): Rechtschreibung dick rot gerade, Satz dick gelb (rot liegt darüber) */
+.cm-lintRange.cm-lt-spell, .cm-lintRange.cm-lt-sentence { background-image: none; padding-bottom: 0; }
+.cm-lintRange.cm-lt-sentence { border-bottom: 3px solid #e5b800; }
+.cm-lintRange.cm-lt-spell { border-bottom: 3px solid #d32f2f; }
