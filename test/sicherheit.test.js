@@ -118,3 +118,17 @@ test('Reset-Link folgt nie einem gefälschten Host-Header (#151)', async () => {
     await srv.stop();
   }
 });
+
+// #159: Compile-Route pro Nutzer begrenzt (20/min), danach 429.
+test('POST /api/compile: Rate-Limit pro Nutzer', async () => {
+  const srv = await startServer();
+  try {
+    const c = client(srv.base);
+    await c.login('admin', ADMIN_PASSWORD);
+    let last = 0;
+    for (let i = 0; i < 21; i++) last = (await c.call('POST', '/api/compile', {})).status;
+    assert.strictEqual(last, 429);
+  } finally {
+    await srv.stop();
+  }
+});
