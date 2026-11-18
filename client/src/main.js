@@ -399,11 +399,7 @@ async function openFile(path, line) {
   if (outline) outline.render();
   if (commentsPanel && commentsPanel.isOpen()) commentsPanel.renderList();
   if (line && kind === 'text') {
-    const doc = editorMgr.view.state.doc;
-    const ln = Math.min(line, doc.lines);
-    const pos = doc.line(ln).from;
-    editorMgr.view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
-    editorMgr.view.focus();
+    editorMgr.jumpToLine(line);
     if (outline) outline.render();
   }
 }
