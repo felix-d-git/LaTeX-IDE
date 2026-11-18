@@ -97,12 +97,7 @@ export function setupOutline({ editorMgr, getActivePath }) {
       link.textContent = item.title;
       link.title = item.title;
       link.addEventListener('click', () => {
-        const view = editorMgr.view;
-        const doc = view.state.doc;
-        const ln = Math.min(item.line, doc.lines);
-        const pos = doc.line(ln).from;
-        view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
-        view.focus();
+        editorMgr.jumpToLine(item.line);
         render();
       });
       body.appendChild(link);

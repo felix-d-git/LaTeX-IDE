@@ -342,9 +342,19 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     return { from: sel.from, to: sel.to, text: view.state.sliceDoc(sel.from, sel.to) };
   }
 
+  // Gemeinsamer Sprung (SyncTeX, Outline, Fehlerliste, Kommentare): Ziel vertikal zentriert (#211).
+  // Zweiter Scroll nach dem Layout, falls der Editor nach Datei-/Tab-Wechsel noch nicht vermessen war.
   function jumpToRange(from, to) {
-    view.dispatch({ selection: { anchor: from, head: to ?? from }, scrollIntoView: true });
+    const center = () => view.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+    view.dispatch({ selection: { anchor: from, head: to ?? from } });
+    center();
     view.focus();
+    requestAnimationFrame(center);
+  }
+
+  function jumpToLine(line) {
+    const doc = view.state.doc;
+    jumpToRange(doc.line(Math.min(Math.max(1, line), doc.lines)).from);
   }
 
   // Applied directly to the DOM (not baked into EditorState/extensions),
@@ -449,6 +459,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     getSelection,
     openSearch,
     jumpToRange,
+    jumpToLine,
     refreshCommentsForPath,
     setFontSettings,
     setSpellcheck,
