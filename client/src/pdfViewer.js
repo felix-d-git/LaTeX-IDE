@@ -3,6 +3,7 @@
 // Legacy-Build: das moderne setzt neueste JS-APIs voraus (Iterator, Map.getOrInsertComputed) und legt sonst die ganze App lahm (#105).
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { withPid } from './api.js';
+import { wheelScale } from './pdfZoom.js';
 
 // build.js copies pdfjs-dist's worker build to client/dist/pdf.worker.min.mjs
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/dist/pdf.worker.min.mjs';
@@ -145,8 +146,8 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     const wrapper = pageWrappers.get(page);
     if (!wrapper) return;
     const pageTop = wrapper.offsetTop;
-    container.scrollTop = Math.max(0, pageTop + state.ratio * wrapper.offsetHeight);
-    container.scrollLeft = state.leftRatio * container.scrollWidth;
+    container.scrollTop = Math.max(0, pageTop + state.ratio * wrapper.offsetHeight - (state.dy || 0));
+    container.scrollLeft = Math.max(0, state.leftRatio * container.scrollWidth - (state.dx || 0));
     currentPage = page;
   }
 
@@ -249,6 +250,44 @@ export function createPdfViewer(container, toolbar, { onPdfDoubleClick } = {}) {
     scale = Math.min(3, Math.max(0.25, scale + delta));
     updateLabels();
     if (pdfDoc) renderAll();
+  }
+
+  // Strg + Mausrad (auch Touchpad-Pinch): Zoom um den Mauszeiger, Rendern entprellt (#210).
+  let wheelTimer = null;
+  let wheelPos = null;
+  container.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey || !pdfDoc || native) return;
+    e.preventDefault();
+    const next = wheelScale(scale, e.deltaY);
+    zoomMode = 'fixed';
+    scale = next;
+    updateLabels();
+    const rect = container.getBoundingClientRect();
+    wheelPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (!wheelTimer) wheelAnchor = captureAnchor(wheelPos);
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      wheelTimer = null;
+      renderAll(wheelAnchor);
+    }, 120);
+  }, { passive: false });
+  let wheelAnchor = null;
+
+  // Inhaltspunkt unter dem Zeiger als Seite + Anteil, plus Zeigerabstand fuer restoreScroll.
+  function captureAnchor({ x, y }) {
+    const base = captureScroll();
+    if (!base) return null;
+    const cy = container.scrollTop + y;
+    let page = base.page;
+    for (const [n, w] of pageWrappers) if (w.offsetTop <= cy) page = n;
+    const w = pageWrappers.get(page);
+    return {
+      page,
+      ratio: (cy - w.offsetTop) / (w.offsetHeight || 1),
+      leftRatio: (container.scrollLeft + x) / (container.scrollWidth || 1),
+      dy: y,
+      dx: x,
+    };
   }
 
   function setZoom(value) {

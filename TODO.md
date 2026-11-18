@@ -1,6 +1,8 @@
 # TODO
 
 ## GUI-Prüfpunkte
+- ⬜ #211 Sprung zentriert: Doppelklick im PDF auf Text weit unten → Editor scrollt, Zielzeile mittig, Editor hat Fokus; dasselbe mit noch nicht geöffneter Zieldatei; Outline-Eintrag, Fehlerliste und Kommentar anklicken → Zeile jeweils mittig
+- ⬜ #210 PDF-Zoom Strg+Mausrad: Strg+Rad über PDF → nur PDF zoomt (~10 % pro Raste, 25–300 %, Label folgt, UI bleibt gleich groß); Stelle unter dem Mauszeiger bleibt stehen; schnelles Drehen rendert erst am Ende; Touchpad-Pinch; Doppelklick-SyncTeX nach Zoom springt korrekt; Strg+Rad außerhalb der PDF-Vorschau unverändert; Desktop-App und Web
 - ⬜ #167 SMTP-Hinweis (staging/second-branch): App starten → Profil-/Admin-Dialog → SMTP-Bereich öffnen → Hinweis „Port 587 setzt STARTTLS voraus“ sichtbar und lesbar (hell/dunkel)
 - ⬜ #158 Limits-Tab (staging/second-branch): Admin-Dialog → Tab „Limits“ zeigt 6 Felder mit aktuellen Werten, Tooltip = Vorgabe; Kontingent auf 1 → Speichern → „Gespeichert.“, Wert bleibt nach Neuöffnen; als Nutzer Zip > 1 MB hochladen → „Speicherkontingent überschritten“; 0 bzw. „abc“ → Validierungsfehler; Kommentarlimit 5, Kommentar mit 6 Zeichen → „Kommentar zu lang“; Kontingent zurück auf 300; Nicht-Admin sieht den Tab nicht
 - ⬜ #163 Start-Schlüssel (staging/second-branch): `LatexIDE.cmd` und `LatexIDE-Lokal.vbs` per Doppelklick → Browser öffnet mit `?k=…` und steht danach auf `/` ohne `k`; zweiter Doppelklick bei laufender App öffnet nur den Browser erneut; „Desktop-App verbinden“ (Login über Server, `/desktop-callback`) einmal durchspielen; macOS `install.command` nur textuell getestet
