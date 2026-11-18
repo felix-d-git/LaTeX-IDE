@@ -427,7 +427,8 @@ const limitLoginAccount = authMw.rateLimit('login-acct', 20, 15 * 60 * 1000, (re
 const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
-const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitMailTest = authMw.rateLimit('mail-test', 5, 15 * 60 * 1000);
+const limitToken =authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitShare = authMw.rateLimit('share', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
@@ -635,13 +636,20 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   const prev = auth.getSettings().smtp;
   if (smtp !== undefined) {
     const host = String((smtp && smtp.host) || '').trim();
-    // Empty host = back to .env. Password: undefined keeps the stored one, '' removes it.
+    const port = Number(smtp && smtp.port) || 587;
+    const user = String((smtp && smtp.user) || '').trim();
+    // Stored password only for the same host/port/user, else it would be sent to the new target (#169).
+    const sameTarget = !!prev && prev.host === host && Number(prev.port) === port && (prev.user || '') === user;
+    if (host && smtp.pass === undefined && prev && prev.pass && !sameTarget) {
+      return res.status(400).json({ error: 'Host, Port oder Benutzer geändert: Das SMTP-Passwort muss neu eingegeben werden.' });
+    }
+    // Empty host = back to .env. Password: undefined keeps the stored one (same target), '' removes it.
     const next = host ? {
       host,
-      port: Number(smtp.port) || 587,
+      port,
       secure: !!smtp.secure,
-      user: String(smtp.user || '').trim(),
-      pass: smtp.pass === undefined ? (prev && prev.pass) || '' : String(smtp.pass),
+      user,
+      pass: smtp.pass === undefined ? (sameTarget && prev.pass) || '' : String(smtp.pass),
       from: String(smtp.from || '').trim(),
     } : null;
     mailer.setSmtp(next);
@@ -652,12 +660,13 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   res.json(mailState());
 });
 
-app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
+app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, limitMailTest, ah(async (req, res) => {
   if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
   try {
     await mailer.sendMail({ to: req.user.email, subject: 'LaTeX-IDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
   } catch (e) {
-    return res.status(502).json({ error: `Versand fehlgeschlagen: ${e.message}` });
+    console.error('[mailer] Testmail fehlgeschlagen:', e.message);
+    return res.status(502).json({ error: 'Versand fehlgeschlagen (Details im Server-Log).' });
   }
   res.json({ ok: true, to: req.user.email });
 }));
