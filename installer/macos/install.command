@@ -143,11 +143,8 @@ export PATH="$APP_ROOT/node/bin:/Library/TeX/texbin:$PATH"
 : "${LATEX_IDE_DATA:=$HOME/Library/Application Support/LatexIDE}"
 export PORT LATEX_IDE_DATA
 cd "$APP_ROOT/app"
-"$APP_ROOT/node/bin/node" server/desktop.js &
-SERVER_PID=$!
-sleep 2
-open "http://localhost:$PORT"
-wait "$SERVER_PID"
+# desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
+exec "$APP_ROOT/node/bin/node" server/desktop.js
 EOF
 chmod +x "$STARTER"
 

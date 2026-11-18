@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+require('./lib/secureFiles').applyUmask();
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
@@ -7,6 +8,7 @@ if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirna
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
+require('./lib/secureFiles').tightenSecrets(process.env.DATA_DIR || require('path').join(__dirname, '..'));
 {
   const dataErr = require('./lib/fsTree').dataDirError(process.env.DATA_DIR || require('path').join(__dirname, '..'));
   if (dataErr) {
@@ -102,9 +104,13 @@ app.use((req, res, next) => {
 app.use(securityHeaders());
 // Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
+const launchKey = require('./lib/launchKey');
+const LOCAL_KEY = launchKey.generate();
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
+  // #163: Start-Schlüssel (?k= im vom Server geöffneten Link -> HttpOnly-Cookie), sonst könnte jeder lokale Prozess/OS-Benutzer mit.
+  app.use(launchKey.middleware(LOCAL_KEY));
 }
 // CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
@@ -426,7 +432,8 @@ const limitLoginAccount = authMw.rateLimit('login-acct', 20, 15 * 60 * 1000, (re
 const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
-const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitMailTest = authMw.rateLimit('mail-test', 5, 15 * 60 * 1000);
+const limitToken =authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitShare = authMw.rateLimit('share', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
@@ -642,13 +649,20 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   const prev = auth.getSettings().smtp;
   if (smtp !== undefined) {
     const host = String((smtp && smtp.host) || '').trim();
-    // Empty host = back to .env. Password: undefined keeps the stored one, '' removes it.
+    const port = Number(smtp && smtp.port) || 587;
+    const user = String((smtp && smtp.user) || '').trim();
+    // Stored password only for the same host/port/user, else it would be sent to the new target (#169).
+    const sameTarget = !!prev && prev.host === host && Number(prev.port) === port && (prev.user || '') === user;
+    if (host && smtp.pass === undefined && prev && prev.pass && !sameTarget) {
+      return res.status(400).json({ error: 'Host, Port oder Benutzer geändert: Das SMTP-Passwort muss neu eingegeben werden.' });
+    }
+    // Empty host = back to .env. Password: undefined keeps the stored one (same target), '' removes it.
     const next = host ? {
       host,
-      port: Number(smtp.port) || 587,
+      port,
       secure: !!smtp.secure,
-      user: String(smtp.user || '').trim(),
-      pass: smtp.pass === undefined ? (prev && prev.pass) || '' : String(smtp.pass),
+      user,
+      pass: smtp.pass === undefined ? (sameTarget && prev.pass) || '' : String(smtp.pass),
       from: String(smtp.from || '').trim(),
     } : null;
     mailer.setSmtp(next);
@@ -671,12 +685,13 @@ app.put('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res)
   res.json({ limits: limits.all() });
 });
 
-app.post('/api/admin/mail/test',authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
+app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, limitMailTest, ah(async (req, res) => {
   if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
   try {
     await mailer.sendMail({ to: req.user.email, subject: 'LaTeX-IDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
   } catch (e) {
-    return res.status(502).json({ error: `Versand fehlgeschlagen: ${e.message}` });
+    console.error('[mailer] Testmail fehlgeschlagen:', e.message);
+    return res.status(502).json({ error: 'Versand fehlgeschlagen (Details im Server-Log).' });
   }
   res.json({ ok: true, to: req.user.email });
 }));
@@ -2373,7 +2388,7 @@ async function handleUpgrade(req, socket, head) {
     return rejectUpgrade(socket, 400, 'Bad Request');
   }
   // Cross-site WebSocket hijacking guard (cookies ride along on upgrades).
-  if (authMw.LOCAL_MODE && !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) return rejectUpgrade(socket, 403, 'Forbidden');
+  if (authMw.LOCAL_MODE && (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') || !launchKey.hasCookie(req, LOCAL_KEY))) return rejectUpgrade(socket, 403, 'Forbidden');
   const origin = req.headers.origin;
   if (origin) {
     let host = null;
@@ -2609,7 +2624,7 @@ bootstrapAdmin()
       // Zweiter Start, während schon einer läuft: nur den Browser öffnen.
       server.on('error', (e) => {
         if (e.code !== 'EADDRINUSE') throw e;
-        openBrowser(`http://localhost:${PORT}`);
+        launchKey.openRunning(path.dirname(PROJECTS_DIR), PORT);
         process.exit(0);
       });
       let idleSince = Date.now();
@@ -2622,7 +2637,10 @@ bootstrapAdmin()
       console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
       if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
       if (!authMw.LOCAL_MODE && !PUBLIC_URL) console.warn(`[auth] Warnung: PUBLIC_URL fehlt - Reset-/Bestätigungs-/Einladungslinks nur für ${[...ALLOWED_HOSTS].join(', ')} (ALLOWED_HOSTS), sonst keine.`);
-      if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
+      if (authMw.LOCAL_MODE) {
+        launchKey.save(path.dirname(PROJECTS_DIR), LOCAL_KEY);
+        return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}/?k=${LOCAL_KEY}`);
+      }
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});
     });
