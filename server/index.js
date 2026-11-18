@@ -46,6 +46,7 @@ const state = require('./state');
 const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
+const { audit, clip, recent: auditRecent, warning: auditWarning, TRAVERSAL } = require('./lib/audit');
 const collab = require('./lib/collab');
 const { createMcp } = require('./lib/mcp');
 const legal = require('./lib/legal');
@@ -495,6 +496,7 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   try {
     user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: verifyMode() === 'auto' });
     auth.consumeInvite(token, user.id);
+    audit('invite_used', req, { uid: user.id });
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
@@ -513,7 +515,11 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
 
 app.post('/api/auth/verify', notLocal, limitToken, (req, res) => {
   const user = auth.consumeVerifyToken(req.body.token || '');
-  if (!user) return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
+  if (!user) {
+    audit('verify_invalid', req);
+    return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
+  }
+  audit('verify_ok', req, { uid: user.id });
   res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
 });
 
@@ -531,8 +537,12 @@ app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) =
   const startedAt = Date.now();
   const hashAtStart = user && user.passwordHash;
   const ok = user && (await auth.verifyPassword(user, password)) && user.passwordHash === hashAtStart;
-  if (!ok) return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
+  if (!ok) {
+    audit('login_fail', req, { login: clip(req.body.login || req.body.email, 64), known: !!user });
+    return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
+  }
   if (!auth.isVerified(user)) {
+    audit('login_unverified', req, { uid: user.id });
     return res.status(403).json({ error: verifyMode() === 'mail' ? 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).' : 'Dein Konto wartet noch auf die Bestätigung durch einen Admin.', unverified: true });
   }
   req.session.regenerate((err) => {
@@ -540,6 +550,7 @@ app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) =
     req.session.userId = user.id;
     req.session.loginAt = startedAt;
     authMw.applyRememberMe(req, !!rememberMe);
+    audit('login_ok', req, { uid: user.id, rememberMe: !!rememberMe });
     res.json({ user: auth.toPublicUser(user) });
   });
 }));
@@ -564,6 +575,7 @@ app.post('/api/auth/forgot-password', notLocal, limitMail, requireBaseUrl, ah(as
   // otherwise the endpoint would leak which e-mails/usernames are registered.
   // Admin mode: unapproved accounts get no reset mail (the reset must not bypass approval).
   if (user && (auth.isVerified(user) || verifyMode() !== 'admin')) {
+    audit('password_reset_requested', req, { uid: user.id });
     const token = auth.createResetToken(user.id);
     const link = `${req.linkBase}/?reset=${token}`;
     // Not awaited (see resend-verification); sendMailSafe never rejects.
@@ -581,13 +593,17 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
   // Check first: a typo must not burn the single-use link.
   try { auth.validatePassword(password); } catch (e) { return res.status(400).json({ error: e.message }); }
   const user = auth.consumeResetToken(token || '');
-  if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
+  if (!user) {
+    audit('password_reset_invalid', req);
+    return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
+  }
   try {
     // Clicking the mailed link proves the mailbox (mail/auto); in admin mode only an admin may approve.
     if (verifyMode() !== 'admin') user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
     closeUserSockets(user.id);
     initialPasswordDone();
+    audit('password_reset_done', req, { uid: user.id });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -598,6 +614,7 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
 
 app.post('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   const token = auth.createInvite(req.user.id);
+  audit('admin_invite_created', req);
   const base = baseUrl(req);
   res.json({ token, url: base && `${base}/?invite=${token}` });
 });
@@ -616,6 +633,7 @@ app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res
 
 app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   auth.revokeInvite(req.params.token);
+  audit('admin_invite_revoked', req);
   res.json({ ok: true });
 });
 
@@ -627,6 +645,7 @@ app.get('/api/admin/users', authMw.requireAuth, authMw.requireAdmin, (req, res) 
 
 app.post('/api/admin/users/:id/verify', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   if (!auth.markVerified(req.params.id)) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+  audit('admin_user_verified', req, { uid: req.params.id });
   res.json({ ok: true });
 });
 
@@ -670,6 +689,7 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   }
   if (mode === 'mail' && !mailer.isConfigured()) return res.status(400).json({ error: 'Bestätigung per Mail braucht einen funktionierenden SMTP-Zugang.' });
   if (mode !== undefined) auth.setSettings({ verifyMode: mode });
+  audit('admin_mail_changed', req, { smtpHost: smtp && clip(smtp.host, 64), smtpUser: smtp && clip(smtp.user, 64), verifyMode: mode });
   res.json(mailState());
 });
 
@@ -682,6 +702,7 @@ app.put('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res)
   const next = { ...auth.getSettings().limits, ...patch };
   auth.setSettings({ limits: next });
   limits.setOverrides(next);
+  audit('admin_limits_changed', req, { keys: Object.keys(patch).join(',') });
   res.json({ limits: limits.all() });
 });
 
@@ -702,6 +723,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
   if (!user) return res.status(404).json({ error: 'Konto nicht gefunden.' });
   if (user.isAdmin) return res.status(400).json({ error: 'Admin-Konten können nicht gelöscht werden.' });
   removeAccount(user.id);
+  audit('admin_user_deleted', req, { uid: user.id });
   res.json({ ok: true });
 });
 
@@ -742,7 +764,7 @@ function updateStatus() {
 }
 
 app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
-  const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
+  const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus(), securityWarning: auditWarning() };
   // AGPL §13: /source shows a commit, but the checkout has local changes and SOURCE_URL is unset (lib/legal.js).
   // Local mode has no other users to offer the source to.
   if (legal.SOURCE_WARNING && !authMw.LOCAL_MODE) base.sourceWarning = legal.SOURCE_WARNING;
@@ -760,7 +782,15 @@ app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (
 app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   if (UPDATE_MODE !== 'button') return res.status(400).json({ error: 'Update per Button ist auf diesem Server nicht aktiviert (UPDATE_MODE).' });
   fs.writeFileSync(UPDATE_REQUEST, new Date().toISOString());
+  audit('admin_update_requested', req);
   res.json({ ok: true });
+});
+
+// Security audit log (#176): last entries, optional ?event= filter, admins only.
+app.get('/api/admin/audit', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  const limit = Math.max(1, Math.min(1000, parseInt(req.query.limit, 10) || 200));
+  const event = typeof req.query.event === 'string' && req.query.event ? req.query.event : undefined;
+  res.json({ entries: auditRecent({ limit, event }), warning: auditWarning() });
 });
 
 // --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
@@ -774,6 +804,7 @@ function mcpProjects(user) {
 const mcpTokenFirst = (req, res, next) => {
   const h = req.headers.authorization || '';
   if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
+  audit('mcp_auth_fail', req);
   res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
 };
 const mcp = createMcp({ searchAllowed, PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, compileAllowed, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
@@ -782,6 +813,15 @@ app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error:
 
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
+// #176: `..` segments (or an absolute `file`) in query/body fields: log only, the routes still refuse them themselves.
+app.use('/api', (req, res, next) => {
+  for (const src of [req.query, req.body]) {
+    for (const [k, v] of Object.entries(src || {})) {
+      if (typeof v === 'string' && (TRAVERSAL.test(v) || (k === 'file' && path.isAbsolute(v)))) audit('path_traversal_attempt', req, { param: clip(k, 32), value: clip(v) });
+    }
+  }
+  next();
+});
 
 // Too little free space on the data volume: reject writes and compiles (#158/#161); deletes stay possible.
 app.use('/api', (req, res, next) => {
@@ -877,10 +917,12 @@ app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const hashAtStart = req.user.passwordHash;
   if (!(await auth.verifyPassword(req.user, currentPassword)) || req.user.passwordHash !== hashAtStart) {
+    audit('password_change_fail', req);
     return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    audit('password_changed', req);
     closeUserSockets(req.user.id);
     initialPasswordDone();
     // Every other session is now invalid; keep this one.
@@ -950,6 +992,7 @@ app.post('/api/auth/delete-account', limitLogin, ah(async (req, res) => {
   if (!(await auth.verifyPassword(req.user, req.body.password))) {
     return res.status(400).json({ error: 'Passwort ist falsch.' });
   }
+  audit('account_deleted', req);
   removeAccount(req.user.id); // throws (-> error middleware) before deleting anything if files are in use
   req.session.destroy(() => {
     res.clearCookie('latex_ide_sid');
@@ -963,6 +1006,7 @@ app.post('/api/auth/desktop-token', (req, res) => {
   if (!req.session || req.session.userId !== req.user.id) {
     return res.status(403).json({ error: 'Nur aus einer Browser-Anmeldung heraus möglich.' });
   }
+  audit('desktop_token_created', req);
   res.json({ token: auth.createApiToken(req.user.id, req.body.label) });
 });
 
@@ -985,7 +1029,9 @@ function mcpScope(req, existing) {
 
 app.post('/api/auth/mcp-token', (req, res) => {
   try {
-    res.json({ token: auth.createMcpToken(req.user.id, { name: req.body.name, ...mcpScope(req) }) });
+    const token = auth.createMcpToken(req.user.id, { name: req.body.name, ...mcpScope(req) });
+    audit('mcp_token_created', req, { name: clip(req.body.name, 64) });
+    res.json({ token });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
@@ -995,6 +1041,7 @@ app.patch('/api/auth/mcp-tokens/:id', (req, res) => {
   try {
     const existing = auth.listMcpTokens(req.user.id).find((t) => t.id === req.params.id);
     if (!existing || !auth.updateMcpToken(req.user.id, req.params.id, { name: req.body.name, ...mcpScope(req, existing) })) return res.status(404).json({ error: 'Token nicht gefunden.' });
+    audit('mcp_token_updated', req, { id: clip(req.params.id, 64) });
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
@@ -1007,11 +1054,13 @@ app.get('/api/auth/mcp-tokens', (req, res) => {
 
 app.delete('/api/auth/mcp-tokens/:id', (req, res) => {
   auth.revokeMcpToken(req.user.id, req.params.id);
+  audit('mcp_token_deleted', req, { id: clip(req.params.id, 64) });
   res.json({ ok: true });
 });
 
 app.delete('/api/auth/desktop-tokens/:id', (req, res) => {
   auth.revokeApiToken(req.user.id, req.params.id);
+  audit('desktop_token_deleted', req, { id: clip(req.params.id, 64) });
   res.json({ ok: true });
 });
 
@@ -1071,6 +1120,7 @@ app.post('/api/share', limitShare, (req, res) => {
   const ids = state.getShares(key);
   if (!ids.includes(target.id)) state.setShares(key, [...ids, target.id]);
   state.setRole(key, target.id, role);
+  audit('share_added', req, { pid: projectIdOf(root), target: target.id, role });
   res.json(shareInfo(root, req.user, target.id));
 });
 
@@ -1082,6 +1132,7 @@ app.post('/api/share/role', (req, res) => {
     return res.status(400).json({ error: 'Ungültige Rolle oder kein Mitglied.' });
   }
   state.setRole(key, req.body.userId, req.body.role);
+  audit('share_role', req, { pid: projectIdOf(root), target: req.body.userId, role: req.body.role });
   res.json(shareInfo(root, req.user));
 });
 
@@ -1093,6 +1144,7 @@ app.post('/api/share/link', (req, res) => {
   if (!SHARE_ROLES.includes(req.body.role)) return res.status(400).json({ error: 'Ungültige Rolle.' });
   const maxUses = Math.max(0, Math.min(1000, parseInt(req.body.maxUses, 10) || 0));
   state.setShareLink(path.resolve(root), req.body.role, { token: crypto.randomBytes(24).toString('base64url'), maxUses, uses: 0 });
+  audit('share_link_created', req, { pid: projectIdOf(root), role: req.body.role, maxUses });
   res.json(shareInfo(root, req.user));
 });
 
@@ -1100,12 +1152,16 @@ app.delete('/api/share/link/:role', (req, res) => {
   const root = requireManagedRoot(req, res);
   if (!root) return;
   state.setShareLink(path.resolve(root), req.params.role, null);
+  audit('share_link_revoked', req, { pid: projectIdOf(root), role: req.params.role });
   res.json(shareInfo(root, req.user));
 });
 
 app.post('/api/share/join', limitToken, (req, res) => {
   const link = typeof req.body.token === 'string' && state.findShareLink(req.body.token);
-  if (!link || !fs.existsSync(link.root) || isParked(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  if (!link || !fs.existsSync(link.root) || isParked(link.root)) {
+    audit('share_join_invalid', req);
+    return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  }
   if (!auth.isVerified(req.user)) return res.status(403).json({ error: 'Bitte zuerst die E-Mail-Adresse bestätigen.' });
   if (!canManageRoot(req.user, link.root)) {
     const ids = state.getShares(link.root);
@@ -1114,6 +1170,7 @@ app.post('/api/share/join', limitToken, (req, res) => {
       state.setShares(link.root, [...ids, req.user.id]);
       state.setRole(link.root, req.user.id, link.role);
       state.useShareLink(link.root, link.role);
+      audit('share_joined', req, { pid: projectIdOf(link.root), role: link.role });
     }
   }
   res.json({ root: link.root });
@@ -1129,6 +1186,7 @@ app.delete('/api/share/:userId', (req, res) => {
   const key = path.resolve(root);
   state.setShares(key, state.getShares(key).filter((id) => id !== req.params.userId));
   state.setRole(key, req.params.userId, 'editor');
+  audit('share_removed', req, { pid: projectIdOf(root), target: req.params.userId });
   kickRoot(key, req.params.userId);
   if (req.params.userId === req.user.id) return res.json({ ok: true });
   res.json(shareInfo(root, req.user));
@@ -2347,7 +2405,10 @@ app.post('/api/file/convert-utf8', (req, res) => {
 
 // Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
 app.use((err, req, res, next) => {
-  if (!err.status || err.status >= 500) console.error('[route]', req.method, req.path, err.cause || err);
+  if (!err.status || err.status >= 500) {
+    console.error('[route]', req.method, req.path, err.cause || err);
+    audit('server_error', req, { status: err.status || 500, error: clip(err.message, 100) });
+  }
   if (res.headersSent) return next(err);
   res.status(err.status || 500).json({ error: err.status ? err.message : 'Interner Fehler: ' + (err.message || err) });
 });
