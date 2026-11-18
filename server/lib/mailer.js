@@ -37,6 +37,9 @@ function getTransporter() {
       host: c.host,
       port: Number(c.port) || 587,
       secure: !!c.secure,
+      // STARTTLS Pflicht (sonst kann ein Angreifer es entfernen und AUTH im Klartext mitlesen); Opt-out nur per Env.
+      requireTLS: !c.secure && process.env.SMTP_ALLOW_PLAIN !== 'true',
+      tls: { minVersion: 'TLSv1.2' },
       auth: c.user ? { user: c.user, pass: c.pass } : undefined,
       // An unreachable SMTP server must not keep requests hanging for minutes.
       connectionTimeout: 10000,
@@ -45,6 +48,11 @@ function getTransporter() {
     });
   }
   return transporter;
+}
+
+// nodemailer: 'Message failed: ... STARTTLS' bzw. code ESOCKET/ECONNECTION when the server has no STARTTLS.
+function explain(e) {
+  return /STARTTLS/i.test(e.message || '') ? 'Der SMTP-Server bietet kein STARTTLS an (Port 587 setzt STARTTLS voraus; Port 465 mit SSL/TLS). Nur für lokale Tests: SMTP_ALLOW_PLAIN=true.' : e.message;
 }
 
 function logToOutbox(subject, to, text, reason = 'Kein SMTP konfiguriert') {
@@ -63,12 +71,17 @@ async function sendMail({ to, subject, text }) {
     logToOutbox(subject, to, text);
     return { delivered: false };
   }
-  await t.sendMail({
-    from: getConfig().from || getConfig().user,
-    to,
-    subject,
-    text,
-  });
+  try {
+    await t.sendMail({
+      from: getConfig().from || getConfig().user,
+      to,
+      subject,
+      text,
+    });
+  } catch (e) {
+    e.message = explain(e);
+    throw e;
+  }
   return { delivered: true };
 }
 
@@ -78,7 +91,7 @@ async function sendMailSafe(opts) {
   try {
     return await sendMail(opts);
   } catch (e) {
-    console.error('[mailer] Versand fehlgeschlagen:', e.message);
+    console.error('[mailer] Versand fehlgeschlagen:', explain(e));
     logToOutbox(opts.subject, opts.to, opts.text, 'Versand fehlgeschlagen');
     return { delivered: false, error: e };
   }
