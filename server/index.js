@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+require('./lib/secureFiles').applyUmask();
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
@@ -7,6 +8,7 @@ if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirna
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
+require('./lib/secureFiles').tightenSecrets(process.env.DATA_DIR || require('path').join(__dirname, '..'));
 {
   const dataErr = require('./lib/fsTree').dataDirError(process.env.DATA_DIR || require('path').join(__dirname, '..'));
   if (dataErr) {

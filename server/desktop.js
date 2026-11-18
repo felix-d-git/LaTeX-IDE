@@ -7,6 +7,7 @@
 // (default Documents\LatexIDE), synced both ways while online; offline, tree,
 // files and compile come from that copy. Other GETs fall back to a cache, Yjs
 // keeps editing alive in the browser's IndexedDB.
+require('./lib/secureFiles').applyUmask();
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -40,6 +41,7 @@ const LOCAL_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const CSRF_COOKIE = 'csrfToken';
 
 fs.mkdirSync(CACHE_DIR, { recursive: true });
+require('./lib/secureFiles').tightenSecrets(DATA);
 fs.mkdirSync(MIRROR_DIR, { recursive: true });
 
 // --- small helpers ---
@@ -54,7 +56,7 @@ function readJson(file, fallback) {
 
 function writeJson(file, value) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 }); // config.json holds the desktop token (#168)
   fs.renameSync(tmp, file);
 }
 
