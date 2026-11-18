@@ -64,7 +64,14 @@ jobs:
       - name: Inno Setup
         shell: pwsh
         run: |
-          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) {
+            # Feste Version + SHA-256 des Pakets (#175): nupkg selbst laden, pruefen, dann lokal installieren.
+            $dir = Join-Path $env:RUNNER_TEMP 'innosetup-pkg'
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Invoke-WebRequest 'https://community.chocolatey.org/api/v2/package/innosetup/6.7.1' -OutFile "$dir\innosetup.6.7.1.nupkg"
+            if ((Get-FileHash "$dir\innosetup.6.7.1.nupkg" -Algorithm SHA256).Hash -ne 'a0dad33db33099d9cd2b89ac2d08b5d70c589b15118ced3b95f469f044f99950'.ToUpper()) { throw 'Inno Setup nupkg: SHA-256 stimmt nicht' }
+            choco install innosetup --version 6.7.1 --source $dir -y --no-progress
+          }
 
       # npm ci laeuft darin mit --ignore-scripts + npm rebuild esbuild (installer/build-release.ps1).
       - name: Pakete bauen
