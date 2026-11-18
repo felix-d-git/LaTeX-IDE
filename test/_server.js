@@ -60,12 +60,14 @@ async function startServer(extraEnv = {}, { prepare } = {}) {
     }
     fs.rmSync(dir, { recursive: true, force: true });
   };
-  return { base, dataDir, port, stop, log: () => log };
+  // LOCAL_MODE (#163): Start-Schlüssel, den der Server für den Browser-Link erzeugt hat
+  const localKey = () => fs.readFileSync(path.join(dataDir, '.launch-key'), 'utf8');
+  return { base, dataDir, port, stop, localKey, log: () => log };
 }
 
 // One logged-in browser-like client: cookie jar + CSRF header.
-function client(base) {
-  const jar = {};
+function client(base, localKey) {
+  const jar = localKey ? { lideLocal: localKey } : {};
   const cookie = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
   async function call(method, url, body, headers = {}) {
     const res = await fetch(base + url, {

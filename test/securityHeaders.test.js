@@ -199,7 +199,7 @@ test('#115: Desktop-App setzt eigene Header, auch auf weitergeleitete Server-Ant
   fs.mkdirSync(path.join(dir, 'data'));
   fs.writeFileSync(path.join(dir, 'data', 'config.json'), JSON.stringify({ token: 'lide_test' }));
   const port = await freePort();
-  const env = { ...process.env, PORT: String(port), LATEX_IDE_DATA: path.join(dir, 'data'), LATEX_IDE_LOCAL: path.join(dir, 'local'), REMOTE_URL: `http://127.0.0.1:${rport}` };
+  const env = { ...process.env, PORT: String(port), LATEX_IDE_DATA: path.join(dir, 'data'), LATEX_IDE_LOCAL: path.join(dir, 'local'), REMOTE_URL: `http://127.0.0.1:${rport}`, LOCAL_NO_BROWSER: '1' };
   delete env.CSP_REPORT_ONLY;
   const child = spawn(process.execPath, [path.join(REPO, 'server', 'desktop.js')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let log = '';
@@ -217,16 +217,18 @@ test('#115: Desktop-App setzt eigene Header, auch auf weitergeleitete Server-Ant
         await new Promise((r) => setTimeout(r, 100));
       }
     }
-    const page = await fetch(base + '/');
+    const key = fs.readFileSync(path.join(dir, 'data', '.launch-key'), 'utf8');
+    const kf = (url, o = {}) => fetch(url, { ...o, headers: { cookie: `lideLocal=${key}`, ...o.headers } });
+    const page = await kf(base + '/');
     assert.strictEqual(page.status, 200);
     assert.match(page.headers.get('content-type'), /text\/html/);
     assertHeaders(page, 'Desktop GET /');
-    assertHeaders(await fetch(base + '/api/desktop/info'), 'Desktop GET /api/desktop/info');
-    const proxied = await fetch(base + '/api/tree');
+    assertHeaders(await kf(base + '/api/desktop/info'), 'Desktop GET /api/desktop/info');
+    const proxied = await kf(base + '/api/tree');
     assert.strictEqual(proxied.status, 200);
     assertHeaders(proxied, 'Desktop GET /api/tree (weitergeleitet)');
-    assertHeaders(await fetch(base + '/api/raw?path=a.pdf'), 'Desktop GET /api/raw (weitergeleitet)', { framed: true });
-    const r = await fetch(base + '/csp-report', { method: 'POST', headers: { 'Content-Type': 'application/csp-report' }, body: '{"csp-report":{"effective-directive":"img-src","blocked-uri":"data"}}' });
+    assertHeaders(await kf(base + '/api/raw?path=a.pdf'), 'Desktop GET /api/raw (weitergeleitet)', { framed: true });
+    const r = await kf(base + '/csp-report', { method: 'POST', headers: { 'Content-Type': 'application/csp-report' }, body: '{"csp-report":{"effective-directive":"img-src","blocked-uri":"data"}}' });
     assert.strictEqual(r.status, 204, 'Berichte ohne CSRF-Token');
   } finally {
     if (child.exitCode === null) {
