@@ -41,6 +41,26 @@ vollständige Protokoll steht in `latex-update.log`.
 Die Daten sind dabei nicht in Gefahr: der laufende Container bleibt bis zum
 erfolgreichen Neubau aktiv, und das Backup liegt vorher bereit.
 
+### Signierte Releases (Pflicht)
+
+Das Skript installiert nur Tags, die per `git verify-tag` gegen die Datei `.release-signers`
+im Repo-Ordner des Hosts geprüft werden. Die Datei kommt nie aus dem Repo und wird nie vom
+Update überschrieben. Fehlt sie oder stimmt die Signatur nicht, bricht das Update ab.
+
+1. Schlüssel erzeugen (einmalig, nicht auf dem Server): `ssh-keygen -t ed25519 -N "" -f release_key`
+2. Privaten Schlüssel als Actions-Secret `RELEASE_SIGNING_KEY` setzen (Repo, Settings, Secrets and variables, Actions). Fehlt es, scheitert `auto-release.yml` mit Fehler. Danach `release_key` lokal löschen. Manuelle Release-Tags mit `git -c gpg.format=ssh -c user.signingkey=<Schlüssel> tag -s vX.Y.Z -m vX.Y.Z` signieren.
+3. Auf dem Host `.release-signers` anlegen (`chmod 600`), eine Zeile pro erlaubtem Schlüssel:
+   `echo "release-signer $(cat release_key.pub)" > .release-signers`
+   (Format siehe `ssh-keygen(1)`, ALLOWED SIGNERS).
+
+Zusätzlich stoppt das Update, wenn sich `docker-compose*`, `Dockerfile` oder `scripts/server-update.sh`
+gegenüber dem installierten Stand ändern. Nach Prüfung des Diffs mit `ALLOW_INFRA_CHANGES=1` (in `.update.env`
+oder in der Umgebung) erneut starten und danach wieder entfernen. Die Wartezeit vor dem Auto-Release
+(`MIN_AGE_H`, #177) bleibt unverändert.
+
+Empfohlen, Repo-Einstellung: "Immutable releases" aktivieren (Settings, General), damit veröffentlichte
+Tags/Assets nicht nachträglich geändert werden können.
+
 ### Einstellungen für das Skript (`.update.env` im Repo-Ordner)
 
 ```bash

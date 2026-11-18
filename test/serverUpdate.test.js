@@ -32,6 +32,7 @@ test('server-update.sh: neues Release mit längerem Skriptkopf -> Update läuft 
   fs.mkdirSync(data);
   fs.writeFileSync(path.join(app, 'scripts', 'server-update.sh'), script, { mode: 0o755 });
   fs.writeFileSync(path.join(app, '.release'), 'v0.5.1\n');
+  fs.writeFileSync(path.join(app, '.release-signers'), 'x ssh-ed25519 AAAA\n');
   fs.writeFileSync(path.join(data, 'auth-data.json'), '{}');
 
   // Release: dasselbe Skript mit drei zusätzlichen Kommentarzeilen am Anfang.
@@ -47,13 +48,17 @@ test('server-update.sh: neues Release mit längerem Skriptkopf -> Update läuft 
     'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -H) shift ;; -*) ;; *) url="$1" ;; esac; shift; done',
     'case "$url" in',
     '  */releases/latest) echo \'{"tag_name": "v9.9.9"}\' ;;',
-    '  */tarball/v9.9.9) (cd "$REL" && tar -czf - repo) > "$out" ;;',
     '  *) exit 22 ;;',
     'esac',
   ].join('\n'));
+  // git: Tag-Download/-Pruefung (#172) und git archive aus dem Release-Ordner simulieren.
+  exe(path.join(stubs, 'git'), [
+    'for a in "$@"; do case "$a" in init) mkdir -p "${@: -1}"; exit 0 ;; fetch|verify-tag) exit 0 ;; archive) (cd "$REL/repo" && tar -cf - .); exit 0 ;; esac; done',
+    'exit 1',
+  ].join('\n'));
   exe(path.join(stubs, 'docker'), 'echo "$*" >> "$APP_DIR/docker-aufrufe"');
 
-  const env = { ...process.env, STUBS: fwd(stubs), APP: fwd(app), DATA: fwd(data), RELD: fwd(rel), GITHUB_TOKEN: '' };
+  const env = { ...process.env, STUBS: fwd(stubs), APP: fwd(app), DATA: fwd(data), RELD: fwd(rel), GITHUB_TOKEN: '', ALLOW_INFRA_CHANGES: '1' };
   delete env.COMPOSE;
   // Pfade in bash umwandeln (Windows), PATH auf die Stubs, nie echtes curl/docker.
   const r = spawnSync(BASH, ['-c', [
