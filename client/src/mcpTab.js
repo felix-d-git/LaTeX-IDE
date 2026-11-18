@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
-import { publicOrigin, authApi } from './api.js';
+import { publicOrigin, authApi, getProjectId } from './api.js';
 
 // Settings tab "MCP": tokens for external AI tools (Claude, Codex, Cursor) with single rights per project.
 const DOCS_URL = 'https://github.com/felix-d-git/LaTeX-IDE/blob/master/docs/MCP.md';
@@ -68,7 +68,7 @@ function scopeEditor(initial, projectList) {
   const wrap = el('div', 'mcp-scope');
   const mode = el('select');
   for (const [v, t] of [['all', 'Alle Projekte'], ['sel', 'Ausgewählte Projekte']]) mode.appendChild(Object.assign(el('option', null, t), { value: v }));
-  mode.value = initial.projects ? 'sel' : 'all';
+  mode.value = initial.id && !initial.projects ? 'all' : 'sel'; // neuer Token: ausgewählte Projekte; bestehende "alle" bleiben
   const body = el('div');
   const boxes = (state) => {
     const row = el('span', 'mcp-perms');
@@ -84,6 +84,7 @@ function scopeEditor(initial, projectList) {
     return row;
   };
   const allPerms = new Set(initial.perms || []);
+  let preselect = !initial.id && !initial.projects; // einmalig: aktuelles Projekt vorauswählen
   const selPerms = new Map(); // project id -> Set (only checked projects)
   for (const [id, l] of Object.entries(initial.projects || {})) selPerms.set(id, new Set(l));
   function draw() {
@@ -98,6 +99,10 @@ function scopeEditor(initial, projectList) {
       on.type = 'checkbox';
       on.checked = selPerms.has(p.id);
       const perms = on.checked ? selPerms.get(p.id) : new Set(['read']);
+      if (preselect && p.id === getProjectId()) { // neuer Token: aktuelles Projekt vorausgewählt
+        selPerms.set(p.id, perms);
+        on.checked = true;
+      }
       const detail = boxes(perms);
       detail.classList.toggle('hidden', !on.checked);
       on.addEventListener('change', () => {
@@ -110,6 +115,7 @@ function scopeEditor(initial, projectList) {
       row.append(title, detail);
       body.appendChild(row);
     }
+    preselect = false;
   }
   mode.addEventListener('change', draw);
   draw();
