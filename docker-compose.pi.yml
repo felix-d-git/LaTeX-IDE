@@ -33,6 +33,7 @@ services:
     environment:
       # env_file reicht die ganze .env durch; der Tailscale-Schluessel gehoert nur in den tailscale-Container.
       TS_AUTHKEY: ""
+      TRUST_PROXY: 172.31.77.10 # Tailscale-Container (fest, s. networks unten): echte Client-IP + https
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt in .env}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD fehlt in .env}
@@ -84,6 +85,9 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     hostname: latex
+    networks:
+      default:
+        ipv4_address: 172.31.77.10 # fest: TRUST_PROXY der App vertraut nur diesem Proxy
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_HOSTNAME: latex
@@ -95,6 +99,12 @@ services:
       - ./tailscale-serve.json:/config/serve.json:ro
     depends_on:
       - app
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.77.0/24
 
 volumes:
   tsstate:
