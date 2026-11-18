@@ -31,6 +31,12 @@ function load() {
     for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!Array.isArray(data[k])) data[k] = [];
     if (!data.settings || typeof data.settings !== 'object') data.settings = {};
     data.mcpTokens.forEach(migrateMcpToken);
+    // #182: Einladungen nur noch gehasht; Klartext-Altbestand einmalig umstellen (alte Links gelten weiter).
+    let migrated = false;
+    for (const i of data.invites) {
+      if (typeof i.token === 'string') { i.tokenHash = crypto.createHash('sha256').update(i.token).digest('hex'); delete i.token; migrated = true; }
+    }
+    if (migrated) save(data);
     return data;
   }
   return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [], settings: {} };
@@ -184,10 +190,24 @@ async function resetInitialPassword(user, password) {
 
 // --- Invites: admin generates a link, the recipient uses it once to self-register ---
 
+const PENDING = '__pending__'; // Einladung beansprucht, Konto wird gerade angelegt (#178)
+
+function safeEqualHex(a, b) {
+  const x = Buffer.from(String(a), 'hex');
+  const y = Buffer.from(String(b), 'hex');
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function findInvite(token) {
+  const h = hashToken(String(token || ''));
+  return data.invites.find((i) => safeEqualHex(i.tokenHash, h)) || null;
+}
+
+// Gibt den Klartext-Token einmalig zurück; gespeichert wird nur der Hash (#182).
 function createInvite(createdByUserId) {
   const token = randomToken();
   data.invites.push({
-    token,
+    tokenHash: hashToken(token),
     createdBy: createdByUserId,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString(),
@@ -203,23 +223,53 @@ function listInvites() {
 }
 
 function getValidInvite(token) {
-  const invite = data.invites.find((i) => i.token === token);
+  const invite = findInvite(token);
   if (!invite) return null;
   if (invite.usedBy) return null;
   if (new Date(invite.expiresAt).getTime() < Date.now()) return null;
   return invite;
 }
 
-function consumeInvite(token, userId) {
-  const invite = data.invites.find((i) => i.token === token);
-  if (!invite) return;
-  invite.usedBy = userId;
-  invite.usedAt = new Date().toISOString();
-  save(data);
+// Atomar (#178): prüfen + als beansprucht markieren in einem synchronen Schritt, VOR bcrypt/createUser.
+// Gibt die Einladung zurück oder null, wenn ungültig/schon beansprucht.
+function claimInvite(token) {
+  const invite = getValidInvite(token);
+  if (!invite) return null;
+  const { tokenHash } = invite;
+  commit((d) => {
+    const i = d.invites.find((x) => x.tokenHash === tokenHash);
+    i.usedBy = PENDING;
+    i.usedAt = new Date().toISOString();
+  });
+  return invite;
 }
 
-function revokeInvite(token) {
-  data.invites = data.invites.filter((i) => i.token !== token);
+// Anlegen fehlgeschlagen: Einladung wieder freigeben (nur wenn noch beansprucht, nicht widerrufen).
+function releaseInvite(token) {
+  const invite = findInvite(token);
+  if (!invite || invite.usedBy !== PENDING) return;
+  const { tokenHash } = invite;
+  commit((d) => {
+    const i = d.invites.find((x) => x.tokenHash === tokenHash);
+    i.usedBy = null;
+    i.usedAt = null;
+  });
+}
+
+// Schließt die Beanspruchung ab; überschreibt nie eine fremde/ungültige Einladung.
+function consumeInvite(token, userId) {
+  const invite = findInvite(token);
+  if (!invite || invite.usedBy !== PENDING) return false;
+  const { tokenHash } = invite;
+  commit((d) => {
+    d.invites.find((x) => x.tokenHash === tokenHash).usedBy = userId;
+  });
+  return true;
+}
+
+// id = tokenHash (aus listInvites); der Klartext-Token ist nach der Erzeugung nicht mehr bekannt.
+function revokeInvite(id) {
+  data.invites = data.invites.filter((i) => i.tokenHash !== id);
   save(data);
 }
 
@@ -431,6 +481,8 @@ function deleteUser(id) {
 
 module.exports = {
   getSettings,
+  claimInvite,
+  releaseInvite,
   setSettings,
   markVerified,
   moveMcpProject,

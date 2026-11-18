@@ -50,6 +50,8 @@ export function setupShareDialog({ currentUser, onLeft }) {
     return sel;
   }
 
+  const freshLinks = {}; // role -> plaintext token, only from the create response
+
   function renderLinks(links) {
     linksEl.innerHTML = '';
     for (const [role, label] of Object.entries(ROLE_LABEL)) {
@@ -60,23 +62,33 @@ export function setupShareDialog({ currentUser, onLeft }) {
       el.append(name);
       const link = links[role];
       if (link) {
+        // #182: the server only stores a hash; the link is visible right after creation (this dialog session) only.
         const input = document.createElement('input');
         input.readOnly = true;
-        input.value = `${publicOrigin()}/?join=${link.token}`;
-        if (link.maxUses) input.title = `${link.uses} von ${link.maxUses} Beitritten genutzt`;
+        const url = freshLinks[role] && `${publicOrigin()}/?join=${freshLinks[role]}`;
+        input.value = url || 'Link nur bei Erstellung sichtbar – zum neuen Link deaktivieren und neu erstellen';
+        const tip = [link.maxUses && `${link.uses} von ${link.maxUses} Beitritten genutzt`, link.expiresAt && `gültig bis ${new Date(link.expiresAt).toLocaleString()}`].filter(Boolean).join(', ');
+        if (tip) input.title = tip;
         input.addEventListener('focus', () => input.select());
-        el.append(
-          input,
-          button('Kopieren', () => copyText(input.value)),
-          button('Deaktivieren', () => run(() => shareApi.revokeLink(role)))
-        );
+        el.append(input);
+        if (url) el.append(button('Kopieren', () => copyText(url)));
+        el.append(button('Deaktivieren', () => { delete freshLinks[role]; run(() => shareApi.revokeLink(role)); }));
       } else {
         const max = document.createElement('input');
         max.type = 'number';
         max.min = '0';
         max.placeholder = 'max. Beitritte (leer = ∞)';
         max.className = 'share-link-max';
-        el.append(max, button('Link erstellen', () => run(() => shareApi.createLink(role, max.value))));
+        const days = document.createElement('input');
+        days.type = 'number';
+        days.min = '0';
+        days.placeholder = 'Ablauf in Tagen (leer = nie)';
+        days.className = 'share-link-max';
+        el.append(max, days, button('Link erstellen', () => run(async () => {
+          const info = await shareApi.createLink(role, max.value, days.value);
+          if (info.newLink) freshLinks[info.newLink.role] = info.newLink.token;
+          return info;
+        })));
       }
       linksEl.append(el);
     }
