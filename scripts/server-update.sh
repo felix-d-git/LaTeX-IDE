@@ -13,6 +13,7 @@
 #   DATA_DIR     the mounted data dir; default LATEX_DATA_DIR from .env, else ./data
 #   COMPOSE      compose file; default docker-compose.yml (Pi: docker-compose.pi.yml)
 #   BACKUP_DIR   default: $DATA_DIR/../backups
+#   VAULT        1 = encrypted setup, back up only $DATA_DIR/vault (set once; auto-added if vault/ exists)
 #   GITHUB_TOKEN only while the repo is private (read-only "Contents" token)
 #   UPDATE_REPO  default: felix-d-git/LaTeX-IDE
 # .env, .update.env and anything not in the release stay untouched. Progress goes to
@@ -37,7 +38,15 @@ case "$DATA_DIR" in /*) ;; *) DATA_DIR="$APP_DIR/${DATA_DIR#./}" ;; esac
 # the plaintext lives in container RAM. Backup = vault only; restoring needs DATA_KEY.
 BACKUP_SRC="$(basename "$DATA_DIR")"
 SRC_PARENT="$(dirname "$DATA_DIR")"
-if [ -d "$DATA_DIR/vault" ]; then
+# Vault mode comes from the host config (VAULT=1 in .update.env), never from the data dir:
+# the container can create folders there (#171). Migration: no VAULT line yet and a vault/
+# folder exists -> write VAULT=1 once, from then on only the env counts.
+if ! grep -q '^[[:space:]]*VAULT=' "$APP_DIR/.update.env" 2>/dev/null && [ -d "$DATA_DIR/vault" ] && [ ! -L "$DATA_DIR/vault" ]; then
+  echo "VAULT=1" >> "$APP_DIR/.update.env"
+  VAULT=1
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Migration: VAULT=1 in $APP_DIR/.update.env eingetragen"
+fi
+if [ "${VAULT:-}" = 1 ]; then
   BACKUP_SRC=vault
   SRC_PARENT="$DATA_DIR"
 fi
@@ -53,6 +62,8 @@ fi
 
 # --if-requested: only run when an admin pressed "Jetzt aktualisieren" (file written by the app).
 if [ "${1:-}" = "--if-requested" ]; then
+  # The container may create symlinks here: only a regular file counts (#171).
+  if [ -L "$REQUEST" ]; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $REQUEST ist ein Symlink, ignoriert"; exit 0; fi
   [ -f "$REQUEST" ] || exit 0
   rm -f "$REQUEST"
 fi
@@ -67,9 +78,14 @@ trap 'exit 143' INT TERM HUP
 installed="$(cat "$APP_DIR/.release" 2>/dev/null || true)"
 tag=""
 status() {
-  local log=""
+  local log="" t
+  # Never write through a symlink planted by the container (#171): temp file (mktemp = O_EXCL)
+  # in the same dir, then atomic mv -fT replaces the link itself, not its target.
+  t="$(mktemp "$(dirname "$STATUS")/.update-status.XXXXXX" 2>/dev/null)" || return 0
   [ "$1" = failed ] && log="$(tail -n 20 "$RUNLOG" | tr -d '\000-\010\013-\037' | tr '\t' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')"
-  printf '{"state":"%s","from":"%s","to":"%s","at":"%s","log":"%s"}\n' "$1" "$installed" "$tag" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$log" > "$STATUS" 2>/dev/null || true
+  printf '{"state":"%s","from":"%s","to":"%s","at":"%s","log":"%s"}\n' "$1" "$installed" "$tag" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$log" > "$t" 2>/dev/null || { rm -f -- "$t"; return 0; }
+  chmod 644 "$t" 2>/dev/null || true
+  mv -fT -- "$t" "$STATUS" 2>/dev/null || rm -f -- "$t"
 }
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$RUNLOG"; }
 trap 'status failed' ERR
