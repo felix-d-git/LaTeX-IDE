@@ -47,11 +47,16 @@ erfolgreichen Neubau aktiv, und das Backup liegt vorher bereit.
 COMPOSE=docker-compose.pi.yml   # andere Compose-Datei (Standard docker-compose.yml)
 BACKUP_DIR=$HOME/latex-backups  # Standard: neben dem Datenordner, ./backups
 # DATA_DIR=...                  # Standard: LATEX_DATA_DIR aus .env, sonst ./data
+# VAULT=1                       # Verschlüsselung (DATA_KEY/Pi): nur vault/ sichern
 # GITHUB_TOKEN=...              # nur bei privatem Repo, siehe unten
 ```
 
 Das Skript muss die Daten lesen und `docker` aufrufen dÃ¼rfen: entweder als
 Nutzer in der Gruppe `docker`, dem der Datenordner gehÃ¶rt, oder per `sudo crontab -e`.
+`VAULT=1` legt fest, dass nur `vault/` gesichert wird und `.update-request`/`.update-status` dort liegen. Das Skript leitet das nicht mehr aus dem Datenordner ab (den kann der Container beschreiben). Fehlt `VAULT` in `.update.env` und es gibt einen Ordner `vault/` im Datenpfad, trägt das Skript einmalig `VAULT=1` ein.
+
+Empfohlen ohne Root: eigener Systemnutzer in der Gruppe `docker`, dem der Repo-Ordner gehört, mit dem Cron-Eintrag dieses Nutzers (`crontab -e` als dieser Nutzer) statt `sudo crontab -e`. Das Skript folgt keinen Symlinks im Datenordner (Status per Temp-Datei + `mv -fT`, `.update-request` nur als reguläre Datei).
+
 Unter Windows mit Docker Desktop lÃ¤uft es in Git Bash oder WSL (ohne Cron von Hand).
 
 ### ZurÃ¼ck auf ein Backup
