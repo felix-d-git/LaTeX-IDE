@@ -175,7 +175,13 @@ function maybeAutocompile(root, userId) {
   if (!main) return;
   const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && wsRoot(c) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
-  for (const u of users) runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
+  for (const u of users) {
+    try {
+      runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
+    } catch (e) {
+      // Compile cap per user reached: skip this autocompile run.
+    }
+  }
 }
 
 // Multiple users can have different projects open at the same time, so
@@ -418,8 +424,14 @@ const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
 const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
+const limitCompile = authMw.rateLimit('compile', 20, 60 * 1000, (req) => req.user.id);
 const limitSearch = authMw.rateLimit('search', 30, 60 * 1000, (req) => req.user.id);
 // Dieselbe Begrenzung für das MCP-Werkzeug search (Aufruf ohne echten req/res).
+function compileAllowed(user) {
+  let ok = true;
+  limitCompile({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
+  return ok;
+}
 function searchAllowed(user) {
   let ok = true;
   limitSearch({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
@@ -719,7 +731,7 @@ const mcpTokenFirst = (req, res, next) => {
   if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
   res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
 };
-const mcp = createMcp({ searchAllowed, PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
+const mcp = createMcp({ searchAllowed, PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, compileAllowed, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
 app.post('/mcp', limitMcp, mcpTokenFirst, bigJson, ah(mcp));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
@@ -727,7 +739,7 @@ app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error:
 app.use('/api', authMw.requireAuth);
 
 // Reviewers may read, compile and comment, but not change the project.
-const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/i;
+const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label|compile\/clear-cache)(\/|$)/i;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
   const { root } = windowRoot(req); // errors are answered by the route itself
@@ -1838,6 +1850,8 @@ app.post('/api/main-file', (req, res) => {
 // ponytail: one global queue - per-core workers if the server gets stronger.
 let compileChain = Promise.resolve();
 const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
+const MAX_PENDING_COMPILES = Math.max(1, parseInt(process.env.MAX_PENDING_COMPILES, 10) || 2);
+const pendingByUser = new Map(); // userId -> queued + running runs (DoS cap, #159)
 
 // opts.auto: autocompile run - its version snapshot is throttled like autosave.
 function runCompile(root, main, userId, meta, { auto = false } = {}) {
@@ -1846,6 +1860,9 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
   // Group mode: everyone on the project sees the run; individual: only the compiling user.
   const to = outRel === OUT_DIR ? undefined : userId;
   if (queuedCompile.has(key)) return queuedCompile.get(key);
+  const pending = pendingByUser.get(userId) || 0;
+  if (pending >= MAX_PENDING_COMPILES) throw Object.assign(new Error(`Zu viele Kompilierungen gleichzeitig (max. ${MAX_PENDING_COMPILES}). Bitte warten, bis ein Lauf fertig ist.`), { status: 429 });
+  pendingByUser.set(userId, pending + 1);
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain
     .then(() => {
@@ -1857,6 +1874,10 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
       console.error('[compile]', root, e);
       broadcast(root, { type: 'compileStatus', status: 'error', log: String((e && e.message) || e) }, to);
       throw e;
+    })
+    .finally(() => {
+      const n = (pendingByUser.get(userId) || 1) - 1;
+      if (n > 0) pendingByUser.set(userId, n); else pendingByUser.delete(userId);
     });
   queuedCompile.set(key, run);
   compileChain = run.catch(() => {});
@@ -1898,7 +1919,7 @@ async function doCompile(root, main, outRel, to, meta, auto) {
   return result;
 }
 
-app.post('/api/compile', ah(async (req, res) => {
+app.post('/api/compile', limitCompile, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const main = mainFileOf(root);
@@ -1906,7 +1927,7 @@ app.post('/api/compile', ah(async (req, res) => {
   try {
     res.json(await runCompile(root, main, req.user.id));
   } catch (e) {
-    res.status(500).json({ error: 'Kompilierung fehlgeschlagen: ' + e.message });
+    res.status(e.status || 500).json({ error: e.status === 429 ? e.message : 'Kompilierung fehlgeschlagen: ' + e.message });
   }
 }));
 
