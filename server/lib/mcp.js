@@ -185,7 +185,8 @@ function createMcp(ctx) {
       async (a, args) => {
         const root = resolveRoot(a, args);
         collab.flushRoot(root);
-        const res = searchProject(root, String(args.query || ''), { regex: !!args.regex, caseSensitive: !!args.case_sensitive });
+        if (!ctx.searchAllowed(a.user)) throw new Error('Zu viele Suchanfragen. Bitte später erneut probieren.');
+        const res = await searchProject(root, String(args.query || ''), { regex: !!args.regex, caseSensitive: !!args.case_sensitive });
         const rows = res.slice(0, 50).map((r) => `${r.file}:${r.line}: ${cap(r.lineText.trim())}`);
         return rows.length ? rows.join('\n') + (res.length > 50 ? `\n… (${res.length - 50} weitere Zeilen)` : '') : 'Keine Treffer.';
       }
