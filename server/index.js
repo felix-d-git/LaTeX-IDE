@@ -386,8 +386,26 @@ function userProjectsDir(user) {
 
 // --- Auth (public - no login required) ---
 
+// #151: absolute links (reset/verify mails, invites, desktop installer) never come from the request's
+// Host/X-Forwarded-* alone (Host-header poisoning). PUBLIC_URL, otherwise only an allowed host:
+// ALLOWED_HOSTS (comma/space separated host[:port]) or the server itself on loopback; local mode
+// already rejects every other host (DNS-rebinding check above). Otherwise null = no link.
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+const ALLOWED_HOSTS = new Set([
+  ...String(process.env.ALLOWED_HOSTS || '').split(/[\s,]+/).filter(Boolean),
+  ...['localhost', '127.0.0.1', '[::1]'].map((h) => `${h}:${PORT}`),
+].map((h) => h.toLowerCase()));
 function baseUrl(req) {
-  return process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  if (PUBLIC_URL) return PUBLIC_URL;
+  const host = String(req.get('host') || '').toLowerCase();
+  return authMw.LOCAL_MODE || ALLOWED_HOSTS.has(host) ? `${req.protocol}://${host}` : null;
+}
+const NO_BASE_URL = 'PUBLIC_URL ist nicht gesetzt (oder der Host fehlt in ALLOWED_HOSTS) - es werden keine Links per Mail verschickt.';
+function requireBaseUrl(req, res, next) {
+  req.linkBase = baseUrl(req);
+  if (req.linkBase) return next();
+  console.warn(`[auth] ${req.path}: Host ${JSON.stringify(req.get('host') || '')} nicht erlaubt - ${NO_BASE_URL}`);
+  res.status(503).json({ error: NO_BASE_URL });
 }
 
 // Only failed attempts use up the budget (many users behind one IP); separate buckets per purpose.
@@ -421,7 +439,7 @@ function sendVerifyMail(req, user) {
   return mailer.sendMailSafe({
     to: user.email,
     subject: 'LaTeX-IDE - E-Mail-Adresse bestätigen',
-    text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${baseUrl(req)}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
+    text: `Hallo ${user.username || ''},\n\nbitte bestätige deine E-Mail-Adresse (Link gültig 48 Stunden):\n${req.linkBase}/?verify=${token}\n\nFalls du dich nicht registriert hast, ignoriere diese Mail.`,
   });
 }
 
@@ -430,6 +448,8 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   const { token, username, email, password } = req.body;
   const invite = auth.getValidInvite(token || '');
   if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
+  // Check before the account exists: otherwise it would be created without a deliverable verify mail.
+  if (verifyMode() === 'mail' && !(req.linkBase = baseUrl(req))) return res.status(503).json({ error: NO_BASE_URL });
   let user;
   try {
     user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: verifyMode() === 'auto' });
@@ -456,7 +476,7 @@ app.post('/api/auth/verify', notLocal, limitToken, (req, res) => {
   res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
 });
 
-app.post('/api/auth/resend-verification', notLocal, limitMail, ah(async (req, res) => {
+app.post('/api/auth/resend-verification', notLocal, limitMail, requireBaseUrl, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Not awaited: same answer and timing whether or not the account exists, and a hanging SMTP server doesn't block.
   if (user && !auth.isVerified(user) && verifyMode() === 'mail') sendVerifyMail(req, user);
@@ -494,13 +514,13 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: { ...auth.toPublicUser(user), ...flags }, features: { pandoc: exporter.pandocAvailable() } });
 });
 
-app.post('/api/auth/forgot-password', notLocal, limitMail, ah(async (req, res) => {
+app.post('/api/auth/forgot-password', notLocal, limitMail, requireBaseUrl, ah(async (req, res) => {
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Always answer the same way, whether or not the account exists -
   // otherwise the endpoint would leak which e-mails/usernames are registered.
   if (user) {
     const token = auth.createResetToken(user.id);
-    const link = `${baseUrl(req)}/?reset=${token}`;
+    const link = `${req.linkBase}/?reset=${token}`;
     // Not awaited (see resend-verification); sendMailSafe never rejects.
     mailer.sendMailSafe({
       to: user.email,
@@ -533,7 +553,8 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
 
 app.post('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   const token = auth.createInvite(req.user.id);
-  res.json({ token, url: `${baseUrl(req)}/?invite=${token}` });
+  const base = baseUrl(req);
+  res.json({ token, url: base && `${base}/?invite=${token}` });
 });
 
 app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
@@ -767,8 +788,11 @@ app.get('/api/desktop/release', ah(async (req, res) => {
 }));
 
 app.get('/api/desktop/download/:os', ah(async (req, res) => {
+  // Request host as fallback (desktop updates of servers without PUBLIC_URL): a forged Host only
+  // poisons the installer the requester downloads himself, nobody else gets that link.
+  const base = baseUrl(req) || `${req.protocol}://${req.get('host')}`;
   try {
-    await desktopAssets.send(req.params.os, baseUrl(req).replace(/\/+$/, ''), res);
+    await desktopAssets.send(req.params.os, base, res);
   } catch (e) {
     if (res.headersSent) return res.destroy(e);
     res.status(502).json({ error: e.message });
@@ -2511,6 +2535,7 @@ bootstrapAdmin()
     server.listen(PORT, authMw.LOCAL_MODE ? '127.0.0.1' : undefined, () => {
       console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
       if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
+      if (!authMw.LOCAL_MODE && !PUBLIC_URL) console.warn(`[auth] Warnung: PUBLIC_URL fehlt - Reset-/Bestätigungs-/Einladungslinks nur für ${[...ALLOWED_HOSTS].join(', ')} (ALLOWED_HOSTS), sonst keine.`);
       if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});

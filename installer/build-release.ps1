@@ -128,8 +128,11 @@ if ($StagingOnly) {
 Write-Step "npm ci in staging"
 Push-Location $StagingDir
 try {
-    npm ci
+    # Keine Lifecycle-Scripts fremder Pakete (#177); nur esbuild braucht seins.
+    npm ci --ignore-scripts
     if ($LASTEXITCODE -ne 0) { throw "npm ci fehlgeschlagen (Exit $LASTEXITCODE)" }
+    npm rebuild esbuild
+    if ($LASTEXITCODE -ne 0) { throw "npm rebuild esbuild fehlgeschlagen (Exit $LASTEXITCODE)" }
 
     Write-Step "node build.js (Client-Bundle bauen)"
     node build.js

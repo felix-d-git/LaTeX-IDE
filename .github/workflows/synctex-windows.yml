@@ -31,7 +31,8 @@ jobs:
           cache: npm
 
       - name: Abhaengigkeiten installieren
-        run: npm ci
+        # Keine Lifecycle-Scripts fremder Pakete (#177); nur esbuild braucht seins.
+        run: npm ci --ignore-scripts && npm rebuild esbuild
 
       - name: TeX Live installieren
         shell: pwsh

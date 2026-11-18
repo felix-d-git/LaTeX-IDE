@@ -211,7 +211,10 @@ Lizenzen, u. a. unter GPL, LGPL und AGPL:
   LPPL) mit ihren Abhängigkeiten, darunter Ghostscript/libgs (AGPL-3.0+),
   ImageMagick 6 (ImageMagick-Lizenz), poppler (GPL), Qt 5 und MPFR (LGPL),
   Python 3 (PSF-2.0), Ruby (Ruby-Lizenz oder BSD-2-Clause), Asymptote (LGPL/GPL),
-  biber (Artistic-2.0), ConTeXt/LuaTeX (u. a. GPL) und zahlreiche Schriften
+  biber (Artistic-2.0), ConTeXt/LuaTeX (u. a. GPL; das IDE-Startskript
+  `server/lib/luaSandbox.lua` läuft im LuaTeX-Prozess neben luaotfload
+  (GPL-2.0-only), bleibt aber eine getrennte Datei, siehe Lizenzabschnitt im
+  README) und zahlreiche Schriften
   (u. a. OFL-1.1, GPL mit Font-Ausnahme, LPPL); die genaue Lizenz jedes Pakets
   steht in dessen `copyright`-Datei
 - `pandoc` (GPL-2.0-or-later, einzelne Teile GPL-2.0-only, z. B. der

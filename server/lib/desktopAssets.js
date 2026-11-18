@@ -100,10 +100,17 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
     const file = await assetFile(os);
     const parts = os === 'windows' ? [[0, fs.statSync(file).size], exeTrailer(serverUrl)] : zipAppendParts(file, 'server.json', JSON.stringify({ remoteUrl: serverUrl }));
     const length = parts.reduce((n, p) => n + (Buffer.isBuffer(p) ? p.length : p[1] - p[0]), 0);
+    // SHA-256 of exactly the bytes sent: the desktop app installs nothing that differs (#147).
+    const hash = crypto.createHash('sha256');
+    for (const p of parts) {
+      if (Buffer.isBuffer(p)) hash.update(p);
+      else if (p[1] > p[0]) for await (const c of fs.createReadStream(file, { start: p[0], end: p[1] - 1 })) hash.update(c);
+    }
     res.set({
       'Content-Type': 'application/octet-stream',
       'Content-Disposition': `attachment; filename="${path.basename(file)}"`,
       'Content-Length': String(length),
+      'X-Content-SHA256': hash.digest('hex'),
     });
     for (const p of parts) {
       if (Buffer.isBuffer(p)) {
@@ -123,6 +130,12 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
 function checkUrl(url) {
   const ok = /^https:\/\/[^\s"\\]+$/.test(url) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s"\\]*)?$/.test(url);
   if (!ok || MARKER.length + url.length > TRAILER) throw new Error(`Ungültige Server-Adresse: ${url}`);
+}
+
+// Desktop side: the downloaded package must match the server's SHA-256 header (#147).
+function verifyDownload(buf, sha256) {
+  if (!/^[0-9a-f]{64}$/.test(sha256 || '')) throw new Error('Update ohne Prüfsumme abgelehnt.');
+  if (crypto.createHash('sha256').update(buf).digest('hex') !== sha256) throw new Error('Prüfsumme des Updates stimmt nicht.');
 }
 
 function exeTrailer(url) {
@@ -190,4 +203,4 @@ function zipAppendParts(file, name, content) {
   }
 }
 
-module.exports = { createDesktopAssets, checkUrl, exeTrailer, zipAppendParts };
+module.exports = { createDesktopAssets, checkUrl, verifyDownload, exeTrailer, zipAppendParts };

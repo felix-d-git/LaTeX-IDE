@@ -27,10 +27,12 @@ export function getDocument() {
         render: () => ({ promise: delay(1).then(() => { if (doc.destroyed) throw new Error('destroyed'); }) }),
       };
     },
-    destroy() { doc.destroyed = true; },
   };
+  // pdf.js v6: Dokument hat kein destroy(), nur doc.loadingTask.destroy()
+  const task = { promise: delay(20).then(() => { m.active--; return doc; }), destroy() { doc.destroyed = true; } };
+  doc.loadingTask = task;
   m.docs.push(doc);
-  return { promise: delay(20).then(() => { m.active--; return doc; }), destroy() {} };
+  return task;
 }`;
 const mockUrl = 'data:text/javascript,' + encodeURIComponent(mockSrc);
 register(
