@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { diffLines } = require('diff');
 const { isIgnored, isTextFile, safeResolve } = require('./fsTree');
+const limits = require('./limits');
 
 const HISTORY_DIR = '.latex-ide-history';
 const INDEX_FILE = 'index.json';
@@ -19,8 +20,8 @@ const AUTOSAVE_COOLDOWN_MS = 3 * 60 * 1000;
 const THROTTLED = new Set(['autosave', 'autocompile']);
 
 // Retention (prune): last 24 h everything, up to 7 days one per hour, then one
-// per day; hard cap MAX_ENTRIES. Labelled and 'restore' entries are always kept
-// and don't count against it.
+// per day; hard cap MAX_ENTRIES. The newest maxLabeledEntries labelled/'restore' entries
+// are always kept and don't count against it.
 const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
 const MAX_ENTRIES = 500;
@@ -171,8 +172,11 @@ function retained(entries, now = Date.now()) {
   const keep = new Set();
   const buckets = new Set();
   // Newest first, so each hour/day keeps its latest snapshot and the cap drops the oldest.
+  let protectedN = 0;
+  const maxProtected = limits.get('maxLabeledEntries');
   for (const e of entries.slice().reverse()) {
-    if (e.label || e.trigger === 'restore') {
+    // Only the newest maxProtected labelled/restore entries are exempt; older ones thin out like the rest (#158).
+    if ((e.label || e.trigger === 'restore') && protectedN++ < maxProtected) {
       keep.add(e);
       continue;
     }

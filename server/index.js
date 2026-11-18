@@ -34,6 +34,7 @@ const projects = require('./lib/projects');
 const treeOps = require('./lib/treeOps');
 const comments = require('./lib/comments');
 const history = require('./lib/history');
+const limits = require('./lib/limits');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const exporter = require('./lib/export');
@@ -442,6 +443,14 @@ function searchAllowed(user) {
   limitSearch({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
   return ok;
 }
+// Resource limits (#158): env = default, admin values from auth-data.json apply immediately.
+limits.setOverrides(auth.getSettings().limits);
+// 413 (quota) / 507 (free space) as error with status; the surrounding catch passes e.status on.
+function checkSpace(req, addBytes) {
+  const dir = userProjectsDir(req.user);
+  limits.checkQuota(req.user, dir, addBytes);
+  limits.checkFree(PROJECTS_DIR, addBytes);
+}
 // Local mode has no mail and only one login-free account: these routes have nothing to do there.
 const notLocal = (req, res, next) => (authMw.LOCAL_MODE ? res.status(404).json({ error: 'Im lokalen Modus nicht verfügbar.' }) : next());
 
@@ -650,7 +659,19 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   res.json(mailState());
 });
 
-app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
+// --- Admin: resource limits (#158) ---
+app.get('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res) => res.json({ limits: limits.all() }));
+
+app.put('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  let patch;
+  try { patch = limits.validate(req.body && req.body.limits); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const next = { ...auth.getSettings().limits, ...patch };
+  auth.setSettings({ limits: next });
+  limits.setOverrides(next);
+  res.json({ limits: limits.all() });
+});
+
+app.post('/api/admin/mail/test',authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
   if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
   try {
     await mailer.sendMail({ to: req.user.email, subject: 'LaTeX-IDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
@@ -746,6 +767,13 @@ app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error:
 
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
+
+// Too little free space on the data volume: reject writes and compiles (#158/#161); deletes stay possible.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'DELETE' || req.method === 'HEAD') return next();
+  try { limits.checkFree(PROJECTS_DIR); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+  next();
+});
 
 // Reviewers may read, compile and comment, but not change the project.
 const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label|compile\/clear-cache)(\/|$)/i;
@@ -1178,6 +1206,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     const abs = assertUserPath(root, rel);
     if (!checkSyncBase(req, root, abs)) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    checkSpace(req, buf.length);
     if (isTextFile(rel)) state.markSelfWrite(abs, buf);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
@@ -1185,7 +1214,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     safeSnapshot(root, { trigger: 'autosave' });
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1456,11 +1485,12 @@ app.post('/api/projects/open', (req, res) => {
 app.post('/api/projects/create', (req, res) => {
   try {
     const projectsDir = userProjectsDir(req.user);
+    checkSpace(req, 1024); // main.tex template
     const root = projects.createProject(projectsDir, req.body.name || '');
     projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1487,12 +1517,13 @@ app.post('/api/projects/copy', (req, res) => {
   try {
     const projectsDir = userProjectsDir(req.user);
     collab.flushRoot(path.resolve(path.join(projectsDir, req.body.name || ''))); // live edits into the copy
+    checkSpace(req, limits.dirSize(path.join(projectsDir, String(req.body.name || '')))); // upper bound (copy skips history)
     const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
     projectFresh(req, projectsDir, root);
     state.copyRoot(path.join(projectsDir, req.body.name), root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1526,15 +1557,16 @@ app.post('/api/projects/unarchive', (req, res) => {
 });
 
 // Neues Projekt aus .zip (Body = rohe Zip-Bytes, ?name=<Dateiname>). Limits/Zip-Slip: lib/unzip.js.
-app.post('/api/projects/upload-zip', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
+const zipBody = (req, res, next) => express.raw({ type: () => true, limit: limits.get('zipLimitMb') * limits.MB })(req, res, next);
+app.post('/api/projects/upload-zip', zipBody, (req, res) => {
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Keine Zip-Datei empfangen.' });
   try {
     const projectsDir = userProjectsDir(req.user);
-    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body);
+    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body, (total) => checkSpace(req, total));
     projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1820,6 +1852,7 @@ app.post('/api/tree/upload', bigJson, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    checkSpace(req, Math.floor(String(req.body.content || '').length * 0.75));
     const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
     // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
     if (req.body.overwrite && isTextFile(relPath)) {
@@ -1827,7 +1860,7 @@ app.post('/api/tree/upload', bigJson, (req, res) => {
     }
     res.json({ ok: true, path: relPath });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -2116,6 +2149,10 @@ function mayChange(user, root, item) {
 function commentText(req, res) {
   const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
   if (!text) res.status(400).json({ error: 'text ist erforderlich.' });
+  else if (text.length > limits.get('commentMaxChars')) {
+    res.status(413).json({ error: `Kommentar zu lang (max. ${limits.get('commentMaxChars')} Zeichen).` });
+    return '';
+  }
   return text;
 }
 
@@ -2202,6 +2239,7 @@ app.post('/api/history/label', (req, res) => {
   if (!root) return;
   const { id, name } = req.body;
   if (!id || !name || !name.trim()) return res.status(400).json({ error: 'id und name sind erforderlich.' });
+  if (typeof name !== 'string' || name.trim().length > limits.get('labelMaxChars')) return res.status(413).json({ error: `Bezeichnung zu lang (max. ${limits.get('labelMaxChars')} Zeichen).` });
   try {
     const entry = history.addLabel(root, id, name.trim());
     res.json({ entry });
