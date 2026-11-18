@@ -38,6 +38,7 @@ jobs:
     permissions:
       contents: write   # Paketliste als Release-Asset
       packages: write   # Push nach ghcr
+      id-token: write   # keyless cosign-Signatur (#174)
     env:
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
       # nicht-leer = Lauf gehoert zu einem Release (Event "release" oder Aufruf aus release.yml)
@@ -262,3 +263,22 @@ jobs:
             docker push "$IMG:latest"
           fi
           docker inspect --format '{{join .RepoDigests "\n"}}' latex-ide:test | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "DIGEST_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMG:${ASSET#v}")" >> "$GITHUB_ENV"
+
+      # Keyless cosign-Signatur + SBOM-Attestation fuer den Digest (#174).
+      - uses: sigstore/cosign-installer@v3
+        if: env.PUBLISH == 'true'
+
+      - uses: anchore/sbom-action@v0
+        if: env.PUBLISH == 'true'
+        with:
+          image: ${{ env.DIGEST_REF }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Image signieren und SBOM attestieren
+        if: env.PUBLISH == 'true'
+        run: |
+          cosign sign --yes "$DIGEST_REF"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$DIGEST_REF"

@@ -44,8 +44,11 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
       const assets = {};
       for (const [os, re] of Object.entries(ASSETS)) {
         const a = (rel.assets || []).find((x) => re.test(x.name));
-        if (a) assets[os] = { url: a.url, digest: a.digest };
+        if (a) assets[os] = { url: a.url, digest: a.digest, name: a.name };
       }
+      // SHA256SUMS of the release (#174); releases before it have none.
+      const sums = (rel.assets || []).find((x) => x.name === 'SHA256SUMS');
+      if (sums) Object.defineProperty(assets, 'sums', { value: sums.url });
       meta = { at: Date.now(), assets, error: null };
       return assets;
     } catch (e) {
@@ -61,11 +64,19 @@ function createDesktopAssets({ dataDir, repo, token, version }) {
     if (fs.existsSync(file)) return Promise.resolve(file);
     if (!downloads.has(os)) {
       const p = (async () => {
-        const asset = (await releaseAssets())[os];
+        const assets = await releaseAssets();
+        const asset = assets[os];
         if (!asset) throw new Error(`Release v${version} enthält kein Paket für ${os}.`);
         // GitHub's own SHA-256 of the asset: a manipulated download is never cached or served (#147).
         const want = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest || '');
         if (!want) throw new Error(`Release v${version}: keine SHA-256-Prüfsumme für ${os}.`);
+        // The release's SHA256SUMS (own asset, covered by the build attestation) must agree with that digest (#174).
+        if (assets.sums) {
+          const sr = await fetch(assets.sums, { headers: headers('application/octet-stream'), signal: AbortSignal.timeout(30000) });
+          if (!sr.ok) throw new Error(`GitHub HTTP ${sr.status} (SHA256SUMS)`);
+          const line = (await sr.text()).split('\n').map((l) => /^([0-9a-f]{64}) [ *](.+?)\r?$/i.exec(l)).find((m) => m && m[2] === asset.name);
+          if (!line || line[1].toLowerCase() !== want[1].toLowerCase()) throw new Error(`Release v${version}: SHA256SUMS passt nicht zum Paket für ${os}.`);
+        }
         const r = await fetch(asset.url, { headers: headers('application/octet-stream'), signal: AbortSignal.timeout(900000) });
         if (!r.ok) throw new Error(`GitHub HTTP ${r.status} (Download)`);
         fs.mkdirSync(dir, { recursive: true });
