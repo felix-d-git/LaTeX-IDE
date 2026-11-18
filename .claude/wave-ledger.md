@@ -97,7 +97,9 @@ Base: master (tabu) · Second: staging/second-branch
 ## Wave 6 (18.11.2026)
 | Issue | Prio | Agent | Status |
 |---|---|---|---|
-| #172 | 1 | agent-1 | IN_PROGRESS |
-| #164 | 1 | agent-2 | IN_PROGRESS |
-| #175, #174 | 1 | agent-3 | IN_PROGRESS |
-| #211, #210 | 2 | agent-4 | IN_PROGRESS |
+| #172 | 1 | agent-1 | DONE (aca1979) |
+| #164 | 1 | agent-2 | DONE (6574d2a) |
+| #175, #174 | 1 | agent-3 | DONE (266eeda) |
+| #211, #210 | 2 | agent-4 | DONE (78edd42) |
+
+Wave-6-Tests: 362 Tests, 358 pass, 2 skipped, 2 fail (nur bekannte: pandocCopyright CRLF, containerWorkflow Windows). Offen für User: Secret RELEASE_SIGNING_KEY + Host-Datei .release-signers anlegen (#172, Anleitung docs/UPDATES.md); Workflows #174/#175 erst beim nächsten Release real geprüft; GUI-⬜ in TODO.md (#164, #210, #211).
