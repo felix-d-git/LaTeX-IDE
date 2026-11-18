@@ -55,13 +55,29 @@ function explain(e) {
   return /STARTTLS/i.test(e.message || '') ? 'Der SMTP-Server bietet kein STARTTLS an (Port 587 setzt STARTTLS voraus; Port 465 mit SSL/TLS). Nur für lokale Tests: SMTP_ALLOW_PLAIN=true.' : e.message;
 }
 
+const OUTBOX_MAX_AGE_MS = 48 * 3600 * 1000;
+const maskAddr = (to) => String(to || '').replace(/^(.)[^@]*@/, '$1***@');
+
+// stdout: only masked recipient + subject. The file (links!) is 0600, atomically replaced, entries > 48 h pruned.
 function logToOutbox(subject, to, text, reason = 'Kein SMTP konfiguriert') {
-  const entry = `\n--- ${new Date().toISOString()} ---\nAn: ${to}\nBetreff: ${subject}\n${text}\n`;
-  console.log(`[mailer] ${reason} - Link/Nachricht wird nur geloggt:${entry}`);
+  console.log(`[mailer] ${reason} - An: ${maskAddr(to)}, Betreff: ${subject} (Nachricht nur in mail-outbox.log)`);
   try {
-    fs.appendFileSync(OUTBOX_PATH, entry, 'utf8');
+    let old = '';
+    try { old = fs.readFileSync(OUTBOX_PATH, 'utf8'); } catch (e) { /* none yet */ }
+    const cutoff = Date.now() - OUTBOX_MAX_AGE_MS;
+    const kept = old.split(/(?=\n--- \d{4}-\d\d-\d\dT)/)
+      .filter((e) => { const m = /^\n--- (\S+) ---\n/.exec(e); return m && Date.parse(m[1]) >= cutoff; }).join('');
+    const entry = `
+--- ${new Date().toISOString()} ---
+An: ${to}
+Betreff: ${subject}
+${text}
+`;
+    const tmp = `${OUTBOX_PATH}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, kept + entry, { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, OUTBOX_PATH);
   } catch (e) {
-    // best-effort log file, console output above is the source of truth
+    // best-effort log file
   }
 }
 
@@ -85,14 +101,12 @@ async function sendMail({ to, subject, text }) {
   return { delivered: true };
 }
 
-// Never throws: a failed delivery is logged (and the text kept in the outbox,
-// so the admin can still hand out the link) instead of failing the request.
+// Never throws: a failed delivery is logged instead of failing the request.
 async function sendMailSafe(opts) {
   try {
     return await sendMail(opts);
   } catch (e) {
-    console.error('[mailer] Versand fehlgeschlagen:', explain(e));
-    logToOutbox(opts.subject, opts.to, opts.text, 'Versand fehlgeschlagen');
+    console.error(`[mailer] Versand an ${maskAddr(opts.to)} fehlgeschlagen:`, explain(e));
     return { delivered: false, error: e };
   }
 }
