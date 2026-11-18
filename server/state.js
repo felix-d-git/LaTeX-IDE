@@ -33,6 +33,21 @@ if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
 if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
 if (!workspace.rolesByRoot) workspace.rolesByRoot = {}; // root -> { userId: 'reviewer' }, absent = editor
 if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { editor?: link, reviewer?: link }, siehe getShareLinks
+// #182: Share-Tokens nur gehasht speichern; Klartext-Altbestand (Token-String oder .token) einmalig umstellen.
+const hashShareToken = (t) => require('crypto').createHash('sha256').update(String(t)).digest('hex');
+{
+  let migrated = false;
+  for (const m of Object.values(workspace.shareLinksByRoot)) {
+    for (const [role, l] of Object.entries(m)) {
+      const plain = typeof l === 'string' ? l : l && l.token;
+      if (typeof plain !== 'string') continue;
+      const { token, ...rest } = typeof l === 'string' ? { maxUses: 0, uses: 0 } : l;
+      m[role] = { ...rest, tokenHash: hashShareToken(plain) };
+      migrated = true;
+    }
+  }
+  if (migrated) saveWorkspace(workspace);
+}
 if (!workspace.labelsByUser) workspace.labelsByUser = {};
 if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root -> [{ ms, at, estimateMs? }], letzte 10 Läufe
 
@@ -204,11 +219,23 @@ function setShareLink(root, role, link) {
   });
 }
 
+// Ohne Token-Hash, für die Anzeige (Klartext gibt es nur bei Erzeugung).
+function getShareLinksPublic(root) {
+  const m = {};
+  for (const [role, { tokenHash, token, ...rest }] of Object.entries(getShareLinks(root))) m[role] = rest;
+  return m;
+}
+
 function findShareLink(token) {
+  const h = Buffer.from(hashShareToken(token), 'hex');
   for (const [root, m] of Object.entries(workspace.shareLinksByRoot)) {
     for (const role of ['editor', 'reviewer']) {
       const l = getShareLinks(root)[role];
-      if (l && l.token === token) return { root, role, ...l };
+      if (!l || !l.tokenHash) continue;
+      const x = Buffer.from(l.tokenHash, 'hex');
+      if (x.length !== h.length || !require('crypto').timingSafeEqual(x, h)) continue;
+      if (l.expiresAt && new Date(l.expiresAt).getTime() < Date.now()) return null;
+      return { root, role, ...l };
     }
   }
   return null;
@@ -380,6 +407,8 @@ function takeSelfWrite(abs, hash) {
 }
 
 module.exports = {
+  hashShareToken,
+  getShareLinksPublic,
   copyRoot,
   workspace,
   migrateLegacyGlobalState,

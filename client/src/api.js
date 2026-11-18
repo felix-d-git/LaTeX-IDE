@@ -67,7 +67,7 @@ export const shareApi = {
   add: (login, role) => req('POST', '/api/share', { login, role }),
   remove: (userId) => req('DELETE', `/api/share/${encodeURIComponent(userId)}`),
   setRole: (userId, role) => req('POST', '/api/share/role', { userId, role }),
-  createLink: (role, maxUses) => req('POST', '/api/share/link', { role, maxUses }),
+  createLink: (role, maxUses, expiresInDays) => req('POST', '/api/share/link', { role, maxUses, expiresInDays }),
   revokeLink: (role) => req('DELETE', `/api/share/link/${encodeURIComponent(role)}`),
   join: (token) => req('POST', '/api/share/join', { token }),
 };
