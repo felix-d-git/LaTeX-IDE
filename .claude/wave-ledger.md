@@ -31,7 +31,9 @@ Base: master (tabu) · Second: staging/second-branch
 ## Wave 2 (18.11.2026)
 | Issue | Prio | Agent | Status |
 |---|---|---|---|
-| #160 | 1 | agent-1 | IN_PROGRESS |
-| #159 | 1 | agent-2 | IN_PROGRESS |
-| #154 | 1 | agent-3 | IN_PROGRESS |
-| #167 | 1 | agent-4 | IN_PROGRESS |
+| #160 | 1 | agent-1 | DONE |
+| #159 | 1 | agent-2 | DONE |
+| #154 | 1 | agent-3 | DONE |
+| #167 | 1 | agent-4 | DONE |
+- Merges: agent-1 c0485d1, agent-4 b542f24 konfliktfrei; agent-2 + agent-3 erst Konflikt in test/sicherheit.test.js → Worker hat staging in seinen Branch gemergt, dann agent-2 28f63f6, agent-3 0ae8f9b
+- Suite: 286 Tests, 283 pass, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
