@@ -20,7 +20,7 @@ function loadWorkspace() {
 }
 
 function saveWorkspace(ws) {
-  fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), 'utf8');
+  fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(CONFIG_PATH + '.tmp', CONFIG_PATH);
   vault.writeThrough(CONFIG_PATH); // synchron, kein 500-ms-Debounce (#161)
 }

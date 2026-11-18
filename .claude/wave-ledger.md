@@ -15,6 +15,10 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 3: #165 → COOKIE_SECURE auto/true/false (Default auto), CSRF-Cookie ebenso, HSTS nur bei req.secure ohne includeSubDomains, Start-Warnung; __Host--Präfix verworfen (meldet alle ab)
 - 18.11.2026 Wave 3: #166 → stdout nur maskierte Adresse + Betreff, Outbox 0600 + 48h-Trim, bei konfiguriertem SMTP + Fehler kein Outbox-Eintrag; Admin-UI-Linkanzeige verworfen
 - 18.11.2026 Wave 3: #170 → E-Mail nur für canManage + eigenen Eintrag, keine E-Mail bei Suche per Name, limitShare 30 Fehlversuche/15 min; Einladungs-Workflow verworfen
+- 18.11.2026 Wave 4: #169 → Passwort nur bei gleichem Host/Port/User weiterverwenden, sonst Pflicht; mail/test generischer Fehler + Rate-Limit; Re-Auth verworfen, Audit-Log → #176
+- 18.11.2026 Wave 4: #168 → umask 077 (Server+Desktop, nicht Windows), 0600 für Secret-Dateien, einmaliges chmod beim Start, server-update.sh umask 077 + Backup 700, Start-Warnung bei world-readable DATA_DIR
+- 18.11.2026 Wave 4: #163 → Pro-Start-Schlüssel als HttpOnly-Cookie für Desktop-Proxy UND LOCAL_MODE (inkl. Starter), authView nur Port 3178; PKCE später
+- 18.11.2026 Wave 4: #158 → Zip eintragsweise, ZIP_LIMIT 50 MB, USER_QUOTA_MB 300 (Admins frei), Kommentar ≤20 000, Label ≤100, max 50 gelabelte/Restore-Einträge, statfs-Reserve; Projektanzahl-Limit verworfen; alle Limits im Admin-Menü änderbar (Env = Default)
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
@@ -53,3 +57,11 @@ Base: master (tabu) · Second: staging/second-branch
 - Erste Suite: neuer Fehler SPDX-Kopf in 2 neuen Testdateien → statt Revert Nachbesserung 21f8ce4 (nur Testdatei-Kopf)
 - Suite: 294 Tests, 291 pass, 2 fail (dieselben vorbestehenden: pandocCopyright CRLF, containerWorkflow Windows) → kein Revert
 - Zurückgestellt (Kollision mailer.js/auth.js): #169, #168
+
+## Wave 4 (18.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #169 | 1 | agent-1 | IN_PROGRESS |
+| #168 | 1 | agent-2 | IN_PROGRESS |
+| #163 | 1 | agent-3 | IN_PROGRESS |
+| #158 | 1 | agent-4 | IN_PROGRESS |

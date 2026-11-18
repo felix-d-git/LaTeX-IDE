@@ -62,7 +62,8 @@ export function setupAuthView({ onAuthenticated }) {
   const inviteToken = params.get('invite') || '';
   const resetToken = params.get('reset') || '';
   const verifyToken = params.get('verify') || '';
-  const desktopPort = /^\d{2,5}$/.test(params.get('desktop') || '') ? params.get('desktop') : null;
+  // Nur der feste Desktop-Port (#163): sonst könnte ein lokaler Prozess auf einem eigenen Port den Token abgreifen.
+  const desktopPort = params.get('desktop') === '3178' ? '3178' : null;
   const desktopState = params.get('state') || '';
   let info = ''; // message shown above the login form (e.g. after verifying)
   let lastLogin = '';

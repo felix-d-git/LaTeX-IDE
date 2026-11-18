@@ -75,7 +75,7 @@ async function startDesktop(remoteUrl) {
   fs.writeFileSync(path.join(local, 'Thesis', 'seite.html'), '<script>alert(1)</script>');
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ token: 'lide_test' }));
   const port = await freePort();
-  const env = { ...process.env, PORT: String(port), LATEX_IDE_DATA: data, LATEX_IDE_LOCAL: local, REMOTE_URL: remoteUrl };
+  const env = { ...process.env, PORT: String(port), LATEX_IDE_DATA: data, LATEX_IDE_LOCAL: local, REMOTE_URL: remoteUrl, LOCAL_NO_BROWSER: '1' };
   const child = spawn(process.execPath, [path.join(REPO, 'server', 'desktop.js')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
@@ -92,8 +92,9 @@ async function startDesktop(remoteUrl) {
     }
   }
   const csrf = 'c'.repeat(48);
+  const key = fs.readFileSync(path.join(data, '.launch-key'), 'utf8');
   const call = async (method, url, { pid, body } = {}) => {
-    const headers = { cookie: `csrfToken=${csrf}`, 'x-csrf-token': csrf };
+    const headers = { cookie: `csrfToken=${csrf}; lideLocal=${key}`, 'x-csrf-token': csrf };
     if (pid) headers['x-project-id'] = pid;
     if (body) headers['content-type'] = 'application/json';
     const r = await fetch(base + url, { method, headers, body: body && JSON.stringify(body) });

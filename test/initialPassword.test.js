@@ -183,7 +183,7 @@ test('mit Verschlüsselung liegt die Datei in VAULT_DIR (für den Host), nicht i
 test('lokaler Modus bleibt ohne Login und ohne Einmal-Passwort', async () => {
   const srv = await startServer({ LOCAL_MODE: '1', LOCAL_NO_BROWSER: '1' });
   test.after(() => srv.stop());
-  const c = client(srv.base);
+  const c = client(srv.base, srv.localKey());
   const me = await c.call('GET', '/api/auth/me');
   assert.strictEqual(me.status, 200);
   assert.strictEqual(me.body.user.localMode, true);
