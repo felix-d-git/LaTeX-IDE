@@ -11,10 +11,15 @@ Base: master (tabu) · Second: staging/second-branch
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
 |---|---|---|---|
-| #156 | 1 | agent-1 | IN_PROGRESS |
-| #157 | 1 | agent-2 | IN_PROGRESS |
-| #155 | 1 | agent-3 | IN_PROGRESS |
-| #161 | 1 | agent-4 | IN_PROGRESS |
+| #156 | 1 | agent-1 | DONE |
+| #157 | 1 | agent-2 | DONE |
+| #155 | 1 | agent-3 | DONE |
+| #161 | 1 | agent-4 | DONE |
 
 ## Ausgeschlossen
 - #121, #137, #199: PRs bereits auf master gemergt → nur Schließen offen
+
+### Wave 1 Ergebnis
+- Merges konfliktfrei: agent-1 e34286a, agent-2 4e7c37e, agent-3 9397b91, agent-4 e182cca
+- Suite: 282 Tests, 279 pass, 2 fail (pandocCopyright CRLF, containerWorkflow Windows — beide vorbestehend auf master, nicht Wave-bezogen) → kein Revert
+- Issues bleiben bis Merge nach master offen
