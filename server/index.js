@@ -141,11 +141,12 @@ function streamFile(res, abs) {
 
 let wss = null;
 let yjsWss = null;
+let yjsReviewerWss = null; // same /yjs, but small maxPayload for reviewers
 
 // Rights changed (password changed/reset, account deleted): drop all of the user's sockets;
 // the current, still valid session reconnects by itself.
 function closeUserSockets(userId) {
-  for (const s of [wss, yjsWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
+  for (const s of [wss, yjsWss, yjsReviewerWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
 }
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
 const AUTOCOMPILE_THROTTLE_MS = 5000;
@@ -207,7 +208,7 @@ function kickRoot(root, userId) {
     wsSubscribe(c, null);
   });
   // Live text sync of the removed user stops too (otherwise it keeps receiving/sending updates).
-  if (userId && yjsWss) yjsWss.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
+  for (const s of [yjsWss, yjsReviewerWss]) if (userId && s) s.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
 }
 
 // onlyUserId: restrict to one user's connections (per-user compile events).
@@ -2260,6 +2261,7 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
+yjsReviewerWss = new WebSocketServer({ noServer: true, maxPayload: collab.REVIEWER_MAX_PAYLOAD });
 
 collab.setHooks({
   markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
@@ -2328,10 +2330,15 @@ async function handleUpgrade(req, socket, head) {
     const u = auth.findUserById(userId);
     return u && canAccessRoot(u, root) ? roleOf(u, root) === 'reviewer' : null;
   };
-  yjsWss.handleUpgrade(req, socket, head, (ws) => {
+  // A reviewer may only set/remove anchors of their own comments (deleting: comment already gone is fine).
+  const ownsAnchor = (id, isDelete) => {
+    const a = comments.authorIdOf(root, rel, id);
+    return a === userId || (isDelete && a === undefined);
+  };
+  (readOnly() ? yjsReviewerWss : yjsWss).handleUpgrade(req, socket, head, (ws) => {
     ws.userId = userId;
     ws.root = path.resolve(root);
-    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly);
+    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly, ownsAnchor);
   });
 }
 
