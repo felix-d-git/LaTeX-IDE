@@ -146,3 +146,38 @@ test('XFF-Spoofing, Konto-Login-Limit und MCP-Batch-Limit (#154)', async () => {
     await srv.stop();
   }
 });
+
+// #159: Compile-Route pro Nutzer begrenzt (20/min), danach 429.
+test('POST /api/compile: Rate-Limit pro Nutzer', async () => {
+  const srv = await startServer();
+  try {
+    const c = client(srv.base);
+    await c.login('admin', ADMIN_PASSWORD);
+    let last = 0;
+    for (let i = 0; i < 21; i++) last = (await c.call('POST', '/api/compile', {})).status;
+    assert.strictEqual(last, 429);
+  } finally {
+    await srv.stop();
+  }
+});
+
+test('Admin-Modus: Passwort-Reset umgeht die Freigabe nicht (#160)', async () => {
+  const srv = await startServer();
+  try {
+    const admin = client(srv.base);
+    await admin.login('admin', ADMIN_PASSWORD);
+    assert.strictEqual((await admin.call('PUT', '/api/admin/mail', { verifyMode: 'admin' })).status, 200);
+    const { token } = (await admin.call('POST', '/api/admin/invites')).body;
+    const c = client(srv.base);
+    await c.call('GET', '/api/auth/me');
+    assert.strictEqual((await c.call('POST', '/api/auth/register', { token, username: 'dora', email: 'dora@example.test', password: 'geheim-passwort-123' })).status, 200);
+    const r = await c.call('POST', '/api/auth/forgot-password', { login: 'dora' });
+    assert.strictEqual(r.status, 200);
+    assert.doesNotMatch(await outbox(srv), /reset=/);
+    const l = await c.call('POST', '/api/auth/login', { login: 'dora', username: 'dora', password: 'geheim-passwort-123' });
+    assert.strictEqual(l.status, 403);
+    assert.strictEqual(l.body.unverified, true);
+  } finally {
+    await srv.stop();
+  }
+});
