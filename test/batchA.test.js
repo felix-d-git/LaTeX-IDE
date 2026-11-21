@@ -44,7 +44,12 @@ test('#188 wartender Compile: Freigabe-Entzug vor dem Start -> 403 ohne Log', { 
   test.after(() => srv.stop());
   const { admin, user, userId } = await adminAndUser(srv);
   const root = (await admin.call('POST', '/api/projects/create', { name: 'Queue' })).body.root;
-  fs.writeFileSync(path.join(root, 'main.tex'), '\documentclass{article}\n\def\foo{\foo}\n\begin{document}\n\foo\n\end{document}\n');
+  fs.writeFileSync(path.join(root, 'main.tex'), String.raw`\documentclass{article}
+\def\foo{\foo}
+\begin{document}
+\foo
+\end{document}
+`);
   await admin.call('POST', '/api/projects/open', { root });
   assert.strictEqual((await admin.call('POST', '/api/share', { login: 'bob' })).status, 200);
   await user.call('POST', '/api/projects/open', { root });

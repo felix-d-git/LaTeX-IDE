@@ -55,10 +55,13 @@ async function startServer(extraEnv = {}, { prepare } = {}) {
   }
   const stop = async () => {
     if (child.exitCode === null) {
-      child.kill();
-      await new Promise((r) => child.once('exit', r));
+      const exited = new Promise((r) => child.once('exit', r));
+      // Windows: child.kill() skips the server's exit handlers, so running TeX grandchildren survive.
+      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+      else child.kill();
+      await exited;
     }
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   };
   // LOCAL_MODE (#163): Start-Schlüssel, den der Server für den Browser-Link erzeugt hat
   const localKey = () => fs.readFileSync(path.join(dataDir, '.launch-key'), 'utf8');
