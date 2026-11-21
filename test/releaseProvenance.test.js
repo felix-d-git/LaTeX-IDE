@@ -13,7 +13,7 @@ const wf = (f) => fs.readFileSync(path.join(__dirname, '..', '.github', 'workflo
 
 test('release.yml: Attestation und SHA256SUMS am Release', () => {
   const y = wf('release.yml');
-  assert.match(y, /uses: actions\/attest-build-provenance@v\d+/);
+  assert.match(y, /uses: actions\/attest-build-provenance@[0-9a-f]{40}/);
   assert.match(y, /attestations: write/);
   assert.match(y, /sha256sum LatexIDE-Setup\.exe LatexIDE-macOS\.zip > SHA256SUMS/);
   assert.match(y, /gh release upload [^\n]*assets\/SHA256SUMS/);

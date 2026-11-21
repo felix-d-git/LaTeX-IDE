@@ -62,6 +62,7 @@ vorher geht nichts anderes; danach löscht der Server die Datei.
 | `COOKIE_SECURE` | `true`, sobald HTTPS davor sitzt. |
 | `HOST_PORT` | Port auf dem Host (Standard 3077). |
 | `LATEX_DATA_DIR` | Datenordner auf dem Host (Standard `./data`). |
+| `LATEX_MEM`, `LATEX_CPUS`, `LATEX_PIDS`, `LATEX_HEAP_MB` | Container-Limits (Standard 2g, 2 CPUs, 256 Prozesse, 1024 MB Node-Heap). Bei großen Dokumenten erhöhen. |
 | `TEXLIVE` | `apt` (Debian-Paket im Image, Standard) oder `host` (eigenes TeX Live einhängen). |
 | `UPDATE_MODE` | `notify` / `button` / `auto` / `off`, siehe [UPDATES.md](UPDATES.md). |
 | `SOURCE_URL` | Quellcode-Link unter `/source` (AGPL-3.0 §13). Ohne zeigt er auf den Tag der Version in `UPDATE_REPO`; das Image kennt seinen Git-Stand nicht. Wer einen anderen Stand als ein Release baut (master, Fork, eigene Änderungen), setzt ihn, z. B. auf `…/tree/<commit>`. Geht beim Build auch in den Lizenz-Banner des Clients. |
@@ -118,7 +119,7 @@ docker compose -f docker-compose.pi.yml up -d --build
 - TeX Live 2025 vorher auf dem Host installieren (install-tl, Ziel z. B. auf der SSD).
 - `DATA_KEY` getrennt von den Daten sichern (Passwortmanager): ohne ihn sind
   Daten und Backups unlesbar.
-- Limits per `.env`: `LATEX_MEM` (Standard 1g), `LATEX_CPUS`, `LATEX_TMPFS`.
+- Limits per `.env`: `LATEX_MEM` (Standard 1g), `LATEX_CPUS`, `LATEX_PIDS` (Standard 256), `LATEX_HEAP_MB` (Node-Heap), `LATEX_TMPFS`.
 - Das Image `tailscale/tailscale` wird nur referenziert und beim Start von
   Docker Hub geladen, es ist nicht Teil dieses Projekts. Für Konto und Funnel
   gelten die [Nutzungsbedingungen von Tailscale](https://tailscale.com/terms)
