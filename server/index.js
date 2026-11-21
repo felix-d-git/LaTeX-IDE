@@ -1985,6 +1985,14 @@ const queuedCompile = new Map(); // output dir -> promise of a not-yet-started r
 const MAX_PENDING_COMPILES = Math.max(1, parseInt(process.env.MAX_PENDING_COMPILES, 10) || 2);
 const pendingByUser = new Map(); // userId -> queued + running runs (DoS cap, #159)
 
+// Identity of a project folder: inode, or the state epoch where inodes are 0 (Windows). null = gone.
+function rootIdentity(root) {
+  try {
+    const ino = fs.statSync(root).ino;
+    return ino ? `i${ino}` : `e${state.getEpoch(root)}`;
+  } catch { return null; }
+}
+
 // opts.auto: autocompile run - its version snapshot is throttled like autosave.
 function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const outRel = outRelFor(root, userId);
@@ -1995,10 +2003,16 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const pending = pendingByUser.get(userId) || 0;
   if (pending >= MAX_PENDING_COMPILES) throw Object.assign(new Error(`Zu viele Kompilierungen gleichzeitig (max. ${MAX_PENDING_COMPILES}). Bitte warten, bis ein Lauf fertig ist.`), { status: 429 });
   pendingByUser.set(userId, pending + 1);
+  const identAtEnqueue = rootIdentity(root);
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain
     .then(() => {
       queuedCompile.delete(key);
+      // Rights and project identity are re-checked when the job starts, not only when it was queued (#188).
+      const u = auth.findUserById(userId);
+      if (!u || isParked(root) || !canAccessRoot(u, root) || rootIdentity(root) !== identAtEnqueue) {
+        throw Object.assign(new Error('Kein Zugriff mehr auf dieses Projekt.'), { status: 403 });
+      }
       return doCompile(root, main, outRel, to, meta, auto);
     })
     .catch((e) => {
