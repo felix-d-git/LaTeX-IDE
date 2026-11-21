@@ -115,3 +115,15 @@ Wave-6-Tests: 362 Tests, 358 pass, 2 skipped, 2 fail (nur bekannte: pandocCopyri
 | #184, #185 | 2 | agent-3 | DONE (f9d817d) |
 | #209, #189 | 2 | agent-4 | DONE (c829413, TODO.md-Konflikt: beide Einträge behalten) |
 Tests: 380 pass, 2 fail (bekannt: pandocCopyright, containerWorkflow)
+
+## Wave 8 (21.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #188, #183, #186 | 1 | agent-a | DONE (a931c85; #183 teilweise: share/join, Projektlisten, desktop.js offen) |
+| #187 | 1 | agent-b | DONE (957b9a7) |
+| #190, #191, #192, #200 | 2 | agent-c | DONE (8f098fe) |
+| #181, #199, #200 | 2 | agent-d | DONE (c78db36; #200 Punkte 1/2/5, `reuse lint` nicht gelaufen) |
+- Zurückgestellt: #212; #198/#193 = Übersichts-Issues
+- Nachgezogen: #188-Test (Escape-Bug im TeX-String), test/_server.js stop() killt auf Windows den Prozessbaum (sonst überleben TeX-Enkel → EPERM)
+- Befund: `child.kill()` des Servers auf Windows lässt laufende latexmk/pdflatex weiterlaufen (Exit-Handler laufen nicht); Compile-Timeout selbst killt den Baum korrekt
+- Tests: 396, 392 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
