@@ -2451,12 +2451,12 @@ app.post('/api/file/convert-utf8', (req, res) => {
 
 // Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
 app.use((err, req, res, next) => {
+  const ref = crypto.randomBytes(4).toString('hex');
   if (!err.status || err.status >= 500) {
     console.error('[route]', ref, req.method, req.path, err.cause || err);
     audit('server_error', req, { status: err.status || 500, error: clip(err.message, 100) });
   }
   if (res.headersSent) return next(err);
-  const ref = crypto.randomBytes(4).toString('hex');
   // Node errors carry absolute paths: never hand them to the client.
   res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : `Interner Fehler (Referenz ${ref}).` });
 });
