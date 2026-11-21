@@ -45,7 +45,7 @@ jobs:
       RELEASE_RUN: ${{ (github.event_name == 'release' || inputs.tag != '') && 'true' || '' }}
       PUBLISH: ${{ github.event.repository.private == false && ((github.event_name == 'release' && !github.event.release.prerelease) || inputs.tag != '' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || '' }}
           persist-credentials: false
@@ -159,7 +159,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/src"
           cp pandoc-sources.txt "$RUNNER_TEMP/src/SOURCES.txt"
           # Erst das Archiv der Distribution, sonst snapshot.debian.org (debsnap)
-          docker run --rm -v "$RUNNER_TEMP/src:/out" debian:bookworm bash -euo pipefail -c '
+          docker run --rm -v "$RUNNER_TEMP/src:/out" debian:bookworm@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8 bash -euo pipefail -c '
             sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null
@@ -213,7 +213,7 @@ jobs:
           cp debian-sources.txt "$DIR/SOURCES.txt"
           echo "::notice::Platz vorher: $(df -h --output=avail /mnt | tail -1) frei auf /mnt"
           # Fehlende Quellen alle melden (Annotationen), nicht nur die erste.
-          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:bookworm bash -uo pipefail -c '
+          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:bookworm@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8 bash -uo pipefail -c '
             sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
             apt-get update -qq || exit 1
             apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null || exit 1
@@ -266,10 +266,10 @@ jobs:
           echo "DIGEST_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMG:${ASSET#v}")" >> "$GITHUB_ENV"
 
       # Keyless cosign-Signatur + SBOM-Attestation fuer den Digest (#174).
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
         if: env.PUBLISH == 'true'
 
-      - uses: anchore/sbom-action@v0
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         if: env.PUBLISH == 'true'
         with:
           image: ${{ env.DIGEST_REF }}
