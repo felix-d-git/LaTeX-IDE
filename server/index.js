@@ -2018,7 +2018,7 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
     .catch((e) => {
       // Otherwise every client's status would stay on 'running'.
       console.error('[compile]', root, e);
-      broadcast(root, { type: 'compileStatus', status: 'error', log: String((e && e.message) || e) }, to);
+      broadcast(root, { type: 'compileStatus', status: 'error', log: e && e.status ? e.message : 'Kompilierung fehlgeschlagen.' }, to);
       throw e;
     })
     .finally(() => {
@@ -2073,7 +2073,7 @@ app.post('/api/compile', limitCompile, ah(async (req, res) => {
   try {
     res.json(await runCompile(root, main, req.user.id));
   } catch (e) {
-    res.status(e.status || 500).json({ error: e.status === 429 ? e.message : 'Kompilierung fehlgeschlagen: ' + e.message });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Kompilierung fehlgeschlagen.' });
   }
 }));
 
@@ -2447,11 +2447,13 @@ app.post('/api/file/convert-utf8', (req, res) => {
 // Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
 app.use((err, req, res, next) => {
   if (!err.status || err.status >= 500) {
-    console.error('[route]', req.method, req.path, err.cause || err);
+    console.error('[route]', ref, req.method, req.path, err.cause || err);
     audit('server_error', req, { status: err.status || 500, error: clip(err.message, 100) });
   }
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: err.status ? err.message : 'Interner Fehler: ' + (err.message || err) });
+  const ref = crypto.randomBytes(4).toString('hex');
+  // Node errors carry absolute paths: never hand them to the client.
+  res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : `Interner Fehler (Referenz ${ref}).` });
 });
 
 const server = http.createServer(app);
