@@ -9,7 +9,7 @@
 #
 # Two stages: npm ci with dev and optional packages (esbuild, @napi-rs/canvas) only
 # happens in the build stage, which is not part of the final image.
-FROM node:26-bookworm-slim AS build
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS build
 WORKDIR /app
 COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
@@ -36,7 +36,7 @@ RUN node build.js \
     && cd /app/node_modules/pdfjs-dist \
     && rm -rf cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*
 
-FROM node:26-bookworm-slim
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
 
 # Repo-Zuordnung kommt vom Build (container-image.yml: github.repository), kein fester Name im Image.
 ARG IMAGE_SOURCE=""

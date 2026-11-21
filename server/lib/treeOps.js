@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const fs = require('fs');
 const path = require('path');
-const { safeResolve, resolveEntry, sameEntry } = require('./fsTree');
+const { safeResolve, resolveEntry, assertUserPath, sameEntry } = require('./fsTree');
 
 const INVALID_NAME_RE = /[\\/:*?"<>|]/;
 
@@ -32,14 +32,14 @@ function uniqueDest(dir, name) {
 }
 
 function createFolder(root, relPath) {
-  const abs = safeResolve(root, relPath);
+  const abs = assertUserPath(root, relPath);
   if (fs.existsSync(abs)) throw new Error('Ordner existiert bereits.');
   fs.mkdirSync(abs, { recursive: true });
   return toRel(root, abs);
 }
 
 function createFile(root, relPath) {
-  const abs = safeResolve(root, relPath);
+  const abs = assertUserPath(root, relPath);
   if (fs.existsSync(abs)) throw new Error('Datei existiert bereits.');
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, '', 'utf8');
@@ -49,8 +49,10 @@ function createFile(root, relPath) {
 function renamePath(root, relPath, newName) {
   const safeName = assertValidName(newName);
   const abs = resolveEntry(root, relPath);
+  assertUserPath(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   const dest = path.join(path.dirname(abs), safeName);
+  assertUserPath(root, path.relative(root, dest));
   // Nur Groß-/Kleinschreibung geändert: auf case-insensitiven Dateisystemen existiert dest (= abs) schon.
   if (fs.existsSync(dest) && !sameEntry(abs, dest)) throw new Error('Am Ziel existiert bereits eine Datei/ein Ordner mit diesem Namen.');
   fs.renameSync(abs, dest);
@@ -64,8 +66,9 @@ function renamePath(root, relPath, newName) {
 // set, so the client can ask "cancel or overwrite" before resubmitting.
 function movePath(root, relPath, targetDir, overwrite) {
   const abs = resolveEntry(root, relPath);
+  assertUserPath(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
-  const destDirAbs = safeResolve(root, targetDir || '');
+  const destDirAbs = assertUserPath(root, targetDir || '', { allowRoot: true });
   if (!fs.existsSync(destDirAbs) || !fs.statSync(destDirAbs).isDirectory()) {
     throw new Error('Zielordner nicht gefunden.');
   }
@@ -90,7 +93,7 @@ function movePath(root, relPath, targetDir, overwrite) {
 }
 
 function deletePath(root, relPath) {
-  const abs = resolveEntry(root, relPath);
+  const abs = assertUserPath(root, relPath);
   if (!fs.existsSync(abs)) throw new Error('Nicht gefunden.');
   fs.rmSync(abs, { recursive: true, force: true });
 }
@@ -129,9 +132,10 @@ function purgeTrash(root, maxAgeDays = 30, now = Date.now()) {
 // contentBase64 is the raw file bytes, base64-encoded client-side. overwrite:
 // replace a same-named file (user chose so in the conflict dialog), else "_2".
 function uploadFile(root, relDir, name, contentBase64, overwrite = false) {
-  const dirAbs = safeResolve(root, relDir || '');
-  fs.mkdirSync(dirAbs, { recursive: true });
   const safeName = assertValidName(name);
+  const dirAbs = assertUserPath(root, relDir || '', { allowRoot: true });
+  assertUserPath(root, path.relative(root, path.join(dirAbs, safeName)));
+  fs.mkdirSync(dirAbs, { recursive: true });
   const exact = path.join(dirAbs, safeName);
   const dest = overwrite && !(fs.existsSync(exact) && fs.statSync(exact).isDirectory()) ? exact : uniqueDest(dirAbs, safeName);
   fs.writeFileSync(dest, Buffer.from(contentBase64, 'base64'));

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const fs = require('fs');
 const path = require('path');
+const vault = require('./lib/vault');
 
 const CONFIG_PATH = path.join(process.env.DATA_DIR || path.join(__dirname, '..'), 'workspace.json');
 
@@ -19,8 +20,9 @@ function loadWorkspace() {
 }
 
 function saveWorkspace(ws) {
-  fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), 'utf8');
+  fs.writeFileSync(CONFIG_PATH + '.tmp', JSON.stringify(ws, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(CONFIG_PATH + '.tmp', CONFIG_PATH);
+  vault.writeThrough(CONFIG_PATH); // synchron, kein 500-ms-Debounce (#161)
 }
 
 const workspace = loadWorkspace();
@@ -28,13 +30,37 @@ if (!workspace.settingsByRoot) workspace.settingsByRoot = {};
 if (!workspace.mainFileByRoot) workspace.mainFileByRoot = {};
 if (!workspace.activeRootByUser) workspace.activeRootByUser = {};
 if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
+if (!workspace.epochByRoot) workspace.epochByRoot = {};
 if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
 if (!workspace.rolesByRoot) workspace.rolesByRoot = {}; // root -> { userId: 'reviewer' }, absent = editor
 if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { editor?: link, reviewer?: link }, siehe getShareLinks
+// #182: Share-Tokens nur gehasht speichern; Klartext-Altbestand (Token-String oder .token) einmalig umstellen.
+const hashShareToken = (t) => require('crypto').createHash('sha256').update(String(t)).digest('hex');
+{
+  let migrated = false;
+  for (const m of Object.values(workspace.shareLinksByRoot)) {
+    for (const [role, l] of Object.entries(m)) {
+      const plain = typeof l === 'string' ? l : l && l.token;
+      if (typeof plain !== 'string') continue;
+      const { token, ...rest } = typeof l === 'string' ? { maxUses: 0, uses: 0 } : l;
+      m[role] = { ...rest, tokenHash: hashShareToken(plain) };
+      migrated = true;
+    }
+  }
+  if (migrated) saveWorkspace(workspace);
+}
 if (!workspace.labelsByUser) workspace.labelsByUser = {};
 if (!workspace.compileTimesByRoot) workspace.compileTimesByRoot = {}; // root -> [{ ms, at, estimateMs? }], letzte 10 Läufe
 
 // Every root key is absolute + normalized; a relative DATA_DIR (./data) used to store relative ones.
+// Persist-then-swap (#161): mutate a copy, persist it, only then make it the live state; on a save error the old state stays.
+function commitWs(mutate) {
+  const next = structuredClone(workspace);
+  mutate(next);
+  saveWorkspace(next);
+  Object.assign(workspace, next);
+}
+
 const rk = (r) => (r ? path.resolve(r) : r);
 const ROOT_MAPS = ['sharesByRoot', 'mainFileByRoot', 'settingsByRoot', 'rolesByRoot', 'shareLinksByRoot', 'compileTimesByRoot'];
 
@@ -153,9 +179,10 @@ function getShares(root) {
 
 function setShares(root, userIds) {
   root = rk(root);
-  if (userIds.length) workspace.sharesByRoot[root] = userIds;
-  else delete workspace.sharesByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (userIds.length) w.sharesByRoot[root] = userIds;
+    else delete w.sharesByRoot[root];
+  });
 }
 
 function getRole(root, userId) {
@@ -167,9 +194,10 @@ function setRole(root, userId, role) {
   const m = { ...(workspace.rolesByRoot[root] || {}) };
   if (role === 'reviewer') m[userId] = role;
   else delete m[userId];
-  if (Object.keys(m).length) workspace.rolesByRoot[root] = m;
-  else delete workspace.rolesByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (Object.keys(m).length) w.rolesByRoot[root] = m;
+    else delete w.rolesByRoot[root];
+  });
 }
 
 // Link je Rolle: { token, maxUses (0 = unbegrenzt), uses }. Alte Einträge waren nur der Token-String.
@@ -186,16 +214,29 @@ function setShareLink(root, role, link) {
   const m = { ...getShareLinks(root) };
   if (link) m[role] = link;
   else delete m[role];
-  if (Object.keys(m).length) workspace.shareLinksByRoot[root] = m;
-  else delete workspace.shareLinksByRoot[root];
-  saveWorkspace(workspace);
+  commitWs((w) => {
+    if (Object.keys(m).length) w.shareLinksByRoot[root] = m;
+    else delete w.shareLinksByRoot[root];
+  });
+}
+
+// Ohne Token-Hash, für die Anzeige (Klartext gibt es nur bei Erzeugung).
+function getShareLinksPublic(root) {
+  const m = {};
+  for (const [role, { tokenHash, token, ...rest }] of Object.entries(getShareLinks(root))) m[role] = rest;
+  return m;
 }
 
 function findShareLink(token) {
+  const h = Buffer.from(hashShareToken(token), 'hex');
   for (const [root, m] of Object.entries(workspace.shareLinksByRoot)) {
     for (const role of ['editor', 'reviewer']) {
       const l = getShareLinks(root)[role];
-      if (l && l.token === token) return { root, role, ...l };
+      if (!l || !l.tokenHash) continue;
+      const x = Buffer.from(l.tokenHash, 'hex');
+      if (x.length !== h.length || !require('crypto').timingSafeEqual(x, h)) continue;
+      if (l.expiresAt && new Date(l.expiresAt).getTime() < Date.now()) return null;
+      return { root, role, ...l };
     }
   }
   return null;
@@ -216,11 +257,20 @@ function sharedRootsFor(userId) {
 // Project folder moved (rename, trash, archive, restore): carry its per-root settings/main file/shares
 // over. Leftovers of an earlier project at the target are dropped first, never mixed in.
 // activeTo: where users who had it open/recent now point (null = forget it, e.g. trash/archive).
+// Project identity fallback where inode numbers are useless (Windows: 0): bumped on create/rename/trash.
+function bumpEpoch(root) {
+  root = rk(root);
+  workspace.epochByRoot[root] = (workspace.epochByRoot[root] || 0) + 1;
+}
+const getEpoch = (root) => workspace.epochByRoot[rk(root)] || 0;
+
 function moveRoot(oldRoot, newRoot, activeTo = newRoot) {
   oldRoot = rk(oldRoot);
   newRoot = rk(newRoot);
   activeTo = rk(activeTo);
   if (oldRoot === newRoot) return;
+  bumpEpoch(oldRoot);
+  bumpEpoch(newRoot);
   for (const [u, r] of Object.entries(workspace.activeRootByUser)) {
     if (r !== oldRoot) continue;
     if (activeTo) workspace.activeRootByUser[u] = activeTo;
@@ -253,6 +303,7 @@ function copyRoot(oldRoot, newRoot) {
 function dropRoot(root) {
   root = rk(root);
   for (const k of ROOT_MAPS) delete workspace[k][root];
+  bumpEpoch(root);
   saveWorkspace(workspace);
 }
 
@@ -367,6 +418,8 @@ function takeSelfWrite(abs, hash) {
 }
 
 module.exports = {
+  hashShareToken,
+  getShareLinksPublic,
   copyRoot,
   workspace,
   migrateLegacyGlobalState,
@@ -387,6 +440,7 @@ module.exports = {
   setShares,
   sharedRootsFor,
   dropRoot,
+  getEpoch,
   getRole,
   setRole,
   getShareLinks,

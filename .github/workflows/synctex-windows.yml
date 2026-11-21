@@ -16,16 +16,19 @@ on:
       - .github/workflows/synctex-windows.yml
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   synctex:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           cache: npm
@@ -40,6 +43,9 @@ jobs:
           $Repo = 'https://ftp.tu-chemnitz.de/pub/tug/historic/systems/texlive/2025/tlnet-final'
           $Tex = 'C:/tl'
           Invoke-WebRequest "$Repo/install-tl.zip" -OutFile install-tl.zip
+          # SHA-512 aus install-tl.zip.sha512 der TUG, deren .asc gegen den TeX-Live-Schluessel
+          # C78B82D8C79512F79CC0D7C80D5E5D9106BAB6BC geprueft wurde (Repo eingefroren).
+          if ((Get-FileHash install-tl.zip -Algorithm SHA512).Hash -ne '4571b00c2ca493b594097355735eb20a07c7ca52871515419ecef4951a59e4d4d24318edd92ccb917a6dc8883366d8930183c8d3173e23d3bd33fdf2a8ca8964'.ToUpper()) { throw 'install-tl.zip: SHA-512 stimmt nicht' }
           Expand-Archive install-tl.zip "$env:RUNNER_TEMP/itl"
           $Dir = (Get-ChildItem "$env:RUNNER_TEMP/itl" -Directory)[0].FullName
           @"

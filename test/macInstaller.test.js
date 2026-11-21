@@ -42,6 +42,10 @@ test('install.command kopiert node_modules und alle Paketeinträge', { skip: !fs
     // curl: -o <datei> anlegen, sonst Erfolg
     exe(path.join(stubs, 'curl'), 'while [ $# -gt 0 ]; do [ "$1" = -o ] && { : > "$2"; shift; }; shift; done; exit 0');
     exe(path.join(stubs, 'sudo'), 'exit 0');
+    // MacTeX-Pruefung (Hash + Signatur) mit Stubs: gepinnten Hash aus dem Skript lesen
+    const pinned = /MACTEX_SHA512="([0-9a-f]{128})"/.exec(fs.readFileSync(path.join(ROOT, 'installer', 'macos', 'install.command'), 'utf8'))[1];
+    exe(path.join(stubs, 'shasum'), `echo "${pinned}  -"`);
+    exe(path.join(stubs, 'pkgutil'), 'echo "   1. Developer ID Installer: Richard Koch (RBGCY5RJWM)"');
 
     const env = { ...process.env, HOME: fwd(home), STUBS: fwd(stubs) };
     // PATH erst in bash setzen (Windows-PATH-Umwandlung), und nie mit echtem curl laufen

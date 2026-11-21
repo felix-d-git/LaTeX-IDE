@@ -41,15 +41,15 @@ test('release.yml: Entwurf -> Pruefung -> Assets -> Veroeffentlichen -> Containe
   const at = (re) => { const m = yml.search(re); assert.ok(m >= 0, `${re} fehlt`); return m; };
   const order = [
     /Tag passt zu package\.json/,
-    /gh release create .*--draft/,
     /Pakete bauen/,
-    /gh release upload \$env:TAG installer\/out\/LatexIDE-Setup\.exe/,
+    /gh release create .*--draft/,
+    /gh release upload "\$TAG" assets\/LatexIDE-Setup\.exe/,
     /--draft=false/,
     /uses: \.\/\.github\/workflows\/container-image\.yml/,
   ].map(at);
   assert.deepStrictEqual(order, [...order].sort((a, b) => a - b));
-  assert.match(yml, /publish:\n    needs: \[desktop, macos\]/);
-  assert.match(yml, /container:\n    needs: publish/);
+  assert.match(yml, /upload:\n    needs: \[build, macos\]/);
+  assert.match(yml, /container:\n    needs: upload/);
   // container-image.yml muss aufrufbar sein und den Tag uebernehmen
   const c = read('.github', 'workflows', 'container-image.yml');
   assert.match(c, /workflow_call:/);

@@ -62,6 +62,14 @@ New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
 Write-Host "Lade install-tl.zip..."
 Invoke-WebRequest -Uri "$Repo/install-tl.zip" -OutFile $ZipPath -UseBasicParsing
 
+# SHA-512 aus install-tl.zip.sha512 der TUG, deren .asc gegen den TeX-Live-Schluessel
+# C78B82D8C79512F79CC0D7C80D5E5D9106BAB6BC geprueft wurde (Repo ist eingefroren, 2025).
+$ExpectedSha512 = '4571b00c2ca493b594097355735eb20a07c7ca52871515419ecef4951a59e4d4d24318edd92ccb917a6dc8883366d8930183c8d3173e23d3bd33fdf2a8ca8964'
+if ((Get-FileHash -Path $ZipPath -Algorithm SHA512).Hash -ne $ExpectedSha512.ToUpper()) {
+    Remove-Item -Force $ZipPath
+    throw "install-tl.zip: SHA-512 stimmt nicht - Installation abgebrochen."
+}
+
 Write-Host "Entpacke install-tl.zip..."
 Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
 

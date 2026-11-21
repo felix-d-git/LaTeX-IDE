@@ -24,51 +24,56 @@ on:
         description: 'Tag vX.Y.Z (muss existieren und zu package.json passen)'
         required: true
 
-permissions:
-  contents: write
-  packages: write
+# Minimalrechte (#173): Der Build-Job (npm ci, node build.js, Inno Setup) laeuft ohne Schreibrechte
+# und ohne gespeichertes Token; nur der Job "upload" darf am Release schreiben und bekommt
+# ausschliesslich die fertigen Artefakte.
+permissions: {}
 
 jobs:
-  desktop:
+  build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
 
       - name: Tag passt zu package.json
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
           if ("v$v" -ne $env:TAG) { throw "Tag $env:TAG passt nicht zu package.json ($v). Erst package.json hochzaehlen, dann Tag setzen." }
 
-      # Entwurf anlegen (oder den eines frueheren, abgebrochenen Laufs wiederverwenden).
-      - name: Release-Entwurf anlegen
+      # Frueher Abbruch (der Job "upload" prueft nochmal): veroeffentlichte Releases sind auch mit contents: read sichtbar.
+      - name: Release noch nicht veroeffentlicht
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $rel = gh release view $env:TAG --json isDraft 2>$null | ConvertFrom-Json
-          if ($rel) {
-            if (-not $rel.isDraft) { throw "Release $env:TAG ist schon veroeffentlicht." }
-          } else {
-            gh release create $env:TAG --draft --verify-tag --title $env:TAG --generate-notes
-            if ($LASTEXITCODE) { throw "Entwurf konnte nicht angelegt werden." }
-          }
+          $rel = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null | ConvertFrom-Json
+          if ($rel -and -not $rel.isDraft) { throw "Release $env:TAG ist schon veroeffentlicht." }
 
       - name: Inno Setup
         shell: pwsh
         run: |
-          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          if (-not (Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue)) {
+            # Feste Version + SHA-256 des Pakets (#175): nupkg selbst laden, pruefen, dann lokal installieren.
+            $dir = Join-Path $env:RUNNER_TEMP 'innosetup-pkg'
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Invoke-WebRequest 'https://community.chocolatey.org/api/v2/package/innosetup/6.7.1' -OutFile "$dir\innosetup.6.7.1.nupkg"
+            if ((Get-FileHash "$dir\innosetup.6.7.1.nupkg" -Algorithm SHA256).Hash -ne 'a0dad33db33099d9cd2b89ac2d08b5d70c589b15118ced3b95f469f044f99950'.ToUpper()) { throw 'Inno Setup nupkg: SHA-256 stimmt nicht' }
+            choco install innosetup --version 6.7.1 --source $dir -y --no-progress
+          }
 
+      # npm ci laeuft darin mit --ignore-scripts + npm rebuild esbuild (installer/build-release.ps1).
       - name: Pakete bauen
         shell: pwsh
         # Quell-Link im Client-Bundle und unter /source der installierten Pakete (build.js schreibt
@@ -78,41 +83,29 @@ jobs:
         run: ./installer/build-release.ps1 -MacStagingOut installer/out/macos
 
       # Das macOS-ZIP baut der Job "macos": Windows-ZIPs kennen keine Unix-Rechte.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-staging
           path: installer/out/macos
           include-hidden-files: true
           retention-days: 1
 
-      - name: An Release haengen
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload $env:TAG installer/out/LatexIDE-Setup.exe --clobber
-
-      # Download overview from .github/release-template.md under the release text (once).
-      - name: Download-Übersicht in den Release-Text
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-          $body = gh release view $env:TAG --json body -q .body
-          if ($body -match 'Welche Datei brauche ich') { exit 0 }
-          $tpl = (Get-Content .github/release-template.md -Raw -Encoding utf8).Replace('{{TAG}}', $env:TAG).Replace('{{REPO}}', $env:GITHUB_REPOSITORY)
-          [IO.File]::WriteAllText("$env:RUNNER_TEMP/notes.md", (($body -join "`n") + "`n" + $tpl), [Text.UTF8Encoding]::new($false))
-          gh release edit $env:TAG --notes-file "$env:RUNNER_TEMP/notes.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-setup
+          path: installer/out/LatexIDE-Setup.exe
+          retention-days: 1
 
   # macOS-ZIP auf Linux packen, damit install.command ausfuehrbar ankommt
-  # (Archive-Utility uebernimmt die Unix-Rechte aus dem ZIP).
+  # (Archive-Utility uebernimmt die Unix-Rechte aus dem ZIP). Ohne Rechte.
   macos:
-    needs: desktop
+    needs: build
     runs-on: ubuntu-latest
+    permissions: {}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: macos-staging
           path: staging
@@ -124,32 +117,93 @@ jobs:
           (cd staging && zip -r -X -q ../LatexIDE-macOS.zip .)
           zipinfo LatexIDE-macOS.zip install.command | grep -q '^-rwx'
 
-      - name: An Release haengen
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" LatexIDE-macOS.zip --clobber --repo "$GITHUB_REPOSITORY"
+      # SPDX-SBOM (#200): staging ist nach npm prune --omit=dev --omit=optional der ausgelieferte Stand.
+      - name: SBOM erzeugen
+        run: (cd staging && npm sbom --sbom-format spdx --omit dev --omit optional) > "LatexIDE-$TAG.spdx.json"
 
-  # Erst jetzt, mit allen Assets, wird der Entwurf oeffentlich.
-  publish:
-    needs: [desktop, macos]
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-zip
+          path: |
+            LatexIDE-macOS.zip
+            LatexIDE-*.spdx.json
+          retention-days: 1
+
+  # Einziger Job mit Schreibrechten: legt den Entwurf an (oder nimmt den eines frueheren,
+  # abgebrochenen Laufs wieder auf), haengt die Artefakte an und veroeffentlicht erst mit allen Assets.
+  upload:
+    needs: [build, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write       # Attestation (#174)
+      attestations: write
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
+      # Nur die Release-Vorlage; kein Token im Checkout, kein Build-Code in diesem Job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+          sparse-checkout: .github/release-template.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-setup
+          path: assets
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-zip
+          path: assets
+
+      # Pruefsummen + Provenienz (#174): SHA256SUMS am Release, Build-Attestation fuer beide Pakete.
+      - name: SHA256SUMS erzeugen
+        run: (cd assets && sha256sum LatexIDE-Setup.exe LatexIDE-macOS.zip > SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            assets/LatexIDE-Setup.exe
+            assets/LatexIDE-macOS.zip
+
+      - name: Release-Entwurf anlegen
+        run: |
+          if rel=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null); then
+            [ "$rel" = true ] || { echo "Release $TAG ist schon veroeffentlicht."; exit 1; }
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --generate-notes
+          fi
+
+      - name: An Release haengen
+        run: gh release upload "$TAG" assets/LatexIDE-Setup.exe assets/LatexIDE-macOS.zip assets/LatexIDE-"$TAG".spdx.json assets/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+
+      # Download overview from .github/release-template.md under the release text (once).
+      - name: Download-Uebersicht in den Release-Text
+        run: |
+          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body)
+          if printf '%s' "$body" | grep -q 'Welche Datei brauche ich'; then exit 0; fi
+          tpl=$(sed -e "s|{{TAG}}|$TAG|g" -e "s|{{REPO}}|$GITHUB_REPOSITORY|g" .github/release-template.md)
+          printf '%s\n%s\n' "$body" "$tpl" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+
+      # Erst jetzt, mit allen Assets, wird der Entwurf oeffentlich.
       - name: Release veroeffentlichen
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
-          for a in LatexIDE-Setup.exe LatexIDE-macOS.zip; do echo "$assets" | grep -qx "$a" || { echo "Asset $a fehlt"; exit 1; }; done
+          for a in LatexIDE-Setup.exe LatexIDE-macOS.zip SHA256SUMS; do echo "$assets" | grep -qx "$a" || { echo "Asset $a fehlt"; exit 1; }; done
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
   # Container-Image: container-image.yml haengt sonst nur am release-Event, das GITHUB_TOKEN nicht ausloest.
   container:
-    needs: publish
+    needs: upload
     uses: ./.github/workflows/container-image.yml
     with:
       tag: ${{ inputs.tag || github.ref_name }}
     permissions:
       contents: write
       packages: write
+      id-token: write   # keyless cosign (#174)

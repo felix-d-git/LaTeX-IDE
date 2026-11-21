@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
+require('./lib/secureFiles').applyUmask();
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 // Relative DATA_DIR (.env.example: ./data) against the repo root, before any module reads it:
 // otherwise project roots are relative here and absolute elsewhere (Yjs, sync) and never match.
@@ -7,6 +8,7 @@ if (process.env.DATA_DIR) process.env.DATA_DIR = require('path').resolve(__dirna
 // Verschluesselter Datenspeicher: muss vor allen Modulen laufen, die DATA_DIR lesen.
 const vault = require('./lib/vault');
 vault.start();
+require('./lib/secureFiles').tightenSecrets(process.env.DATA_DIR || require('path').join(__dirname, '..'));
 {
   const dataErr = require('./lib/fsTree').dataDirError(process.env.DATA_DIR || require('path').join(__dirname, '..'));
   if (dataErr) {
@@ -24,7 +26,7 @@ const cookieParser = require('cookie-parser');
 const { WebSocketServer } = require('ws');
 const { ZipArchive } = require('archiver');
 
-const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
+const { canonRel, buildTree, findByName, pickStartFile, isTextFile, safeResolve, assertUserPath, isIgnored, decodeText, toUtf8Text, NOT_UTF8_MSG } = require('./lib/fsTree');
 const { compile, findMainCandidate, mainPathError, OUT_DIR, BACKEND, pdfNameFor } = require('./lib/compile');
 // tectonic has no openin_any=p: a document could \input other users' projects or auth-data.json.
 if (BACKEND !== 'latexmk') throw new Error('TEX_BACKEND=tectonic ist nur für die Desktop-App erlaubt (liest Dateien außerhalb des Projekts).');
@@ -34,6 +36,7 @@ const projects = require('./lib/projects');
 const treeOps = require('./lib/treeOps');
 const comments = require('./lib/comments');
 const history = require('./lib/history');
+const limits = require('./lib/limits');
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const exporter = require('./lib/export');
@@ -43,8 +46,9 @@ const state = require('./state');
 const auth = require('./lib/auth');
 const mailer = require('./lib/mailer');
 const authMw = require('./lib/authMiddleware');
+const { audit, clip, recent: auditRecent, warning: auditWarning, TRAVERSAL } = require('./lib/audit');
 const collab = require('./lib/collab');
-const { createMcp } = require('./lib/mcp');
+const { createMcp, textPath } = require('./lib/mcp');
 const legal = require('./lib/legal');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
@@ -88,8 +92,9 @@ const app = express();
 app.set('case sensitive routing', true);
 // Express 4 ignores rejected promises of async handlers (Node then kills the process) -> pass them on to the error middleware.
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-// Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl.
-app.set('trust proxy', 'loopback, uniquelocal');
+// Behind Tailscale Funnel/serve: real client IP (rate limits) + https for baseUrl. Only loopback by default;
+// other proxies (e.g. the Tailscale container in docker-compose.pi.yml) via TRUST_PROXY (express syntax). Never a whole LAN: X-Forwarded-For would be spoofable.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
 // Marks every answer as coming from the app itself: the desktop app treats 502-504 only without it
 // (= tunnel/proxy, server unreachable) as offline, not e.g. a LanguageTool failure.
 app.use((req, res, next) => {
@@ -100,9 +105,13 @@ app.use((req, res, next) => {
 app.use(securityHeaders());
 // Container-Healthcheck: vor der Session-Middleware, damit die Probe keine Sitzungen anlegt.
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok'));
+const launchKey = require('./lib/launchKey');
+const LOCAL_KEY = launchKey.generate();
 // Lokal ohne Login: nur Anfragen an localhost annehmen (sonst könnte eine Webseite per DNS-Rebinding mitlesen).
 if (authMw.LOCAL_MODE) {
   app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).end()));
+  // #163: Start-Schlüssel (?k= im vom Server geöffneten Link -> HttpOnly-Cookie), sonst könnte jeder lokale Prozess/OS-Benutzer mit.
+  app.use(launchKey.middleware(LOCAL_KEY));
 }
 // CSP-Verstöße ins Server-Log; vor Session/CSRF, der Browser sendet die Berichte ohne Token.
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
@@ -141,11 +150,12 @@ function streamFile(res, abs) {
 
 let wss = null;
 let yjsWss = null;
+let yjsReviewerWss = null; // same /yjs, but small maxPayload for reviewers
 
 // Rights changed (password changed/reset, account deleted): drop all of the user's sockets;
 // the current, still valid session reconnects by itself.
 function closeUserSockets(userId) {
-  for (const s of [wss, yjsWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
+  for (const s of [wss, yjsWss, yjsReviewerWss]) if (s) s.clients.forEach((c) => c.userId === userId && c.close(1008, 'session changed'));
 }
 const lastAutocompileAt = new Map(); // root -> timestamp, throttles autocompile-on-save
 const AUTOCOMPILE_THROTTLE_MS = 5000;
@@ -174,7 +184,13 @@ function maybeAutocompile(root, userId) {
   if (!main) return;
   const users = userId ? [userId] : [...new Set([...(wss ? wss.clients : [])].filter((c) => c.userId && wsRoot(c) === root).map((c) => c.userId))];
   if (settings.compileMode === 'group') users.splice(1);
-  for (const u of users) runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
+  for (const u of users) {
+    try {
+      runCompile(root, main, u, undefined, { auto: true }).catch(() => {});
+    } catch (e) {
+      // Compile cap per user reached: skip this autocompile run.
+    }
+  }
 }
 
 // Multiple users can have different projects open at the same time, so
@@ -207,7 +223,7 @@ function kickRoot(root, userId) {
     wsSubscribe(c, null);
   });
   // Live text sync of the removed user stops too (otherwise it keeps receiving/sending updates).
-  if (userId && yjsWss) yjsWss.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
+  for (const s of [yjsWss, yjsReviewerWss]) if (userId && s) s.clients.forEach((c) => c.root === root && c.userId === userId && c.close(1008, 'access revoked'));
 }
 
 // onlyUserId: restrict to one user's connections (per-user compile events).
@@ -391,6 +407,7 @@ function userProjectsDir(user) {
 // ALLOWED_HOSTS (comma/space separated host[:port]) or the server itself on loopback; local mode
 // already rejects every other host (DNS-rebinding check above). Otherwise null = no link.
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+if (/^https/i.test(PUBLIC_URL) && String(process.env.COOKIE_SECURE).trim().toLowerCase() === 'false') console.warn('[security] PUBLIC_URL ist https, aber COOKIE_SECURE=false: Cookies ohne Secure-Attribut. COOKIE_SECURE entfernen oder auf true setzen.');
 const ALLOWED_HOSTS = new Set([
   ...String(process.env.ALLOWED_HOSTS || '').split(/[\s,]+/).filter(Boolean),
   ...['localhost', '127.0.0.1', '[::1]'].map((h) => `${h}:${PORT}`),
@@ -411,12 +428,37 @@ function requireBaseUrl(req, res, next) {
 // Only failed attempts use up the budget (many users behind one IP); separate buckets per purpose.
 const failed = (res) => res.statusCode >= 400 && res.statusCode !== 429;
 const limitLogin = authMw.rateLimit('login', 10, 15 * 60 * 1000, undefined, { countIf: failed });
+// Per account (normalized login), independent of the IP: XFF/IP rotation cannot guess one password endlessly.
+const limitLoginAccount = authMw.rateLimit('login-acct', 20, 15 * 60 * 1000, (req) => String((req.body && (req.body.login || req.body.email)) || '').trim().toLowerCase(), { countIf: failed });
 const limitPassword = authMw.rateLimit('password', 10, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitRegister = authMw.rateLimit('register', 10, 60 * 60 * 1000);
 const limitMail = authMw.rateLimit('mail', 5, 15 * 60 * 1000);
-const limitToken = authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitMailTest = authMw.rateLimit('mail-test', 5, 15 * 60 * 1000);
+const limitToken =authMw.rateLimit('token', 30, 15 * 60 * 1000, undefined, { countIf: failed });
+const limitShare = authMw.rateLimit('share', 30, 15 * 60 * 1000, undefined, { countIf: failed });
 const limitImport = authMw.rateLimit('import', 30, 15 * 60 * 1000);
 const limitMcp = authMw.rateLimit('mcp', 300, 60 * 1000);
+const limitCompile = authMw.rateLimit('compile', 20, 60 * 1000, (req) => req.user.id);
+const limitSearch = authMw.rateLimit('search', 30, 60 * 1000, (req) => req.user.id);
+// Dieselbe Begrenzung für das MCP-Werkzeug search (Aufruf ohne echten req/res).
+function compileAllowed(user) {
+  let ok = true;
+  limitCompile({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
+  return ok;
+}
+function searchAllowed(user) {
+  let ok = true;
+  limitSearch({ user }, { set() {}, on() {}, status() { ok = false; return { json() {} }; } }, () => {});
+  return ok;
+}
+// Resource limits (#158): env = default, admin values from auth-data.json apply immediately.
+limits.setOverrides(auth.getSettings().limits);
+// 413 (quota) / 507 (free space) as error with status; the surrounding catch passes e.status on.
+function checkSpace(req, addBytes) {
+  const dir = userProjectsDir(req.user);
+  limits.checkQuota(req.user, dir, addBytes);
+  limits.checkFree(PROJECTS_DIR, addBytes);
+}
 // Local mode has no mail and only one login-free account: these routes have nothing to do there.
 const notLocal = (req, res, next) => (authMw.LOCAL_MODE ? res.status(404).json({ error: 'Im lokalen Modus nicht verfügbar.' }) : next());
 
@@ -446,15 +488,18 @@ function sendVerifyMail(req, user) {
 // Registration stays invite-gated: without a valid admin token nobody gets an account.
 app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
   const { token, username, email, password } = req.body;
-  const invite = auth.getValidInvite(token || '');
-  if (!invite) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
+  if (!auth.getValidInvite(token || '')) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   // Check before the account exists: otherwise it would be created without a deliverable verify mail.
   if (verifyMode() === 'mail' && !(req.linkBase = baseUrl(req))) return res.status(503).json({ error: NO_BASE_URL });
+  // #178: claim synchronously BEFORE the bcrypt await, so parallel requests can't reuse the invite.
+  if (!auth.claimInvite(token)) return res.status(400).json({ error: 'Der Einladungslink ist ungültig, abgelaufen oder bereits verwendet.' });
   let user;
   try {
     user = await auth.createUser({ email, password, username: (username || '').trim(), isAdmin: false, emailVerified: verifyMode() === 'auto' });
     auth.consumeInvite(token, user.id);
+    audit('invite_used', req, { uid: user.id });
   } catch (e) {
+    auth.releaseInvite(token);
     return res.status(400).json({ error: e.message });
   }
   if (verifyMode() === 'auto') return res.json({ ok: true, needsVerification: false, message: 'Konto angelegt. Du kannst dich jetzt anmelden.' });
@@ -472,7 +517,11 @@ app.post('/api/auth/register', limitRegister, ah(async (req, res) => {
 
 app.post('/api/auth/verify', notLocal, limitToken, (req, res) => {
   const user = auth.consumeVerifyToken(req.body.token || '');
-  if (!user) return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
+  if (!user) {
+    audit('verify_invalid', req);
+    return res.status(400).json({ error: 'Der Bestätigungslink ist ungültig oder abgelaufen. Beim Anmelden kannst du einen neuen anfordern.' });
+  }
+  audit('verify_ok', req, { uid: user.id });
   res.json({ ok: true, message: 'E-Mail-Adresse bestätigt. Du kannst dich jetzt anmelden.' });
 });
 
@@ -483,19 +532,28 @@ app.post('/api/auth/resend-verification', notLocal, limitMail, requireBaseUrl, a
   res.json({ ok: true, message: 'Falls ein unbestätigtes Konto existiert, wurde eine neue Bestätigungsmail verschickt.' });
 }));
 
-app.post('/api/auth/login', limitLogin, ah(async (req, res) => {
+app.post('/api/auth/login', limitLogin, limitLoginAccount, ah(async (req, res) => {
   const { password, rememberMe } = req.body;
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
-  const ok = user && (await auth.verifyPassword(user, password));
-  if (!ok) return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
+  // TOCTOU (#153): stamp before the slow bcrypt compare; a password change meanwhile voids the result.
+  const startedAt = Date.now();
+  const hashAtStart = user && user.passwordHash;
+  const pwOk = await auth.verifyPassword(user, password); // also runs bcrypt for unknown users (#179)
+  const ok = user && pwOk && user.passwordHash === hashAtStart;
+  if (!ok) {
+    audit('login_fail', req, { login: clip(req.body.login || req.body.email, 64), known: !!user });
+    return res.status(401).json({ error: 'Benutzername/E-Mail oder Passwort falsch.' });
+  }
   if (!auth.isVerified(user)) {
+    audit('login_unverified', req, { uid: user.id });
     return res.status(403).json({ error: verifyMode() === 'mail' ? 'Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungsmail).' : 'Dein Konto wartet noch auf die Bestätigung durch einen Admin.', unverified: true });
   }
   req.session.regenerate((err) => {
     if (err) return res.status(500).json({ error: 'Anmeldung fehlgeschlagen.' });
     req.session.userId = user.id;
-    req.session.loginAt = Date.now();
+    req.session.loginAt = startedAt;
     authMw.applyRememberMe(req, !!rememberMe);
+    audit('login_ok', req, { uid: user.id, rememberMe: !!rememberMe });
     res.json({ user: auth.toPublicUser(user) });
   });
 }));
@@ -518,7 +576,9 @@ app.post('/api/auth/forgot-password', notLocal, limitMail, requireBaseUrl, ah(as
   const user = auth.findUserByLogin(req.body.login || req.body.email || '');
   // Always answer the same way, whether or not the account exists -
   // otherwise the endpoint would leak which e-mails/usernames are registered.
-  if (user) {
+  // Admin mode: unapproved accounts get no reset mail (the reset must not bypass approval).
+  if (user && (auth.isVerified(user) || verifyMode() !== 'admin')) {
+    audit('password_reset_requested', req, { uid: user.id });
     const token = auth.createResetToken(user.id);
     const link = `${req.linkBase}/?reset=${token}`;
     // Not awaited (see resend-verification); sendMailSafe never rejects.
@@ -536,13 +596,17 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
   // Check first: a typo must not burn the single-use link.
   try { auth.validatePassword(password); } catch (e) { return res.status(400).json({ error: e.message }); }
   const user = auth.consumeResetToken(token || '');
-  if (!user) return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
+  if (!user) {
+    audit('password_reset_invalid', req);
+    return res.status(400).json({ error: 'Der Link ist ungültig oder abgelaufen. Bitte erneut "Passwort vergessen" anfordern.' });
+  }
   try {
-    // Clicking the mailed link proves the mailbox, so this also verifies the address.
-    user.emailVerified = true;
+    // Clicking the mailed link proves the mailbox (mail/auto); in admin mode only an admin may approve.
+    if (verifyMode() !== 'admin') user.emailVerified = true;
     await auth.setPassword(user, password); // logs out all other sessions
     closeUserSockets(user.id);
     initialPasswordDone();
+    audit('password_reset_done', req, { uid: user.id });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -553,13 +617,14 @@ app.post('/api/auth/reset-password', notLocal, limitToken, ah(async (req, res) =
 
 app.post('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   const token = auth.createInvite(req.user.id);
+  audit('admin_invite_created', req);
   const base = baseUrl(req);
   res.json({ token, url: base && `${base}/?invite=${token}` });
 });
 
 app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   const invites = auth.listInvites().map((i) => ({
-    token: i.token,
+    id: i.tokenHash,
     createdAt: i.createdAt,
     expiresAt: i.expiresAt,
     usedAt: i.usedAt || null,
@@ -570,7 +635,8 @@ app.get('/api/admin/invites', authMw.requireAuth, authMw.requireAdmin, (req, res
 });
 
 app.delete('/api/admin/invites/:token', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
-  auth.revokeInvite(req.params.token);
+  auth.revokeInvite(req.params.token) /* id = tokenHash */;
+  audit('admin_invite_revoked', req);
   res.json({ ok: true });
 });
 
@@ -582,6 +648,7 @@ app.get('/api/admin/users', authMw.requireAuth, authMw.requireAdmin, (req, res) 
 
 app.post('/api/admin/users/:id/verify', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   if (!auth.markVerified(req.params.id)) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+  audit('admin_user_verified', req, { uid: req.params.id });
   res.json({ ok: true });
 });
 
@@ -604,13 +671,20 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   const prev = auth.getSettings().smtp;
   if (smtp !== undefined) {
     const host = String((smtp && smtp.host) || '').trim();
-    // Empty host = back to .env. Password: undefined keeps the stored one, '' removes it.
+    const port = Number(smtp && smtp.port) || 587;
+    const user = String((smtp && smtp.user) || '').trim();
+    // Stored password only for the same host/port/user, else it would be sent to the new target (#169).
+    const sameTarget = !!prev && prev.host === host && Number(prev.port) === port && (prev.user || '') === user;
+    if (host && smtp.pass === undefined && prev && prev.pass && !sameTarget) {
+      return res.status(400).json({ error: 'Host, Port oder Benutzer geändert: Das SMTP-Passwort muss neu eingegeben werden.' });
+    }
+    // Empty host = back to .env. Password: undefined keeps the stored one (same target), '' removes it.
     const next = host ? {
       host,
-      port: Number(smtp.port) || 587,
+      port,
       secure: !!smtp.secure,
-      user: String(smtp.user || '').trim(),
-      pass: smtp.pass === undefined ? (prev && prev.pass) || '' : String(smtp.pass),
+      user,
+      pass: smtp.pass === undefined ? (sameTarget && prev.pass) || '' : String(smtp.pass),
       from: String(smtp.from || '').trim(),
     } : null;
     mailer.setSmtp(next);
@@ -618,15 +692,30 @@ app.put('/api/admin/mail', authMw.requireAuth, authMw.requireAdmin, (req, res) =
   }
   if (mode === 'mail' && !mailer.isConfigured()) return res.status(400).json({ error: 'Bestätigung per Mail braucht einen funktionierenden SMTP-Zugang.' });
   if (mode !== undefined) auth.setSettings({ verifyMode: mode });
+  audit('admin_mail_changed', req, { smtpHost: smtp && clip(smtp.host, 64), smtpUser: smtp && clip(smtp.user, 64), verifyMode: mode });
   res.json(mailState());
 });
 
-app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
+// --- Admin: resource limits (#158) ---
+app.get('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res) => res.json({ limits: limits.all() }));
+
+app.put('/api/admin/limits', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  let patch;
+  try { patch = limits.validate(req.body && req.body.limits); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  const next = { ...auth.getSettings().limits, ...patch };
+  auth.setSettings({ limits: next });
+  limits.setOverrides(next);
+  audit('admin_limits_changed', req, { keys: Object.keys(patch).join(',') });
+  res.json({ limits: limits.all() });
+});
+
+app.post('/api/admin/mail/test', authMw.requireAuth, authMw.requireAdmin, limitMailTest, ah(async (req, res) => {
   if (!mailer.isConfigured()) return res.status(400).json({ error: 'Kein SMTP-Zugang konfiguriert.' });
   try {
     await mailer.sendMail({ to: req.user.email, subject: 'LaTeX-IDE - Testmail', text: 'Diese Testmail bestätigt, dass der Mailversand funktioniert.' });
   } catch (e) {
-    return res.status(502).json({ error: `Versand fehlgeschlagen: ${e.message}` });
+    console.error('[mailer] Testmail fehlgeschlagen:', e.message);
+    return res.status(502).json({ error: 'Versand fehlgeschlagen (Details im Server-Log).' });
   }
   res.json({ ok: true, to: req.user.email });
 }));
@@ -637,6 +726,7 @@ app.delete('/api/admin/users/:id', authMw.requireAuth, authMw.requireAdmin, (req
   if (!user) return res.status(404).json({ error: 'Konto nicht gefunden.' });
   if (user.isAdmin) return res.status(400).json({ error: 'Admin-Konten können nicht gelöscht werden.' });
   removeAccount(user.id);
+  audit('admin_user_deleted', req, { uid: user.id });
   res.json({ ok: true });
 });
 
@@ -677,7 +767,7 @@ function updateStatus() {
 }
 
 app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (req, res) => {
-  const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus() };
+  const base = { current: APP_VERSION, mode: UPDATE_MODE, installKind: INSTALL_KIND, requested: fs.existsSync(UPDATE_REQUEST), status: updateStatus(), securityWarning: auditWarning() };
   // AGPL §13: /source shows a commit, but the checkout has local changes and SOURCE_URL is unset (lib/legal.js).
   // Local mode has no other users to offer the source to.
   if (legal.SOURCE_WARNING && !authMw.LOCAL_MODE) base.sourceWarning = legal.SOURCE_WARNING;
@@ -695,7 +785,15 @@ app.get('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, ah(async (
 app.post('/api/admin/update', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
   if (UPDATE_MODE !== 'button') return res.status(400).json({ error: 'Update per Button ist auf diesem Server nicht aktiviert (UPDATE_MODE).' });
   fs.writeFileSync(UPDATE_REQUEST, new Date().toISOString());
+  audit('admin_update_requested', req);
   res.json({ ok: true });
+});
+
+// Security audit log (#176): last entries, optional ?event= filter, admins only.
+app.get('/api/admin/audit', authMw.requireAuth, authMw.requireAdmin, (req, res) => {
+  const limit = Math.max(1, Math.min(1000, parseInt(req.query.limit, 10) || 200));
+  const event = typeof req.query.event === 'string' && req.query.event ? req.query.event : undefined;
+  res.json({ entries: auditRecent({ limit, event }), warning: auditWarning() });
 });
 
 // --- MCP endpoint for external AI tools (own Bearer tokens, see lib/mcp.js) ---
@@ -709,17 +807,34 @@ function mcpProjects(user) {
 const mcpTokenFirst = (req, res, next) => {
   const h = req.headers.authorization || '';
   if (auth.findMcpToken(h.startsWith('Bearer ') ? h.slice(7).trim() : '')) return next();
+  audit('mcp_auth_fail', req);
   res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Ungültiger oder widerrufener Token.' });
 };
-const mcp = createMcp({ PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
+const mcp = createMcp({ searchAllowed, PROJECTS_DIR, version: APP_VERSION, state, mcpProjects, projectIdOf, canAccessRoot, roleOf, runCompile, compileAllowed, broadcast, pathMoved, mustChangePassword: authMw.mustChangePassword });
 app.post('/mcp', limitMcp, mcpTokenFirst, bigJson, ah(mcp));
 app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'Nur POST.' }));
 
 // --- Everything below requires a logged-in user ---
 app.use('/api', authMw.requireAuth);
+// #176: `..` segments (or an absolute `file`) in query/body fields: log only, the routes still refuse them themselves.
+app.use('/api', (req, res, next) => {
+  for (const src of [req.query, req.body]) {
+    for (const [k, v] of Object.entries(src || {})) {
+      if (typeof v === 'string' && (TRAVERSAL.test(v) || (k === 'file' && path.isAbsolute(v)))) audit('path_traversal_attempt', req, { param: clip(k, 32), value: clip(v) });
+    }
+  }
+  next();
+});
+
+// Too little free space on the data volume: reject writes and compiles (#158/#161); deletes stay possible.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'DELETE' || req.method === 'HEAD') return next();
+  try { limits.checkFree(PROJECTS_DIR); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+  next();
+});
 
 // Reviewers may read, compile and comment, but not change the project.
-const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label)(\/|$)/i;
+const REVIEWER_BLOCKED = /^\/api\/(collab\/raw|file|tree|main-file|settings|replace|import|history\/label|compile\/clear-cache)(\/|$)/i;
 app.use((req, res, next) => {
   if (req.method === 'GET' || !REVIEWER_BLOCKED.test(req.path)) return next();
   const { root } = windowRoot(req); // errors are answered by the route itself
@@ -803,11 +918,14 @@ app.get('/api/desktop/download/:os', ah(async (req, res) => {
 
 app.post('/api/auth/change-password', limitPassword, ah(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  if (!(await auth.verifyPassword(req.user, currentPassword))) {
+  const hashAtStart = req.user.passwordHash;
+  if (!(await auth.verifyPassword(req.user, currentPassword)) || req.user.passwordHash !== hashAtStart) {
+    audit('password_change_fail', req);
     return res.status(400).json({ error: 'Aktuelles Passwort ist falsch.' });
   }
   try {
     await auth.setPassword(req.user, newPassword);
+    audit('password_changed', req);
     closeUserSockets(req.user.id);
     initialPasswordDone();
     // Every other session is now invalid; keep this one.
@@ -877,6 +995,7 @@ app.post('/api/auth/delete-account', limitLogin, ah(async (req, res) => {
   if (!(await auth.verifyPassword(req.user, req.body.password))) {
     return res.status(400).json({ error: 'Passwort ist falsch.' });
   }
+  audit('account_deleted', req);
   removeAccount(req.user.id); // throws (-> error middleware) before deleting anything if files are in use
   req.session.destroy(() => {
     res.clearCookie('latex_ide_sid');
@@ -890,6 +1009,7 @@ app.post('/api/auth/desktop-token', (req, res) => {
   if (!req.session || req.session.userId !== req.user.id) {
     return res.status(403).json({ error: 'Nur aus einer Browser-Anmeldung heraus möglich.' });
   }
+  audit('desktop_token_created', req);
   res.json({ token: auth.createApiToken(req.user.id, req.body.label) });
 });
 
@@ -909,10 +1029,17 @@ function mcpScope(req, existing) {
   if (sel) for (const id of Object.keys(sel)) if (!ids.has(id)) throw Object.assign(new Error('Kein Zugriff auf Projekt ' + id), { status: 403 });
   return { perms: req.body.perms, projects: sel };
 }
+// Neuer Token: Standard = ausgewählte Projekte; "alle Projekte" (projects null) nur mit ausdrücklichem allProjects: true.
+function newMcpScope(req) {
+  if (!req.body.projects && req.body.allProjects !== true) throw Object.assign(new Error('Projekte auswählen oder „Alle Projekte“ ausdrücklich bestätigen.'), { status: 400 });
+  return mcpScope(req);
+}
 
 app.post('/api/auth/mcp-token', (req, res) => {
   try {
-    res.json({ token: auth.createMcpToken(req.user.id, { name: req.body.name, ...mcpScope(req) }) });
+    const token = auth.createMcpToken(req.user.id, { name: req.body.name, ...newMcpScope(req) });
+    audit('mcp_token_created', req, { name: clip(req.body.name, 64) });
+    res.json({ token });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
@@ -922,6 +1049,7 @@ app.patch('/api/auth/mcp-tokens/:id', (req, res) => {
   try {
     const existing = auth.listMcpTokens(req.user.id).find((t) => t.id === req.params.id);
     if (!existing || !auth.updateMcpToken(req.user.id, req.params.id, { name: req.body.name, ...mcpScope(req, existing) })) return res.status(404).json({ error: 'Token nicht gefunden.' });
+    audit('mcp_token_updated', req, { id: clip(req.params.id, 64) });
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
@@ -934,23 +1062,29 @@ app.get('/api/auth/mcp-tokens', (req, res) => {
 
 app.delete('/api/auth/mcp-tokens/:id', (req, res) => {
   auth.revokeMcpToken(req.user.id, req.params.id);
+  audit('mcp_token_deleted', req, { id: clip(req.params.id, 64) });
   res.json({ ok: true });
 });
 
 app.delete('/api/auth/desktop-tokens/:id', (req, res) => {
   auth.revokeApiToken(req.user.id, req.params.id);
+  audit('desktop_token_deleted', req, { id: clip(req.params.id, 64) });
   res.json({ ok: true });
 });
 
 // --- Sharing (of the active project) ---
 
-function shareInfo(root, user) {
-  const toMember = (id) => {
-    const u = auth.findUserById(id);
-    return u ? { id: u.id, username: auth.toPublicUser(u).username, email: u.email } : null;
-  };
+// E-Mail only for managers and the requester's own entry (#170); hideId = never (just-added target).
+function shareInfo(root, user, hideId) {
   const key = path.resolve(root);
   const canManage = canManageRoot(user, root);
+  const toMember = (id) => {
+    const u = auth.findUserById(id);
+    if (!u) return null;
+    const m = { id: u.id, username: auth.toPublicUser(u).username };
+    if ((canManage && id !== hideId) || id === user.id) m.email = u.email;
+    return m;
+  };
   return {
     canManage,
     myRole: roleOf(user, root),
@@ -959,7 +1093,7 @@ function shareInfo(root, user) {
       .getShares(key)
       .map((id) => toMember(id) && { ...toMember(id), role: state.getRole(key, id) })
       .filter(Boolean),
-    links: canManage ? state.getShareLinks(key) : {},
+    links: canManage ? state.getShareLinksPublic(key) : {},
   };
 }
 
@@ -981,7 +1115,7 @@ app.get('/api/share', (req, res) => {
   res.json(shareInfo(root, req.user));
 });
 
-app.post('/api/share', (req, res) => {
+app.post('/api/share', limitShare, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   if (!canManageRoot(req.user, root)) return res.status(403).json({ error: 'Nur der Eigentümer kann das Projekt teilen.' });
@@ -994,7 +1128,8 @@ app.post('/api/share', (req, res) => {
   const ids = state.getShares(key);
   if (!ids.includes(target.id)) state.setShares(key, [...ids, target.id]);
   state.setRole(key, target.id, role);
-  res.json(shareInfo(root, req.user));
+  audit('share_added', req, { pid: projectIdOf(root), target: target.id, role });
+  res.json(shareInfo(root, req.user, target.id));
 });
 
 app.post('/api/share/role', (req, res) => {
@@ -1005,6 +1140,7 @@ app.post('/api/share/role', (req, res) => {
     return res.status(400).json({ error: 'Ungültige Rolle oder kein Mitglied.' });
   }
   state.setRole(key, req.body.userId, req.body.role);
+  audit('share_role', req, { pid: projectIdOf(root), target: req.body.userId, role: req.body.role });
   res.json(shareInfo(root, req.user));
 });
 
@@ -1015,20 +1151,29 @@ app.post('/api/share/link', (req, res) => {
   if (!root) return;
   if (!SHARE_ROLES.includes(req.body.role)) return res.status(400).json({ error: 'Ungültige Rolle.' });
   const maxUses = Math.max(0, Math.min(1000, parseInt(req.body.maxUses, 10) || 0));
-  state.setShareLink(path.resolve(root), req.body.role, { token: crypto.randomBytes(24).toString('base64url'), maxUses, uses: 0 });
-  res.json(shareInfo(root, req.user));
+  // Optional expiry (days, default none); the plaintext token is returned only here (#182).
+  const days = Number(req.body.expiresInDays);
+  const expiresAt = days > 0 ? new Date(Date.now() + Math.min(days, 3650) * 86400000).toISOString() : null;
+  const token = crypto.randomBytes(24).toString('base64url');
+  state.setShareLink(path.resolve(root), req.body.role, { tokenHash: state.hashShareToken(token), maxUses, uses: 0, expiresAt });
+  audit('share_link_created', req, { pid: projectIdOf(root), role: req.body.role, maxUses, expiresAt });
+  res.json({ ...shareInfo(root, req.user), newLink: { role: req.body.role, token } });
 });
 
 app.delete('/api/share/link/:role', (req, res) => {
   const root = requireManagedRoot(req, res);
   if (!root) return;
   state.setShareLink(path.resolve(root), req.params.role, null);
+  audit('share_link_revoked', req, { pid: projectIdOf(root), role: req.params.role });
   res.json(shareInfo(root, req.user));
 });
 
 app.post('/api/share/join', limitToken, (req, res) => {
   const link = typeof req.body.token === 'string' && state.findShareLink(req.body.token);
-  if (!link || !fs.existsSync(link.root) || isParked(link.root)) return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  if (!link || !fs.existsSync(link.root) || isParked(link.root)) {
+    audit('share_join_invalid', req);
+    return res.status(404).json({ error: 'Link ungültig oder zurückgezogen.' });
+  }
   if (!auth.isVerified(req.user)) return res.status(403).json({ error: 'Bitte zuerst die E-Mail-Adresse bestätigen.' });
   if (!canManageRoot(req.user, link.root)) {
     const ids = state.getShares(link.root);
@@ -1037,6 +1182,7 @@ app.post('/api/share/join', limitToken, (req, res) => {
       state.setShares(link.root, [...ids, req.user.id]);
       state.setRole(link.root, req.user.id, link.role);
       state.useShareLink(link.root, link.role);
+      audit('share_joined', req, { pid: projectIdOf(link.root), role: link.role });
     }
   }
   res.json({ root: link.root });
@@ -1052,6 +1198,7 @@ app.delete('/api/share/:userId', (req, res) => {
   const key = path.resolve(root);
   state.setShares(key, state.getShares(key).filter((id) => id !== req.params.userId));
   state.setRole(key, req.params.userId, 'editor');
+  audit('share_removed', req, { pid: projectIdOf(root), target: req.params.userId });
   kickRoot(key, req.params.userId);
   if (req.params.userId === req.user.id) return res.json({ ok: true });
   res.json(shareInfo(root, req.user));
@@ -1141,10 +1288,10 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
   if (!root) return;
   try {
     const rel = String(req.query.path || '');
-    if (isIgnored(rel.split('/')[0])) throw new Error('Pfad nicht erlaubt.');
-    const abs = safeResolve(root, rel);
+    const abs = assertUserPath(root, rel);
     if (!checkSyncBase(req, root, abs)) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    checkSpace(req, buf.length);
     if (isTextFile(rel)) state.markSelfWrite(abs, buf);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, buf);
@@ -1152,7 +1299,7 @@ app.put('/api/collab/raw', express.raw({ type: () => true, limit: '200mb' }), (r
     safeSnapshot(root, { trigger: 'autosave' });
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1160,7 +1307,7 @@ app.delete('/api/collab/raw', (req, res) => {
   const root = requireSyncRoot(req, res);
   if (!root) return;
   try {
-    if (isIgnored(String(req.query.path || '').split('/')[0])) throw new Error('Pfad nicht erlaubt.');
+    assertUserPath(root, String(req.query.path || ''));
     collab.flushRoot(root);
     if (!checkSyncBase(req, root, safeResolve(root, String(req.query.path || '')))) return res.status(409).json({ error: 'Die Datei wurde inzwischen geändert.', conflict: true });
     treeOps.trashPath(root, req.query.path);
@@ -1357,7 +1504,7 @@ app.post('/api/languagetool', bigJson, ah(async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ data, language }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(60000),
     });
     if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
     res.json({ matches: (await r.json()).matches || [] });
@@ -1423,11 +1570,12 @@ app.post('/api/projects/open', (req, res) => {
 app.post('/api/projects/create', (req, res) => {
   try {
     const projectsDir = userProjectsDir(req.user);
+    checkSpace(req, 1024); // main.tex template
     const root = projects.createProject(projectsDir, req.body.name || '');
     projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1454,12 +1602,13 @@ app.post('/api/projects/copy', (req, res) => {
   try {
     const projectsDir = userProjectsDir(req.user);
     collab.flushRoot(path.resolve(path.join(projectsDir, req.body.name || ''))); // live edits into the copy
+    checkSpace(req, limits.dirSize(path.join(projectsDir, String(req.body.name || '')))); // upper bound (copy skips history)
     const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
     projectFresh(req, projectsDir, root);
     state.copyRoot(path.join(projectsDir, req.body.name), root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1493,15 +1642,16 @@ app.post('/api/projects/unarchive', (req, res) => {
 });
 
 // Neues Projekt aus .zip (Body = rohe Zip-Bytes, ?name=<Dateiname>). Limits/Zip-Slip: lib/unzip.js.
-app.post('/api/projects/upload-zip', express.raw({ type: () => true, limit: '200mb' }), (req, res) => {
+const zipBody = (req, res, next) => express.raw({ type: () => true, limit: limits.get('zipLimitMb') * limits.MB })(req, res, next);
+app.post('/api/projects/upload-zip', zipBody, (req, res) => {
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Keine Zip-Datei empfangen.' });
   try {
     const projectsDir = userProjectsDir(req.user);
-    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body);
+    const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body, (total) => checkSpace(req, total));
     projectFresh(req, projectsDir, root);
     res.json({ root });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1787,6 +1937,7 @@ app.post('/api/tree/upload', bigJson, (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   try {
+    checkSpace(req, Math.floor(String(req.body.content || '').length * 0.75));
     const relPath = treeOps.uploadFile(root, req.body.dir, req.body.name, req.body.content, !!req.body.overwrite);
     // Überschriebene Textdatei: offene Editoren live auf den neuen Inhalt setzen
     if (req.body.overwrite && isTextFile(relPath)) {
@@ -1794,7 +1945,7 @@ app.post('/api/tree/upload', bigJson, (req, res) => {
     }
     res.json({ ok: true, path: relPath });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1831,6 +1982,16 @@ app.post('/api/main-file', (req, res) => {
 // ponytail: one global queue - per-core workers if the server gets stronger.
 let compileChain = Promise.resolve();
 const queuedCompile = new Map(); // output dir -> promise of a not-yet-started run
+const MAX_PENDING_COMPILES = Math.max(1, parseInt(process.env.MAX_PENDING_COMPILES, 10) || 2);
+const pendingByUser = new Map(); // userId -> queued + running runs (DoS cap, #159)
+
+// Identity of a project folder: inode, or the state epoch where inodes are 0 (Windows). null = gone.
+function rootIdentity(root) {
+  try {
+    const ino = fs.statSync(root).ino;
+    return ino ? `i${ino}` : `e${state.getEpoch(root)}`;
+  } catch { return null; }
+}
 
 // opts.auto: autocompile run - its version snapshot is throttled like autosave.
 function runCompile(root, main, userId, meta, { auto = false } = {}) {
@@ -1839,17 +2000,30 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
   // Group mode: everyone on the project sees the run; individual: only the compiling user.
   const to = outRel === OUT_DIR ? undefined : userId;
   if (queuedCompile.has(key)) return queuedCompile.get(key);
+  const pending = pendingByUser.get(userId) || 0;
+  if (pending >= MAX_PENDING_COMPILES) throw Object.assign(new Error(`Zu viele Kompilierungen gleichzeitig (max. ${MAX_PENDING_COMPILES}). Bitte warten, bis ein Lauf fertig ist.`), { status: 429 });
+  pendingByUser.set(userId, pending + 1);
+  const identAtEnqueue = rootIdentity(root);
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain
     .then(() => {
       queuedCompile.delete(key);
+      // Rights and project identity are re-checked when the job starts, not only when it was queued (#188).
+      const u = auth.findUserById(userId);
+      if (!u || isParked(root) || !canAccessRoot(u, root) || rootIdentity(root) !== identAtEnqueue) {
+        throw Object.assign(new Error('Kein Zugriff mehr auf dieses Projekt.'), { status: 403 });
+      }
       return doCompile(root, main, outRel, to, meta, auto);
     })
     .catch((e) => {
       // Otherwise every client's status would stay on 'running'.
       console.error('[compile]', root, e);
-      broadcast(root, { type: 'compileStatus', status: 'error', log: String((e && e.message) || e) }, to);
+      broadcast(root, { type: 'compileStatus', status: 'error', log: e && e.status ? e.message : 'Kompilierung fehlgeschlagen.' }, to);
       throw e;
+    })
+    .finally(() => {
+      const n = (pendingByUser.get(userId) || 1) - 1;
+      if (n > 0) pendingByUser.set(userId, n); else pendingByUser.delete(userId);
     });
   queuedCompile.set(key, run);
   compileChain = run.catch(() => {});
@@ -1891,7 +2065,7 @@ async function doCompile(root, main, outRel, to, meta, auto) {
   return result;
 }
 
-app.post('/api/compile', ah(async (req, res) => {
+app.post('/api/compile', limitCompile, ah(async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const main = mainFileOf(root);
@@ -1899,7 +2073,7 @@ app.post('/api/compile', ah(async (req, res) => {
   try {
     res.json(await runCompile(root, main, req.user.id));
   } catch (e) {
-    res.status(500).json({ error: 'Kompilierung fehlgeschlagen: ' + e.message });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Kompilierung fehlgeschlagen.' });
   }
 }));
 
@@ -1928,12 +2102,17 @@ app.get('/api/settings', (req, res) => {
   res.json({ settings: state.getProjectSettings(root) });
 });
 
+const COMPILERS = ['pdflatex', 'xelatex', 'lualatex'];
+
 app.post('/api/settings', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { compiler, stopOnFirstError, autocompile, compileMode } = req.body;
   const patch = {};
-  if (compiler !== undefined) patch.compiler = compiler;
+  if (compiler !== undefined) {
+    if (!COMPILERS.includes(compiler)) return res.status(400).json({ error: 'Unbekannter Compiler.' });
+    patch.compiler = compiler;
+  }
   if (compileMode !== undefined) patch.compileMode = compileMode === 'group' ? 'group' : 'individual';
   if (stopOnFirstError !== undefined) patch.stopOnFirstError = !!stopOnFirstError;
   if (autocompile !== undefined) patch.autocompile = !!autocompile;
@@ -2018,6 +2197,7 @@ app.get('/api/synctex/forward', ah(async (req, res) => {
   if (!root) return;
   const { file, line } = req.query;
   if (!file || !line) return res.status(400).json({ error: 'file und line sind erforderlich.' });
+  try { synctex.checkForward(line); } catch { return res.status(400).json({ error: 'Ungültige Parameter.' }); }
   const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
@@ -2027,7 +2207,8 @@ app.get('/api/synctex/forward', ah(async (req, res) => {
     const result = await synctex.forward(pdfAbs, texAbs, line, root);
     res.json(result);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    if (!e.badInput) console.error('synctex:', e.message);
+    res.status(400).json({ error: e.badInput ? e.message : 'SyncTeX-Abfrage fehlgeschlagen.' });
   }
 }));
 
@@ -2038,6 +2219,7 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
   if (!page || x === undefined || y === undefined) {
     return res.status(400).json({ error: 'page, x und y sind erforderlich.' });
   }
+  try { synctex.checkInverse(page, x, y); } catch { return res.status(400).json({ error: 'Ungültige Parameter.' }); }
   const pdfAbs = activeMainPdfAbs(root, req.user.id);
   if (!pdfAbs || !fs.existsSync(pdfAbs)) {
     return res.status(400).json({ error: 'Noch kein PDF vorhanden - zuerst kompilieren.' });
@@ -2045,7 +2227,8 @@ app.get('/api/synctex/inverse', ah(async (req, res) => {
   try {
     res.json(await synctex.inverseInProject(root, pdfAbs, page, x, y));
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    if (!e.badInput) console.error('synctex:', e.message);
+    res.status(400).json({ error: e.badInput ? e.message : 'SyncTeX-Abfrage fehlgeschlagen.' });
   }
 }));
 
@@ -2074,6 +2257,10 @@ function mayChange(user, root, item) {
 function commentText(req, res) {
   const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
   if (!text) res.status(400).json({ error: 'text ist erforderlich.' });
+  else if (text.length > limits.get('commentMaxChars')) {
+    res.status(413).json({ error: `Kommentar zu lang (max. ${limits.get('commentMaxChars')} Zeichen).` });
+    return '';
+  }
   return text;
 }
 
@@ -2092,10 +2279,21 @@ app.post('/api/comments', (req, res) => {
   if (!relPath || typeof from !== 'number' || typeof to !== 'number') {
     return res.status(400).json({ error: 'path, from, to und text sind erforderlich.' });
   }
+  let canon;
+  try {
+    if (typeof relPath !== 'string') throw new Error();
+    canon = textPath(root, relPath);
+    if (!fs.statSync(path.join(root, canon)).isFile()) throw new Error();
+  } catch {
+    return res.status(400).json({ error: 'path muss eine Textdatei im Projekt sein.' });
+  }
+  if ([comments.ORPHANED, '__proto__', 'constructor', 'prototype'].includes(canon) || (anchorText !== undefined && (typeof anchorText !== 'string' || anchorText.length > 20000))) {
+    return res.status(400).json({ error: 'Ungültiger path oder anchorText.' });
+  }
   const text = commentText(req, res);
   if (!text) return;
-  const comment = comments.add(root, relPath, { from, to, anchorText, text, author: authorOf(req.user) });
-  broadcast(root, { type: 'commentsChanged', path: relPath });
+  const comment = comments.add(root, canon, { from, to, anchorText, text, author: authorOf(req.user) });
+  broadcast(root, { type: 'commentsChanged', path: canon });
   res.json({ comment });
 });
 
@@ -2160,6 +2358,7 @@ app.post('/api/history/label', (req, res) => {
   if (!root) return;
   const { id, name } = req.body;
   if (!id || !name || !name.trim()) return res.status(400).json({ error: 'id und name sind erforderlich.' });
+  if (typeof name !== 'string' || name.trim().length > limits.get('labelMaxChars')) return res.status(413).json({ error: `Bezeichnung zu lang (max. ${limits.get('labelMaxChars')} Zeichen).` });
   try {
     const entry = history.addLabel(root, id, name.trim());
     res.json({ entry });
@@ -2211,12 +2410,12 @@ app.get('/api/refs', (req, res) => {
   res.json(collectRefs(root));
 });
 
-app.get('/api/search', (req, res) => {
+app.get('/api/search', limitSearch, async (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { q, regex, caseSensitive, wholeWord } = req.query;
   try {
-    const results = searchProject(root, q, {
+    const results = await searchProject(root, String(q || ''), {
       regex: regex === 'true',
       caseSensitive: caseSensitive === 'true',
       wholeWord: wholeWord === 'true',
@@ -2252,14 +2451,20 @@ app.post('/api/file/convert-utf8', (req, res) => {
 
 // Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
 app.use((err, req, res, next) => {
-  if (!err.status || err.status >= 500) console.error('[route]', req.method, req.path, err.cause || err);
+  const ref = crypto.randomBytes(4).toString('hex');
+  if (!err.status || err.status >= 500) {
+    console.error('[route]', ref, req.method, req.path, err.cause || err);
+    audit('server_error', req, { status: err.status || 500, error: clip(err.message, 100) });
+  }
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: err.status ? err.message : 'Interner Fehler: ' + (err.message || err) });
+  // Node errors carry absolute paths: never hand them to the client.
+  res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : `Interner Fehler (Referenz ${ref}).` });
 });
 
 const server = http.createServer(app);
 wss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
 yjsWss = new WebSocketServer({ noServer: true, maxPayload: collab.WS_MAX_PAYLOAD });
+yjsReviewerWss = new WebSocketServer({ noServer: true, maxPayload: collab.REVIEWER_MAX_PAYLOAD });
 
 collab.setHooks({
   markSelfWrite: (root, rel, text) => state.markSelfWrite(safeResolve(root, rel), text),
@@ -2292,7 +2497,7 @@ async function handleUpgrade(req, socket, head) {
     return rejectUpgrade(socket, 400, 'Bad Request');
   }
   // Cross-site WebSocket hijacking guard (cookies ride along on upgrades).
-  if (authMw.LOCAL_MODE && !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) return rejectUpgrade(socket, 403, 'Forbidden');
+  if (authMw.LOCAL_MODE && (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') || !launchKey.hasCookie(req, LOCAL_KEY))) return rejectUpgrade(socket, 403, 'Forbidden');
   const origin = req.headers.origin;
   if (origin) {
     let host = null;
@@ -2328,10 +2533,15 @@ async function handleUpgrade(req, socket, head) {
     const u = auth.findUserById(userId);
     return u && canAccessRoot(u, root) ? roleOf(u, root) === 'reviewer' : null;
   };
-  yjsWss.handleUpgrade(req, socket, head, (ws) => {
+  // A reviewer may only set/remove anchors of their own comments (deleting: comment already gone is fine).
+  const ownsAnchor = (id, isDelete) => {
+    const a = comments.authorIdOf(root, rel, id);
+    return a === userId || (isDelete && a === undefined);
+  };
+  (readOnly() ? yjsReviewerWss : yjsWss).handleUpgrade(req, socket, head, (ws) => {
     ws.userId = userId;
     ws.root = path.resolve(root);
-    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly);
+    collab.handleConnection(ws, root, rel, url.searchParams.get('epoch'), readOnly, ownsAnchor);
   });
 }
 
@@ -2523,7 +2733,7 @@ bootstrapAdmin()
       // Zweiter Start, während schon einer läuft: nur den Browser öffnen.
       server.on('error', (e) => {
         if (e.code !== 'EADDRINUSE') throw e;
-        openBrowser(`http://localhost:${PORT}`);
+        launchKey.openRunning(path.dirname(PROJECTS_DIR), PORT);
         process.exit(0);
       });
       let idleSince = Date.now();
@@ -2536,7 +2746,10 @@ bootstrapAdmin()
       console.log(`LaTeX-IDE laeuft auf http://localhost:${PORT}`);
       if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
       if (!authMw.LOCAL_MODE && !PUBLIC_URL) console.warn(`[auth] Warnung: PUBLIC_URL fehlt - Reset-/Bestätigungs-/Einladungslinks nur für ${[...ALLOWED_HOSTS].join(', ')} (ALLOWED_HOSTS), sonst keine.`);
-      if (authMw.LOCAL_MODE) return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}`);
+      if (authMw.LOCAL_MODE) {
+        launchKey.save(path.dirname(PROJECTS_DIR), LOCAL_KEY);
+        return process.env.LOCAL_NO_BROWSER || openBrowser(`http://localhost:${PORT}/?k=${LOCAL_KEY}`);
+      }
       // Fetch the desktop installers in the background so the first download doesn't wait on GitHub.
       if (UPDATE_MODE !== 'off') for (const os of ['windows', 'macos']) desktopAssets.assetFile(os).catch(() => {});
     });

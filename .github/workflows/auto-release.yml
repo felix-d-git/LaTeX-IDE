@@ -7,24 +7,30 @@ name: Auto-Release
 on:
   schedule: [{cron: "30 0 * * *"}]
   workflow_dispatch:
-permissions:
-  contents: write
-  actions: write
+permissions: {}
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false   # Push unten explizit per Token-URL, nichts in .git/config
       - env:
           GH_TOKEN: ${{ github.token }}
           MIN_AGE_H: 48
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           last=$(gh release view --json tagName -q .tagName) || { echo "noch kein Release"; exit 0; }
-          authors=$(git log "$last"..HEAD --format=%an | sort -u)
-          [ -n "$authors" ] || { echo "nichts Neues seit $last"; exit 0; }
-          [ "$authors" = "dependabot[bot]" ] || { echo "eigene Commits seit $last -> manuelles Release"; exit 0; }
+          # Autor ueber die GitHub-API (#192): der Git-Autorname ist frei setzbar. Nur Commits, deren GitHub-Account
+          # dependabot[bot] ist UND deren Signatur GitHub verifiziert hat, zaehlen als Dependabot.
+          cmp=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${last}...${GITHUB_SHA}" --paginate -q '[.total_commits, (.commits | length), ([.commits[] | select(.author.login == "dependabot[bot]" and .commit.verification.verified == true)] | length)] | @tsv' | awk '{t=$1; n+=$2; v+=$3} END {print t, n, v}')
+          read -r total listed verified <<< "$cmp"
+          [ "$total" -gt 0 ] || { echo "nichts Neues seit $last"; exit 0; }
+          { [ "$total" -eq "$listed" ] && [ "$verified" -eq "$total" ]; } || { echo "eigene/unverifizierte/zu viele Commits seit $last -> manuelles Release"; exit 0; }
           # Wartezeit (#177): erst releasen, wenn der juengste Commit MIN_AGE_H Stunden alt ist -
           # Zeit, eine kompromittierte Version zu entdecken, bevor der Server sie einspielt.
           age_h=$(( ($(date +%s) - $(git log -1 --format=%ct)) / 3600 ))
@@ -36,5 +42,11 @@ jobs:
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           npm version "${next#v}" --no-git-tag-version
           git commit -qam "Release $next"
-          git tag "$next" && git push origin "$next"
+          # Signierter Tag (#172): der Server prueft ihn per git verify-tag. Kein Secret -> laut scheitern.
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::Secret RELEASE_SIGNING_KEY fehlt - kein unsignierter Release-Tag"; exit 1; }
+          keyfile="$RUNNER_TEMP/release_signing_key"
+          (umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$keyfile")
+          git config gpg.format ssh
+          git config user.signingkey "$keyfile"
+          git tag -s "$next" -m "Release $next" && rm -f "$keyfile" && git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$next"
           gh workflow run release.yml --ref "$next" -f tag="$next"

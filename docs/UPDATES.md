@@ -41,17 +41,42 @@ vollständige Protokoll steht in `latex-update.log`.
 Die Daten sind dabei nicht in Gefahr: der laufende Container bleibt bis zum
 erfolgreichen Neubau aktiv, und das Backup liegt vorher bereit.
 
+### Signierte Releases (Pflicht)
+
+Das Skript installiert nur Tags, die per `git verify-tag` gegen die Datei `.release-signers`
+im Repo-Ordner des Hosts geprüft werden. Die Datei kommt nie aus dem Repo und wird nie vom
+Update überschrieben. Fehlt sie oder stimmt die Signatur nicht, bricht das Update ab.
+
+1. Schlüssel erzeugen (einmalig, nicht auf dem Server): `ssh-keygen -t ed25519 -N "" -f release_key`
+2. Privaten Schlüssel als Actions-Secret `RELEASE_SIGNING_KEY` setzen (Repo, Settings, Secrets and variables, Actions). Fehlt es, scheitert `auto-release.yml` mit Fehler. Danach `release_key` lokal löschen. Manuelle Release-Tags mit `git -c gpg.format=ssh -c user.signingkey=<Schlüssel> tag -s vX.Y.Z -m vX.Y.Z` signieren.
+3. Auf dem Host `.release-signers` anlegen (`chmod 600`), eine Zeile pro erlaubtem Schlüssel:
+   `echo "release-signer $(cat release_key.pub)" > .release-signers`
+   (Format siehe `ssh-keygen(1)`, ALLOWED SIGNERS).
+
+Zusätzlich stoppt das Update, wenn sich `docker-compose*`, `Dockerfile` oder `scripts/server-update.sh`
+gegenüber dem installierten Stand ändern. Nach Prüfung des Diffs mit `ALLOW_INFRA_CHANGES=1` (in `.update.env`
+oder in der Umgebung) erneut starten und danach wieder entfernen. Die Wartezeit vor dem Auto-Release
+(`MIN_AGE_H`, #177) bleibt unverändert.
+
+Empfohlen, Repo-Einstellung: "Immutable releases" aktivieren (Settings, General), damit veröffentlichte
+Tags/Assets nicht nachträglich geändert werden können.
+
 ### Einstellungen für das Skript (`.update.env` im Repo-Ordner)
 
 ```bash
 COMPOSE=docker-compose.pi.yml   # andere Compose-Datei (Standard docker-compose.yml)
 BACKUP_DIR=$HOME/latex-backups  # Standard: neben dem Datenordner, ./backups
 # DATA_DIR=...                  # Standard: LATEX_DATA_DIR aus .env, sonst ./data
+# VAULT=1                       # Verschl�sselung (DATA_KEY/Pi): nur vault/ sichern
 # GITHUB_TOKEN=...              # nur bei privatem Repo, siehe unten
 ```
 
 Das Skript muss die Daten lesen und `docker` aufrufen dürfen: entweder als
 Nutzer in der Gruppe `docker`, dem der Datenordner gehört, oder per `sudo crontab -e`.
+`VAULT=1` legt fest, dass nur `vault/` gesichert wird und `.update-request`/`.update-status` dort liegen. Das Skript leitet das nicht mehr aus dem Datenordner ab (den kann der Container beschreiben). Fehlt `VAULT` in `.update.env` und es gibt einen Ordner `vault/` im Datenpfad, tr�gt das Skript einmalig `VAULT=1` ein.
+
+Empfohlen ohne Root: eigener Systemnutzer in der Gruppe `docker`, dem der Repo-Ordner geh�rt, mit dem Cron-Eintrag dieses Nutzers (`crontab -e` als dieser Nutzer) statt `sudo crontab -e`. Das Skript folgt keinen Symlinks im Datenordner (Status per Temp-Datei + `mv -fT`, `.update-request` nur als regul�re Datei).
+
 Unter Windows mit Docker Desktop läuft es in Git Bash oder WSL (ohne Cron von Hand).
 
 ### Zurück auf ein Backup

@@ -268,7 +268,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     const user = field('Benutzer');
     const pass = field('Passwort', 'password');
     const from = field('Absender', 'text', 'wide');
-    const secure = field('SSL/TLS von Anfang an (Port 465)', 'checkbox', 'wide');
+    const secure = field('SSL/TLS von Anfang an (Port 465; sonst setzt Port 587 STARTTLS voraus)', 'checkbox', 'wide');
     const mode = el('select');
     for (const [v, t] of [['mail', 'per Mail (Bestätigungslink)'], ['admin', 'Admin bestätigt manuell'], ['auto', 'automatisch bei Einladung']]) {
       const o = el('option', null, t);
@@ -283,11 +283,16 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     actions.append(saveBtn, testBtn);
     box.append(el('h4', null, 'Kontobestätigung'), ml, actions);
     let loaded = null;
+    // Stored password is only reused for the same host/port/user (#169).
+    const needsPass = () => !!(loaded && loaded.smtp.passwordSet && host.value.trim() && (host.value.trim() !== loaded.smtp.host || (Number(port.value) || 587) !== (Number(loaded.smtp.port) || 587) || user.value.trim() !== loaded.smtp.user));
+    const syncPass = () => { pass.required = needsPass(); };
+    for (const i of [host, port, user]) i.addEventListener('input', syncPass);
     const apply = (st) => {
       loaded = st;
       host.value = st.smtp.host; port.value = st.smtp.port; secure.checked = st.smtp.secure;
       user.value = st.smtp.user; from.value = st.smtp.from; pass.value = '';
-      pass.placeholder = st.smtp.passwordSet ? '(gesetzt – leer lassen zum Beibehalten)' : '';
+      pass.placeholder = st.smtp.passwordSet ? '(gesetzt – leer lassen zum Beibehalten; bei neuem Host/Port/Benutzer Pflicht)' : '';
+      syncPass();
       mode.value = st.verifyMode;
       mode.querySelector('option[value="mail"]').disabled = !st.smtpConfigured;
       status.textContent = { ui: 'SMTP aus diesen Einstellungen.', env: 'SMTP aus der Server-.env (Host leeren/ausfüllen überschreibt).', none: 'Kein SMTP – Mails landen nur im mail-outbox.log; „per Mail“ nicht wählbar.' }[st.smtp.source];
@@ -296,6 +301,7 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       try {
         const smtp = { host: host.value, port: port.value, secure: secure.checked, user: user.value, from: from.value };
         if (pass.value) smtp.pass = pass.value;
+        else if (needsPass()) return alert('Host, Port oder Benutzer geändert: Bitte das SMTP-Passwort neu eingeben.');
         apply(await adminApi.saveMail({ smtp, verifyMode: mode.value }));
         alert('Gespeichert.');
       } catch (e) { alert(e.message); }
@@ -304,6 +310,78 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
       try { alert(`Testmail gesendet an ${(await adminApi.testMail()).to}.`); } catch (e) { alert(e.message); }
     });
     adminApi.getMail().then(apply).catch((e) => { status.textContent = e.message; });
+    return box;
+  }
+
+  const LIMIT_LABELS = {
+    userQuotaMb: 'Speicherkontingent pro Konto (MB, Admins ausgenommen)',
+    zipLimitMb: 'Max. Größe eines Zip-Uploads (MB)',
+    freeReserveMb: 'Freie-Speicher-Reserve des Servers (MB; darunter werden Schreib- und Compile-Vorgänge abgelehnt)',
+    commentMaxChars: 'Kommentar: max. Zeichen',
+    labelMaxChars: 'Verlauf-Bezeichnung: max. Zeichen',
+    maxLabeledEntries: 'Verlauf: max. geschützte Einträge (benannt/Wiederherstellung) pro Projekt',
+  };
+
+  function renderLimitsSection() {
+    const box = el('div');
+    const form = el('div', 'admin-form');
+    box.append(el('h4', null, 'Limits'), note('Werte wirken sofort ohne Neustart. Vorgabe = Wert aus der Server-.env bzw. eingebauter Standard.'), form);
+    const inputs = {};
+    for (const [key, text] of Object.entries(LIMIT_LABELS)) {
+      const i = el('input');
+      i.type = 'number';
+      i.min = '1';
+      i.step = '1';
+      inputs[key] = i;
+      const l = el('label', 'settings-field wide');
+      l.append(text, i);
+      form.appendChild(l);
+    }
+    const saveBtn = el('button', 'primary', 'Speichern');
+    const actions = el('div', 'admin-actions');
+    actions.appendChild(saveBtn);
+    box.appendChild(actions);
+    const apply = ({ limits }) => {
+      for (const [k, i] of Object.entries(inputs)) { i.value = limits[k].value; i.max = limits[k].max; i.title = `Vorgabe: ${limits[k].default}`; }
+    };
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const body = {};
+        for (const [k, i] of Object.entries(inputs)) body[k] = i.value;
+        apply(await adminApi.saveLimits(body));
+        alert('Gespeichert.');
+      } catch (e) { alert(e.message); }
+    });
+    adminApi.getLimits().then(apply).catch((e) => box.appendChild(note(e.message)));
+    return box;
+  }
+
+  function renderSecuritySection() {
+    const box = el('div');
+    const filter = el('select');
+    const list = el('div', 'admin-list');
+    box.append(el('h4', null, 'Sicherheitsereignisse'), note('Letzte 200 Einträge des Audit-Logs (audit.log im Datenordner). Es enthält keine Passwörter oder Tokens.'), filter, list);
+    let known = new Set(['']);
+    const load = () => adminApi.getAudit(filter.value).then(({ entries }) => {
+      for (const e of entries) known.add(e.event);
+      if (filter.options.length !== known.size) {
+        const cur = filter.value;
+        filter.innerHTML = '';
+        for (const ev of known) filter.appendChild(Object.assign(el('option', null, ev || 'Alle Ereignisse'), { value: ev }));
+        filter.value = cur;
+      }
+      list.innerHTML = '';
+      if (!entries.length) return list.appendChild(note('Keine Einträge.'));
+      for (const e of entries) {
+        const row = el('div', 'admin-row');
+        const main = el('div', 'admin-row-main');
+        main.append(el('strong', null, e.event), el('span', 'admin-row-meta', [formatDate(e.t), e.ip, e.user && `Nutzer ${e.user}`, e.login, e.tool, e.path].filter(Boolean).join(' · ')));
+        row.appendChild(main);
+        list.appendChild(row);
+      }
+    }).catch((err) => { list.textContent = err.message; });
+    filter.addEventListener('change', load);
+    load();
     return box;
   }
 
@@ -336,17 +414,12 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
         main.append(title, el('span', 'admin-row-meta', meta));
         row.appendChild(main);
         if (!invite.usedByEmail && !invite.expired) {
-          const copyBtn = el('button', null, 'Link kopieren');
-          copyBtn.addEventListener('click', async () => {
-            const link = `${baseUrl || location.origin}/?invite=${invite.token}`;
-            if (!(await copyText(link))) prompt('Einladungslink (zum Kopieren markieren):', link);
-          });
           const revokeBtn = el('button', 'danger', 'Widerrufen');
           revokeBtn.addEventListener('click', async () => {
-            await adminApi.revokeInvite(invite.token);
+            await adminApi.revokeInvite(invite.id);
             refresh();
           });
-          row.append(copyBtn, revokeBtn);
+          row.append(revokeBtn);
         }
         list.appendChild(row);
       }
@@ -366,6 +439,8 @@ export function setupAdminDialog({ currentUser, onUpdateRequested }) {
     update: () => [renderUpdateSection()],
     users: () => [renderUserSection(), renderInviteSection()],
     mail: () => [renderMailSection()],
+    limits: () => [renderLimitsSection()],
+    security: () => [renderSecuritySection()],
   };
   const tabsBar = document.getElementById('admin-tabs');
   let activeTab = 'update';

@@ -37,6 +37,15 @@ const sessionStore = new FileStore({
   ttl: 7 * 24 * 3600, // sessions without "stay logged in" must outlive 60 min idle (module default)
 });
 
+// COOKIE_SECURE=true: always Secure; false: never; unset: Secure when the request came in over
+// HTTPS (req.secure, honours TRUST_PROXY / X-Forwarded-Proto) (#165).
+function cookieSecureFor(req) {
+  const v = String(process.env.COOKIE_SECURE || '').trim().toLowerCase();
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return !!req.secure;
+}
+
 function createSessionMiddleware() {
   return session({
     name: SESSION_COOKIE_NAME,
@@ -47,7 +56,9 @@ function createSessionMiddleware() {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: ['true', 'false'].includes(String(process.env.COOKIE_SECURE || '').trim().toLowerCase())
+        ? String(process.env.COOKIE_SECURE).trim().toLowerCase() === 'true'
+        : 'auto',
       // no maxAge here = regular session cookie (expires on browser close);
       // login sets an explicit maxAge on req.session.cookie when "Angemeldet bleiben" is checked.
     },
@@ -61,7 +72,7 @@ function ensureCsrfCookie(req, res, next) {
     res.cookie(CSRF_COOKIE_NAME, token, {
       httpOnly: false, // client JS must read this to echo it back in the X-CSRF-Token header
       sameSite: 'lax',
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: cookieSecureFor(req),
     });
   }
   req.csrfToken = token;
@@ -124,6 +135,7 @@ function requireAuth(req, res, next) {
 
 // ponytail: in-memory fixed-window limiter, resets on restart - enough for a handful of users behind one Funnel.
 const hits = new Map();
+const RATE_LIMIT_MAX_KEYS = Number(process.env.RATE_LIMIT_MAX_KEYS) || 50000; // bounds heap against key flooding
 // countIf(res): only answers matching it use up the budget (e.g. failed logins). Counted up front so parallel
 // bursts stay limited; a non-matching answer gives the slot back.
 function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {}) {
@@ -132,6 +144,7 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {
     const now = Date.now();
     let e = hits.get(key);
     if (!e || now > e.resetAt) {
+      if (!e && hits.size >= RATE_LIMIT_MAX_KEYS) return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
       e = { count: 0, resetAt: now + windowMs };
       hits.set(key, e);
     }
@@ -139,6 +152,7 @@ function rateLimit(name, max, windowMs, keyFn = (req) => req.ip, { countIf } = {
     if (countIf) res.on('finish', () => { if (!countIf(res) && e.count > 0) e.count -= 1; });
     if (e.count > max) {
       res.set('Retry-After', String(Math.ceil((e.resetAt - now) / 1000)));
+      if (e.count === max + 1) require('./audit').audit('rate_limit', req, { limiter: name }); // once per window, else an attacker floods the log
       return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut probieren.' });
     }
     next();

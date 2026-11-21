@@ -7,7 +7,26 @@ SPDX-PackageSupplier = "felix-d-git"
 SPDX-PackageDownloadLocation = "https://github.com/felix-d-git/LaTeX-IDE"
 
 [[annotations]]
-path = "**"
+path = ["*.md", "docs/**/*.md", "installer/**/*.md", ".github/**/*.md", ".claude/**/*.md", "LICENSE", "AUTHORS", "LICENSES/**", "installer/**/*.txt"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = ["client/*.png", "package.json", "tailscale-serve.json", "server/lib/latexmkrc", "Dockerfile", ".dockerignore", ".gitignore", ".gitattributes", ".env.example", "REUSE.toml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = ["package-lock.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors; generated lock file listing third-party packages under their own licenses (see THIRD_PARTY_NOTICES.md)"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = ["THIRD_PARTY_NOTICES.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors; the listed third-party components are copyright of their respective authors and licensed as stated in the file"
+SPDX-License-Identifier = "AGPL-3.0-only"
+

@@ -21,9 +21,15 @@ services:
         UPDATE_REPO: ${UPDATE_REPO:-}
     image: latex-ide
     restart: unless-stopped
-    env_file: .env
+    env_file: .env # darin optional ZIP_LIMIT, USER_QUOTA_MB, FREE_RESERVE_MB ... (Defaults: .env.example; Admin-Menue "Limits" hat Vorrang)
     environment:
       DATA_DIR: /app/data
+      NODE_OPTIONS: --max-old-space-size=${LATEX_HEAP_MB:-1024}
+    # Kompilieren ist teuer: Limits per .env anpassbar (#190).
+    mem_limit: ${LATEX_MEM:-2g}
+    memswap_limit: ${LATEX_MEM:-2g}
+    cpus: ${LATEX_CPUS:-2}
+    pids_limit: ${LATEX_PIDS:-256}
     security_opt:
       - no-new-privileges:true
     cap_drop:

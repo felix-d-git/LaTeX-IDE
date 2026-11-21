@@ -109,23 +109,25 @@ fi
 if [ -x /Library/TeX/texbin/latexmk ]; then
     echo "latexmk bereits unter /Library/TeX/texbin gefunden - MacTeX-Installation wird uebersprungen."
 else
-    echo "Suche aktuelles MacTeX-2025-Paket..."
     MACTEX_BASE="https://ftp.tu-chemnitz.de/pub/tug/historic/systems/mactex/2025"
-    MACTEX_PKG="MacTeX.pkg"
-    if ! curl -fsSI "$MACTEX_BASE/$MACTEX_PKG" >/dev/null 2>&1; then
-        echo "Fallback: suche versionierten Dateinamen (mactex-*.pkg)..."
-        MACTEX_PKG="$(curl -fsSL "$MACTEX_BASE/" | grep -oE 'href="mactex-[0-9]+\.pkg"' | head -1 | sed -E 's/href="(.*)"/\1/')"
-        if [ -z "$MACTEX_PKG" ]; then
-            echo "Konnte kein MacTeX-Paket unter $MACTEX_BASE finden." >&2
-            exit 1
-        fi
-    fi
+    MACTEX_PKG="mactex-20250308.pkg"
+    # SHA-512 aus mactex-20250308.pkg.sha512 der TUG; Team-ID aus dem Zertifikat des Pakets (Richard Koch).
+    MACTEX_SHA512="93a853296afdec6eb2b30d9efeef028c87e607179bcdea19804e09e6c38e391d533620f84545293b4e448ca0dcaebccc62a11e0093bf2340f0906b02415017b5"
+    MACTEX_TEAM_ID="RBGCY5RJWM"
     # installer -pkg zeigt die Lizenzseite des MacTeX-Pakets nicht an.
     echo "Hinweis: MacTeX ist nicht Teil von LaTeX-IDE; jede Komponente hat ihre eigene Lizenz."
     echo "  TeX Live: https://www.tug.org/texlive/LICENSE.TL"
     echo "  MacTeX:   https://www.tug.org/mactex/"
     echo "Lade $MACTEX_PKG (mehrere GB, kann lange dauern)..."
     curl -fL -o "$TMP_DIR/$MACTEX_PKG" "$MACTEX_BASE/$MACTEX_PKG"
+    if [ "$(shasum -a 512 "$TMP_DIR/$MACTEX_PKG" | cut -d' ' -f1)" != "$MACTEX_SHA512" ]; then
+        echo "MacTeX-Paket: SHA-512 stimmt nicht - Installation abgebrochen." >&2
+        exit 1
+    fi
+    if ! pkgutil --check-signature "$TMP_DIR/$MACTEX_PKG" | grep -q "Developer ID Installer: .*($MACTEX_TEAM_ID)"; then
+        echo "MacTeX-Paket: Signatur/Team-ID ($MACTEX_TEAM_ID) ungueltig - Installation abgebrochen." >&2
+        exit 1
+    fi
     echo "Installiere MacTeX (Administrator-Passwort erforderlich)..."
     sudo installer -pkg "$TMP_DIR/$MACTEX_PKG" -target /
 fi
@@ -143,11 +145,8 @@ export PATH="$APP_ROOT/node/bin:/Library/TeX/texbin:$PATH"
 : "${LATEX_IDE_DATA:=$HOME/Library/Application Support/LatexIDE}"
 export PORT LATEX_IDE_DATA
 cd "$APP_ROOT/app"
-"$APP_ROOT/node/bin/node" server/desktop.js &
-SERVER_PID=$!
-sleep 2
-open "http://localhost:$PORT"
-wait "$SERVER_PID"
+# desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
+exec "$APP_ROOT/node/bin/node" server/desktop.js
 EOF
 chmod +x "$STARTER"
 
