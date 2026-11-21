@@ -1985,6 +1985,14 @@ const queuedCompile = new Map(); // output dir -> promise of a not-yet-started r
 const MAX_PENDING_COMPILES = Math.max(1, parseInt(process.env.MAX_PENDING_COMPILES, 10) || 2);
 const pendingByUser = new Map(); // userId -> queued + running runs (DoS cap, #159)
 
+// Identity of a project folder: inode, or the state epoch where inodes are 0 (Windows). null = gone.
+function rootIdentity(root) {
+  try {
+    const ino = fs.statSync(root).ino;
+    return ino ? `i${ino}` : `e${state.getEpoch(root)}`;
+  } catch { return null; }
+}
+
 // opts.auto: autocompile run - its version snapshot is throttled like autosave.
 function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const outRel = outRelFor(root, userId);
@@ -1995,16 +2003,22 @@ function runCompile(root, main, userId, meta, { auto = false } = {}) {
   const pending = pendingByUser.get(userId) || 0;
   if (pending >= MAX_PENDING_COMPILES) throw Object.assign(new Error(`Zu viele Kompilierungen gleichzeitig (max. ${MAX_PENDING_COMPILES}). Bitte warten, bis ein Lauf fertig ist.`), { status: 429 });
   pendingByUser.set(userId, pending + 1);
+  const identAtEnqueue = rootIdentity(root);
   broadcast(root, { type: 'compileStatus', status: 'running' }, to);
   const run = compileChain
     .then(() => {
       queuedCompile.delete(key);
+      // Rights and project identity are re-checked when the job starts, not only when it was queued (#188).
+      const u = auth.findUserById(userId);
+      if (!u || isParked(root) || !canAccessRoot(u, root) || rootIdentity(root) !== identAtEnqueue) {
+        throw Object.assign(new Error('Kein Zugriff mehr auf dieses Projekt.'), { status: 403 });
+      }
       return doCompile(root, main, outRel, to, meta, auto);
     })
     .catch((e) => {
       // Otherwise every client's status would stay on 'running'.
       console.error('[compile]', root, e);
-      broadcast(root, { type: 'compileStatus', status: 'error', log: String((e && e.message) || e) }, to);
+      broadcast(root, { type: 'compileStatus', status: 'error', log: e && e.status ? e.message : 'Kompilierung fehlgeschlagen.' }, to);
       throw e;
     })
     .finally(() => {
@@ -2059,7 +2073,7 @@ app.post('/api/compile', limitCompile, ah(async (req, res) => {
   try {
     res.json(await runCompile(root, main, req.user.id));
   } catch (e) {
-    res.status(e.status || 500).json({ error: e.status === 429 ? e.message : 'Kompilierung fehlgeschlagen: ' + e.message });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Kompilierung fehlgeschlagen.' });
   }
 }));
 
@@ -2088,12 +2102,17 @@ app.get('/api/settings', (req, res) => {
   res.json({ settings: state.getProjectSettings(root) });
 });
 
+const COMPILERS = ['pdflatex', 'xelatex', 'lualatex'];
+
 app.post('/api/settings', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { compiler, stopOnFirstError, autocompile, compileMode } = req.body;
   const patch = {};
-  if (compiler !== undefined) patch.compiler = compiler;
+  if (compiler !== undefined) {
+    if (!COMPILERS.includes(compiler)) return res.status(400).json({ error: 'Unbekannter Compiler.' });
+    patch.compiler = compiler;
+  }
   if (compileMode !== undefined) patch.compileMode = compileMode === 'group' ? 'group' : 'individual';
   if (stopOnFirstError !== undefined) patch.stopOnFirstError = !!stopOnFirstError;
   if (autocompile !== undefined) patch.autocompile = !!autocompile;
@@ -2432,12 +2451,14 @@ app.post('/api/file/convert-utf8', (req, res) => {
 
 // Last middleware: thrown/rejected route errors answer 500 instead of crashing the server.
 app.use((err, req, res, next) => {
+  const ref = crypto.randomBytes(4).toString('hex');
   if (!err.status || err.status >= 500) {
-    console.error('[route]', req.method, req.path, err.cause || err);
+    console.error('[route]', ref, req.method, req.path, err.cause || err);
     audit('server_error', req, { status: err.status || 500, error: clip(err.message, 100) });
   }
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: err.status ? err.message : 'Interner Fehler: ' + (err.message || err) });
+  // Node errors carry absolute paths: never hand them to the client.
+  res.status(err.status || 500).json({ error: err.status && err.status < 500 ? err.message : `Interner Fehler (Referenz ${ref}).` });
 });
 
 const server = http.createServer(app);
