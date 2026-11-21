@@ -30,6 +30,7 @@ if (!workspace.settingsByRoot) workspace.settingsByRoot = {};
 if (!workspace.mainFileByRoot) workspace.mainFileByRoot = {};
 if (!workspace.activeRootByUser) workspace.activeRootByUser = {};
 if (!workspace.recentRootsByUser) workspace.recentRootsByUser = {};
+if (!workspace.epochByRoot) workspace.epochByRoot = {};
 if (!workspace.sharesByRoot) workspace.sharesByRoot = {};
 if (!workspace.rolesByRoot) workspace.rolesByRoot = {}; // root -> { userId: 'reviewer' }, absent = editor
 if (!workspace.shareLinksByRoot) workspace.shareLinksByRoot = {}; // root -> { editor?: link, reviewer?: link }, siehe getShareLinks
@@ -256,11 +257,20 @@ function sharedRootsFor(userId) {
 // Project folder moved (rename, trash, archive, restore): carry its per-root settings/main file/shares
 // over. Leftovers of an earlier project at the target are dropped first, never mixed in.
 // activeTo: where users who had it open/recent now point (null = forget it, e.g. trash/archive).
+// Project identity fallback where inode numbers are useless (Windows: 0): bumped on create/rename/trash.
+function bumpEpoch(root) {
+  root = rk(root);
+  workspace.epochByRoot[root] = (workspace.epochByRoot[root] || 0) + 1;
+}
+const getEpoch = (root) => workspace.epochByRoot[rk(root)] || 0;
+
 function moveRoot(oldRoot, newRoot, activeTo = newRoot) {
   oldRoot = rk(oldRoot);
   newRoot = rk(newRoot);
   activeTo = rk(activeTo);
   if (oldRoot === newRoot) return;
+  bumpEpoch(oldRoot);
+  bumpEpoch(newRoot);
   for (const [u, r] of Object.entries(workspace.activeRootByUser)) {
     if (r !== oldRoot) continue;
     if (activeTo) workspace.activeRootByUser[u] = activeTo;
@@ -293,6 +303,7 @@ function copyRoot(oldRoot, newRoot) {
 function dropRoot(root) {
   root = rk(root);
   for (const k of ROOT_MAPS) delete workspace[k][root];
+  bumpEpoch(root);
   saveWorkspace(workspace);
 }
 
@@ -429,6 +440,7 @@ module.exports = {
   setShares,
   sharedRootsFor,
   dropRoot,
+  getEpoch,
   getRole,
   setRole,
   getShareLinks,
