@@ -232,6 +232,10 @@ GEWÄHRLEISTUNG bereitgestellt (Abschnitte 15 und 16 der Lizenz). Das gilt für
 alle Versionen, Tags und Commits dieses Repositorys, auch für die vor Einführung
 der Datei `LICENSE` (u. a. `v0.1.0` und `legacy-local`).
 
+Ausnahme: `server/lib/luaSandbox.lua` steht unter `AGPL-3.0-only OR MIT`. Das
+Skript ist eigenständig, nutzt nur die öffentliche Lua-Schnittstelle und wird nie
+mit `luatex-core.lua`/luaotfload zusammengeführt oder in ein `.fmt` eingebacken.
+
 - Drittkomponenten und ihre Lizenzen:
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), im laufenden Programm unter
   `/licenses` (Help ▸ Licenses). Software im Docker-Image:
