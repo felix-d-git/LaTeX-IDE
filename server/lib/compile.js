@@ -83,7 +83,7 @@ function texCommand(mainRelPath, settings, outDir) {
     'latexmk',
     [
       ...RC_ARGS, // first: latexmk reads the rc files before it looks at the other options
-      ENGINE_FLAG[settings.compiler] || ENGINE_FLAG.pdflatex,
+      Object.hasOwn(ENGINE_FLAG, settings.compiler) ? ENGINE_FLAG[settings.compiler] : ENGINE_FLAG.pdflatex,
       ...(lua ? [`-lualatex=${luaLatexCommand()}`] : []),
       '-g', // force a real rerun even if latexmk thinks nothing changed since the last (possibly failed) run
       '-interaction=nonstopmode', // skip past recoverable errors instead of blocking on stdin

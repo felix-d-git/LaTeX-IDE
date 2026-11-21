@@ -2102,12 +2102,17 @@ app.get('/api/settings', (req, res) => {
   res.json({ settings: state.getProjectSettings(root) });
 });
 
+const COMPILERS = ['pdflatex', 'xelatex', 'lualatex'];
+
 app.post('/api/settings', (req, res) => {
   const root = requireRoot(req, res);
   if (!root) return;
   const { compiler, stopOnFirstError, autocompile, compileMode } = req.body;
   const patch = {};
-  if (compiler !== undefined) patch.compiler = compiler;
+  if (compiler !== undefined) {
+    if (!COMPILERS.includes(compiler)) return res.status(400).json({ error: 'Unbekannter Compiler.' });
+    patch.compiler = compiler;
+  }
   if (compileMode !== undefined) patch.compileMode = compileMode === 'group' ? 'group' : 'individual';
   if (stopOnFirstError !== undefined) patch.stopOnFirstError = !!stopOnFirstError;
   if (autocompile !== undefined) patch.autocompile = !!autocompile;
