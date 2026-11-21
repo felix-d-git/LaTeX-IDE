@@ -11,7 +11,7 @@ test('Mail-/Token-Routen sind nur im lokalen Modus gesperrt', async () => {
   const routes = ['verify', 'resend-verification', 'forgot-password', 'reset-password'];
   const local = await startServer({ LOCAL_MODE: '1', LOCAL_NO_BROWSER: '1' });
   try {
-    const c = client(local.base);
+    const c = client(local.base, local.localKey());
     await c.call('GET', '/api/auth/me');
     for (const r of routes) assert.strictEqual((await c.call('POST', `/api/auth/${r}`, {})).status, 404, r);
   } finally {
@@ -41,7 +41,7 @@ test('Passwortwechsel/-Reset widerruft Desktop- und MCP-Token', async () => {
     await c.login('admin', ADMIN_PASSWORD);
     const tokens = async () => [
       (await c.call('POST', '/api/auth/desktop-token', { label: 'Test' })).body.token,
-      (await c.call('POST', '/api/auth/mcp-token', { name: 'Test', perms: ['read'] })).body.token,
+      (await c.call('POST', '/api/auth/mcp-token', { name: 'Test', perms: ['read'], allProjects: true })).body.token,
     ];
     const status = async ([desktop, mcp]) => [
       (await fetch(srv.base + '/api/auth/me', { headers: { Authorization: `Bearer ${desktop}` } })).status,
@@ -114,6 +114,69 @@ test('Reset-Link folgt nie einem gefälschten Host-Header (#151)', async () => {
     const log = await outbox(srv);
     assert.match(log, /https:\/\/ide\.test\/\?reset=/);
     assert.doesNotMatch(log, /evil\.example/);
+  } finally {
+    await srv.stop();
+  }
+});
+
+// #154: trust proxy nur loopback/konfigurierbar, Konto-Limit, MCP-Batch-Limit.
+test('XFF-Spoofing, Konto-Login-Limit und MCP-Batch-Limit (#154)', async () => {
+  const login = async (base, login, i) => { const c = client(base); await c.call('GET', '/api/auth/me'); return (await c.call('POST', '/api/auth/login', { login, password: 'falsch' }, { 'X-Forwarded-For': `203.0.113.${i % 250}` })).status; };
+  // Client ist kein vertrauter Proxy -> XFF wird ignoriert, gleicher Bucket.
+  let srv = await startServer({ TRUST_PROXY: '10.9.9.9' });
+  try {
+    for (let i = 0; i < 10; i++) assert.strictEqual(await login(srv.base, `u${i}`, i), 401);
+    assert.strictEqual(await login(srv.base, 'u11', 11), 429);
+  } finally {
+    await srv.stop();
+  }
+  // Loopback-Proxy glaubt XFF (IP-Limit umgangen), das Konto-Limit greift trotzdem.
+  srv = await startServer();
+  try {
+    for (let i = 0; i < 20; i++) assert.strictEqual(await login(srv.base, ' Opfer ', i), 401);
+    assert.strictEqual(await login(srv.base, 'opfer', 21), 429);
+    // MCP: Batch > 20 -> 400, Auth zuerst geprüft.
+    const t = (await (async () => { const c = client(srv.base); await c.login('admin', ADMIN_PASSWORD); return (await c.call('POST', '/api/auth/mcp-token', { name: 'T', perms: ['read'], allProjects: true })).body.token; })());
+    const post = (n) => fetch(srv.base + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${t}` }, body: JSON.stringify(Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: i, method: 'ping' }))) });
+    assert.strictEqual((await post(21)).status, 400);
+    const ok = await post(20);
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual((await ok.json()).length, 20);
+  } finally {
+    await srv.stop();
+  }
+});
+
+// #159: Compile-Route pro Nutzer begrenzt (20/min), danach 429.
+test('POST /api/compile: Rate-Limit pro Nutzer', async () => {
+  const srv = await startServer();
+  try {
+    const c = client(srv.base);
+    await c.login('admin', ADMIN_PASSWORD);
+    let last = 0;
+    for (let i = 0; i < 21; i++) last = (await c.call('POST', '/api/compile', {})).status;
+    assert.strictEqual(last, 429);
+  } finally {
+    await srv.stop();
+  }
+});
+
+test('Admin-Modus: Passwort-Reset umgeht die Freigabe nicht (#160)', async () => {
+  const srv = await startServer();
+  try {
+    const admin = client(srv.base);
+    await admin.login('admin', ADMIN_PASSWORD);
+    assert.strictEqual((await admin.call('PUT', '/api/admin/mail', { verifyMode: 'admin' })).status, 200);
+    const { token } = (await admin.call('POST', '/api/admin/invites')).body;
+    const c = client(srv.base);
+    await c.call('GET', '/api/auth/me');
+    assert.strictEqual((await c.call('POST', '/api/auth/register', { token, username: 'dora', email: 'dora@example.test', password: 'geheim-passwort-123' })).status, 200);
+    const r = await c.call('POST', '/api/auth/forgot-password', { login: 'dora' });
+    assert.strictEqual(r.status, 200);
+    assert.doesNotMatch(await outbox(srv), /reset=/);
+    const l = await c.call('POST', '/api/auth/login', { login: 'dora', username: 'dora', password: 'geheim-passwort-123' });
+    assert.strictEqual(l.status, 403);
+    assert.strictEqual(l.body.unverified, true);
   } finally {
     await srv.stop();
   }

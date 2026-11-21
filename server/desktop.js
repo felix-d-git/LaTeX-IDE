@@ -7,6 +7,7 @@
 // (default Documents\LatexIDE), synced both ways while online; offline, tree,
 // files and compile come from that copy. Other GETs fall back to a cache, Yjs
 // keeps editing alive in the browser's IndexedDB.
+require('./lib/secureFiles').applyUmask();
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -38,8 +39,11 @@ const APP_VERSION = require('../package.json').version;
 const LOCAL_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
 const LOCAL_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const CSRF_COOKIE = 'csrfToken';
+const launchKey = require('./lib/launchKey');
+const LAUNCH_KEY = launchKey.generate();
 
 fs.mkdirSync(CACHE_DIR, { recursive: true });
+require('./lib/secureFiles').tightenSecrets(DATA);
 fs.mkdirSync(MIRROR_DIR, { recursive: true });
 
 // --- small helpers ---
@@ -54,7 +58,7 @@ function readJson(file, fallback) {
 
 function writeJson(file, value) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 }); // config.json holds the desktop token (#168)
   fs.renameSync(tmp, file);
 }
 
@@ -200,6 +204,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Start-Schlüssel (#163): ohne Cookie 403. /desktop-callback kommt als Cross-Site-Navigation vom Server (das
+// SameSite=Strict-Cookie fehlt dort) und ist durch den einmaligen state geschützt.
+const launchAuth = launchKey.middleware(LAUNCH_KEY);
+app.use((req, res, next) => (req.path === '/desktop-callback' ? next() : launchAuth(req, res, next)));
+
 // CSP violation reports of the local pages (outside /api: no CSRF token needed).
 app.post(CSP_REPORT_PATH, ...cspReportHandler());
 
@@ -220,7 +229,8 @@ app.get('/desktop-callback', (req, res) => {
   }
   setToken(String(token));
   setImmediate(syncAll);
-  res.redirect(`http://localhost:${PORT}/`);
+  // Kein 302: nach einer Cross-Site-Navigation würde der Browser das Strict-Cookie auch beim Redirect weglassen.
+  res.type('html').send('<!doctype html><meta http-equiv="refresh" content="0;url=/"><a href="/">Weiter</a>');
 });
 
 app.get('/api/desktop/info', (req, res) => {
@@ -365,7 +375,7 @@ app.post('/api/languagetool-local', express.json({ limit: '2mb' }), ah(async (re
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ data: String(req.body.data || ''), language }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(60000),
     });
     if (!r.ok) throw new Error(`LanguageTool antwortet mit ${r.status}.`);
     res.json({ matches: (await r.json()).matches || [] });
@@ -923,7 +933,7 @@ proxy.on('error', (err, req, socket) => {
 
 server.on('upgrade', (req, socket, head) => {
   const p = (req.url || '').split('?')[0];
-  if (!config.token || !LOCAL_ORIGINS.has(req.headers.origin) || !(p === '/ws' || p.startsWith('/yjs/'))) {
+  if (!config.token || !LOCAL_ORIGINS.has(req.headers.origin) || !launchKey.hasCookie(req, LAUNCH_KEY) || !(p === '/ws' || p.startsWith('/yjs/'))) {
     return socket.destroy();
   }
   if (!online) return socket.destroy(); // offline: fail fast, the client retries
@@ -936,7 +946,16 @@ server.on('upgrade', (req, socket, head) => {
 
 process.on('unhandledRejection', (e) => console.error('[desktop] unbehandelte Promise-Ablehnung:', e));
 
+// Zweiter Start bei belegtem Port: nur den Browser mit dem Schlüssel des laufenden Prozesses öffnen.
+server.on('error', (e) => {
+  if (e.code !== 'EADDRINUSE') throw e;
+  if (!process.env.LOCAL_NO_BROWSER) launchKey.openRunning(DATA, PORT);
+  process.exit(0);
+});
+
 server.listen(PORT, '127.0.0.1', () => {
+  launchKey.save(DATA, LAUNCH_KEY);
   console.log(`LaTeX IDE Desktop: http://localhost:${PORT}  (Server: ${REMOTE}, Daten: ${DATA})`);
   if (legal.SOURCE_WARNING) console.warn(`[source] Warnung: ${legal.SOURCE_WARNING}`);
+  if (!process.env.LOCAL_NO_BROWSER) launchKey.openBrowser(`http://localhost:${PORT}/?k=${LAUNCH_KEY}`);
 });

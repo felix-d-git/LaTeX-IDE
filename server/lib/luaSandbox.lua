@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: AGPL-3.0-only
+-- SPDX-License-Identifier: AGPL-3.0-only OR MIT
 -- SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 --
 -- LuaTeX startup script of the compile sandbox (#119), run as `lualatex --lua=<this file>`.

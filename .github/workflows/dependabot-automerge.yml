@@ -8,11 +8,12 @@ on:
   workflow_run:
     workflows: ["CI", "DCO", "Licenses"]
     types: [completed]
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 jobs:
   merge:
+    permissions:
+      contents: write
+      pull-requests: write
     # Herkunft pruefen (#148): actor/Branch-Name allein sind faelschbar (Fork-PR als Confused Deputy).
     if: >-
       github.event.workflow_run.conclusion == 'success' &&

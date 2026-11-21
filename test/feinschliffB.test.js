@@ -85,10 +85,10 @@ test('Hauptdatei folgt Umbenennen/Verschieben und fällt bei Löschung weg', () 
   assert.strictEqual(state.getMainFile(root), null);
 });
 
-test('Suche: Ganzes Wort mit Umlauten, CRLF', () => {
+test('Suche: Ganzes Wort mit Umlauten, CRLF', async () => {
   const root = fs.mkdtempSync(path.join(tmp, 's-'));
   fs.writeFileSync(path.join(root, 'a.tex'), 'Größe und Größen\r\nGröße\r\n');
-  const r = searchProject(root, 'Größe', { wholeWord: true });
+  const r = await searchProject(root, 'Größe', { wholeWord: true });
   assert.deepStrictEqual(r.map((x) => x.line), [1, 2]);
   assert.strictEqual(r[0].matches.length, 1);
   assert.ok(!r[1].lineText.includes('\r'));

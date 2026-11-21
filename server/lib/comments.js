@@ -74,7 +74,9 @@ function isFile(root, rel) {
 // No match -> parked under ORPHANED (retried next time). Never deletes anything.
 function reconcile(root, data) {
   const lost = Object.keys(data).filter((k) => k !== ORPHANED && !isFile(root, k));
-  const parked = data[ORPHANED] || {};
+  // A bucket of the wrong shape (hand-edited / pre-#185 array) must not throw: wrong form = empty.
+  const parked = data[ORPHANED] && typeof data[ORPHANED] === 'object' && !Array.isArray(data[ORPHANED]) ? data[ORPHANED] : {};
+  const asList = (l) => (Array.isArray(l) ? l.filter((c) => c && typeof c === 'object') : []);
   if (!lost.length && !Object.keys(parked).length) return false;
   // ponytail: walks + reads the project on every load while something stays orphaned; cache if projects get huge.
   const files = textFiles(root);
@@ -113,11 +115,14 @@ function reconcile(root, data) {
     return true;
   };
   const nextParked = {};
-  for (const [oldRel, list] of Object.entries(parked)) if (!place(oldRel, list)) mergeInto(nextParked, oldRel, list);
+  for (const [oldRel, l] of Object.entries(parked)) {
+    const list = asList(l);
+    if (list.length && !place(oldRel, list)) mergeInto(nextParked, oldRel, list);
+  }
   for (const k of lost) {
-    const list = data[k];
+    const list = asList(data[k]);
     delete data[k];
-    if (!place(k, list)) mergeInto(nextParked, k, list);
+    if (list.length && !place(k, list)) mergeInto(nextParked, k, list);
   }
   if (Object.keys(nextParked).length) data[ORPHANED] = nextParked;
   else delete data[ORPHANED];
@@ -219,4 +224,10 @@ function remove(root, relPath, id, canDelete = () => true) {
   return true;
 }
 
-module.exports = { listAll, movePath, ORPHANED, add, edit, reply, removeReply, remove, COMMENTS_FILE };
+// Author id of one comment: undefined = no such comment, null = legacy comment without author.
+function authorIdOf(root, relPath, id) {
+  const c = find(load(root), relPath, id);
+  return c ? (c.author ? c.author.id : null) : undefined;
+}
+
+module.exports = { authorIdOf, listAll, movePath, ORPHANED, add, edit, reply, removeReply, remove, COMMENTS_FILE };

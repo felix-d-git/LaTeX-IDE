@@ -54,7 +54,7 @@ export const authApi = {
   createDesktopToken: (label) => req('POST', '/api/auth/desktop-token', { label }),
   listDesktopTokens: () => req('GET', '/api/auth/desktop-tokens'),
   revokeDesktopToken: (id) => req('DELETE', `/api/auth/desktop-tokens/${encodeURIComponent(id)}`),
-  createMcpToken: (name, perms, projects) => req('POST', '/api/auth/mcp-token', { name, perms, projects }),
+  createMcpToken: (name, perms, projects) => req('POST', '/api/auth/mcp-token', { name, perms, projects, allProjects: !projects }),
   updateMcpToken: (id, { perms, projects }) => req('PATCH', `/api/auth/mcp-tokens/${encodeURIComponent(id)}`, { perms, projects }),
   listMcpTokens: () => req('GET', '/api/auth/mcp-tokens'),
   revokeMcpToken: (id) => req('DELETE', `/api/auth/mcp-tokens/${encodeURIComponent(id)}`),
@@ -67,7 +67,7 @@ export const shareApi = {
   add: (login, role) => req('POST', '/api/share', { login, role }),
   remove: (userId) => req('DELETE', `/api/share/${encodeURIComponent(userId)}`),
   setRole: (userId, role) => req('POST', '/api/share/role', { userId, role }),
-  createLink: (role, maxUses) => req('POST', '/api/share/link', { role, maxUses }),
+  createLink: (role, maxUses, expiresInDays) => req('POST', '/api/share/link', { role, maxUses, expiresInDays }),
   revokeLink: (role) => req('DELETE', `/api/share/link/${encodeURIComponent(role)}`),
   join: (token) => req('POST', '/api/share/join', { token }),
 };
@@ -84,6 +84,9 @@ export const adminApi = {
   getMail: () => req('GET', '/api/admin/mail'),
   saveMail: (body) => req('PUT', '/api/admin/mail', body),
   testMail: () => req('POST', '/api/admin/mail/test'),
+  getAudit: (event) => req('GET', '/api/admin/audit' + (event ? `?event=${encodeURIComponent(event)}` : '')),
+  getLimits: () => req('GET', '/api/admin/limits'),
+  saveLimits: (limits) => req('PUT', '/api/admin/limits', { limits }),
 };
 
 export const api = {

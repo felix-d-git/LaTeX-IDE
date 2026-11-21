@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 const fs = require('fs');
 const path = require('path');
-const { buildTree, isTextFile, readUtf8OrNull } = require('./fsTree');
+const { Worker } = require('worker_threads');
+const { buildTree, isTextFile } = require('./fsTree');
 
 function flattenFiles(nodes, out = []) {
   for (const n of nodes) {
@@ -12,14 +13,20 @@ function flattenFiles(nodes, out = []) {
   return out;
 }
 
+const MAX_PATTERN = 500; // Zeichen im Suchmuster
+const MAX_LINE = 5000; // längere Zeilen werden nicht durchsucht (begrenzt Backtracking-Eingabe)
+const SEARCH_TIMEOUT_MS = 5000;
+
 function toRegex(query, { regex, caseSensitive, wholeWord }) {
+  if (query.length > MAX_PATTERN) throw new Error(`Suchmuster zu lang (max. ${MAX_PATTERN} Zeichen).`);
   let pattern = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // \b kennt nur ASCII-Wortzeichen: mit Unicode-Lookarounds sind ä/ö/ü/ß Wortzeichen.
   if (wholeWord) pattern = `(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`;
   return new RegExp(pattern, (caseSensitive ? 'g' : 'gi') + (wholeWord ? 'u' : ''));
 }
 
-function searchProject(root, query, opts = {}) {
+// Synchroner Kern; läuft im Worker (searchWorker.js), nie im Haupt-Thread des Servers.
+function searchProjectSync(root, query, opts = {}) {
   if (!query) return [];
   const re = toRegex(query, opts);
   const files = flattenFiles(buildTree(root));
@@ -29,6 +36,7 @@ function searchProject(root, query, opts = {}) {
     const content = fs.readFileSync(abs, 'utf8');
     const lines = content.split(/\r?\n/);
     lines.forEach((lineText, idx) => {
+      if (lineText.length > MAX_LINE) return;
       re.lastIndex = 0;
       let match;
       const matches = [];
@@ -44,35 +52,23 @@ function searchProject(root, query, opts = {}) {
   return results;
 }
 
-function replaceInProject(root, query, replacement, opts = {}) {
-  // Leere Suche matcht überall und würde jede Datei zerstören.
-  if (!query || typeof replacement !== 'string') throw new Error('Suchbegriff und Ersetzung sind erforderlich.');
-  const re = toRegex(query, opts);
-  const files = flattenFiles(buildTree(root));
-  let totalReplacements = 0;
-  const changedFiles = [];
-  const skippedFiles = [];
-  for (const relPath of files) {
-    const abs = path.join(root, relPath);
-    // Decoding Latin-1 as UTF-8 and writing it back would destroy every umlaut.
-    const content = readUtf8OrNull(abs);
-    if (content === null) {
-      if (re.test(fs.readFileSync(abs, 'latin1'))) skippedFiles.push(relPath);
-      re.lastIndex = 0;
-      continue;
-    }
-    let count = 0;
-    const newContent = content.replace(re, (...args) => {
-      count++;
-      return replacement;
+// Regex-Suche im Worker mit hartem Timeout (ReDoS, #155): hängt das Muster, wird der Worker beendet.
+async function searchProject(root, query, opts = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
+  if (!query) return [];
+  toRegex(query, opts); // ungültige/zu lange Muster sofort ablehnen
+  return new Promise((resolve, reject) => {
+    const w = new Worker(path.join(__dirname, 'searchWorker.js'), { workerData: { root, query, opts } });
+    const timer = setTimeout(() => {
+      w.terminate();
+      reject(new Error('Suche abgebrochen: Zeitlimit überschritten (Muster zu aufwendig).'));
+    }, timeoutMs);
+    w.once('message', (m) => {
+      clearTimeout(timer);
+      w.terminate();
+      m.error ? reject(new Error(m.error)) : resolve(m.results);
     });
-    if (count > 0) {
-      fs.writeFileSync(abs, newContent, 'utf8');
-      totalReplacements += count;
-      changedFiles.push({ file: relPath, count });
-    }
-  }
-  return { totalReplacements, changedFiles, skippedFiles };
+    w.once('error', (e) => { clearTimeout(timer); reject(e); });
+  });
 }
 
 // Labels aus .tex und Bib-Keys aus .bib für \ref{}/\cite{}-Vorschläge und
@@ -102,4 +98,4 @@ function collectRefs(root) {
   };
 }
 
-module.exports = { searchProject, replaceInProject, collectRefs };
+module.exports = { searchProject, searchProjectSync, collectRefs };

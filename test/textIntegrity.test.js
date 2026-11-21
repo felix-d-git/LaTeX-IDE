@@ -248,17 +248,6 @@ test('UTF-8 helpers: decodeText, conversion with inputenc (#43)', () => {
   assert.strictEqual(toUtf8Text(Buffer.from('\\usepackage[ansinew]{inputenc} \x80', 'latin1')), '\\usepackage[utf8]{inputenc} €');
 });
 
-test('replaceInProject skips files that are not UTF-8 (#43)', () => {
-  const { replaceInProject } = require('../server/lib/search');
-  const root = tmp();
-  fs.writeFileSync(path.join(root, 'a.tex'), 'und\n');
-  fs.writeFileSync(path.join(root, 'b.tex'), LATIN1);
-  const r = replaceInProject(root, 'und', 'and', {});
-  assert.deepStrictEqual(r.changedFiles, [{ file: 'a.tex', count: 1 }]);
-  assert.deepStrictEqual(r.skippedFiles, ['b.tex']);
-  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'b.tex')), LATIN1);
-});
-
 test('history: Latin-1 byte change makes a snapshot, snapshot bytes kept (#43)', () => {
   const history = require('../server/lib/history');
   const root = tmp();

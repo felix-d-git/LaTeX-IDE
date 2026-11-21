@@ -33,6 +33,8 @@ function dummySmtp() {
   return new Promise((r) => srv.listen(0, '127.0.0.1', () => r({ mails, port: srv.address().port, close: () => srv.close() })));
 }
 
+process.env.SMTP_ALLOW_PLAIN = 'true'; // dummy sink has no STARTTLS (#167); inherited by startServer
+
 async function register(srv, admin, name) {
   const { token } = (await admin.call('POST', '/api/admin/invites')).body;
   const c = client(srv.base);

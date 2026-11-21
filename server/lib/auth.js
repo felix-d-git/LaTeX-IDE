@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const vault = require('./vault');
 
 const DATA_PATH = path.join((process.env.DATA_DIR || path.join(__dirname, '..', '..')), 'auth-data.json');
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
@@ -30,6 +31,12 @@ function load() {
     for (const k of ['users', 'invites', 'resetTokens', 'verifyTokens', 'apiTokens', 'mcpTokens']) if (!Array.isArray(data[k])) data[k] = [];
     if (!data.settings || typeof data.settings !== 'object') data.settings = {};
     data.mcpTokens.forEach(migrateMcpToken);
+    // #182: Einladungen nur noch gehasht; Klartext-Altbestand einmalig umstellen (alte Links gelten weiter).
+    let migrated = false;
+    for (const i of data.invites) {
+      if (typeof i.token === 'string') { i.tokenHash = crypto.createHash('sha256').update(i.token).digest('hex'); delete i.token; migrated = true; }
+    }
+    if (migrated) save(data);
     return data;
   }
   return { users: [], invites: [], resetTokens: [], verifyTokens: [], apiTokens: [], mcpTokens: [], settings: {} };
@@ -38,11 +45,22 @@ function load() {
 // tmp + rename: a crash mid-write must never leave a truncated auth file behind.
 function save(data) {
   const tmp = DATA_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, DATA_PATH);
+  vault.writeThrough(DATA_PATH); // synchron, kein 500-ms-Debounce (#161)
 }
 
 const data = load();
+
+// Persist-then-swap (#161): mutate a copy, persist it, only then make it the live state. If save() throws,
+// the old state stays live and the caller gets the error.
+function commit(mutate) {
+  const next = structuredClone(data);
+  const result = mutate(next);
+  save(next);
+  Object.assign(data, next);
+  return result;
+}
 
 function randomToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -93,6 +111,8 @@ const PUBLIC_PASSWORDS = new Set(['bitte-sofort-aendern', 'bitte-ein-echtes-pass
 
 function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 8) throw new Error('Passwort muss mindestens 8 Zeichen haben.');
+  // bcrypt only looks at the first 72 bytes (#180): reject longer ones instead of silently truncating.
+  if (Buffer.byteLength(pw, 'utf8') > 72) throw new Error('Passwort zu lang (max. 72 Byte).');
   if (PUBLIC_PASSWORDS.has(pw)) throw new Error('Dieses Passwort ist öffentlich bekannt, bitte ein anderes wählen.');
 }
 
@@ -128,10 +148,20 @@ async function createUser({ email, password, isAdmin, username, emailVerified = 
   return user;
 }
 
+// Dummy hash (same cost as real ones, built once) so unknown users / oversized input cost the same bcrypt time (#179).
+let dummyHash;
+const MAX_LOGIN_PASSWORD = 1024; // coarse cap only: existing accounts with long passwords must still log in (#180)
 async function verifyPassword(user, password) {
   // Malformed bodies (password: 123, {}) would make bcrypt throw.
-  if (typeof (password || '') !== 'string' || typeof user.passwordHash !== 'string') return false;
-  return bcrypt.compare(password || '', user.passwordHash);
+  const pw = password || '';
+  const real = !!user && typeof user.passwordHash === 'string';
+  if (typeof pw !== 'string' || (user && !real)) return false;
+  if (!real || pw.length > MAX_LOGIN_PASSWORD) {
+    dummyHash = dummyHash || bcrypt.hash('dummy-password', 12);
+    await bcrypt.compare(pw.slice(0, MAX_LOGIN_PASSWORD), await dummyHash);
+    return false;
+  }
+  return bcrypt.compare(pw, user.passwordHash);
 }
 
 // A password change/reset is the reaction to a suspected compromise: desktop and MCP tokens minted
@@ -162,19 +192,34 @@ async function resetInitialPassword(user, password) {
   user.passwordHash = await bcrypt.hash(password, 12);
   user.passwordChangedAt = new Date().toISOString();
   user.mustChangePassword = true;
-  const before = data.apiTokens.length + data.mcpTokens.length;
-  data.apiTokens = data.apiTokens.filter((t) => t.userId !== user.id);
-  data.mcpTokens = data.mcpTokens.filter((t) => t.userId !== user.id);
-  save(data);
-  return before - data.apiTokens.length - data.mcpTokens.length;
+  return commit((d) => {
+    const before = d.apiTokens.length + d.mcpTokens.length;
+    d.apiTokens = d.apiTokens.filter((t) => t.userId !== user.id);
+    d.mcpTokens = d.mcpTokens.filter((t) => t.userId !== user.id);
+    return before - d.apiTokens.length - d.mcpTokens.length;
+  });
 }
 
 // --- Invites: admin generates a link, the recipient uses it once to self-register ---
 
+const PENDING = '__pending__'; // Einladung beansprucht, Konto wird gerade angelegt (#178)
+
+function safeEqualHex(a, b) {
+  const x = Buffer.from(String(a), 'hex');
+  const y = Buffer.from(String(b), 'hex');
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function findInvite(token) {
+  const h = hashToken(String(token || ''));
+  return data.invites.find((i) => safeEqualHex(i.tokenHash, h)) || null;
+}
+
+// Gibt den Klartext-Token einmalig zurück; gespeichert wird nur der Hash (#182).
 function createInvite(createdByUserId) {
   const token = randomToken();
   data.invites.push({
-    token,
+    tokenHash: hashToken(token),
     createdBy: createdByUserId,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString(),
@@ -190,23 +235,53 @@ function listInvites() {
 }
 
 function getValidInvite(token) {
-  const invite = data.invites.find((i) => i.token === token);
+  const invite = findInvite(token);
   if (!invite) return null;
   if (invite.usedBy) return null;
   if (new Date(invite.expiresAt).getTime() < Date.now()) return null;
   return invite;
 }
 
-function consumeInvite(token, userId) {
-  const invite = data.invites.find((i) => i.token === token);
-  if (!invite) return;
-  invite.usedBy = userId;
-  invite.usedAt = new Date().toISOString();
-  save(data);
+// Atomar (#178): prüfen + als beansprucht markieren in einem synchronen Schritt, VOR bcrypt/createUser.
+// Gibt die Einladung zurück oder null, wenn ungültig/schon beansprucht.
+function claimInvite(token) {
+  const invite = getValidInvite(token);
+  if (!invite) return null;
+  const { tokenHash } = invite;
+  commit((d) => {
+    const i = d.invites.find((x) => x.tokenHash === tokenHash);
+    i.usedBy = PENDING;
+    i.usedAt = new Date().toISOString();
+  });
+  return invite;
 }
 
-function revokeInvite(token) {
-  data.invites = data.invites.filter((i) => i.token !== token);
+// Anlegen fehlgeschlagen: Einladung wieder freigeben (nur wenn noch beansprucht, nicht widerrufen).
+function releaseInvite(token) {
+  const invite = findInvite(token);
+  if (!invite || invite.usedBy !== PENDING) return;
+  const { tokenHash } = invite;
+  commit((d) => {
+    const i = d.invites.find((x) => x.tokenHash === tokenHash);
+    i.usedBy = null;
+    i.usedAt = null;
+  });
+}
+
+// Schließt die Beanspruchung ab; überschreibt nie eine fremde/ungültige Einladung.
+function consumeInvite(token, userId) {
+  const invite = findInvite(token);
+  if (!invite || invite.usedBy !== PENDING) return false;
+  const { tokenHash } = invite;
+  commit((d) => {
+    d.invites.find((x) => x.tokenHash === tokenHash).usedBy = userId;
+  });
+  return true;
+}
+
+// id = tokenHash (aus listInvites); der Klartext-Token ist nach der Erzeugung nicht mehr bekannt.
+function revokeInvite(id) {
+  data.invites = data.invites.filter((i) => i.tokenHash !== id);
   save(data);
 }
 
@@ -282,8 +357,7 @@ function listApiTokens(userId) {
 }
 
 function revokeApiToken(userId, id) {
-  data.apiTokens = data.apiTokens.filter((t) => !(t.userId === userId && t.id === id));
-  save(data);
+  commit((d) => { d.apiTokens = d.apiTokens.filter((t) => !(t.userId === userId && t.id === id)); });
 }
 
 // --- MCP tokens (external AI tools): single rights, for all projects (perms) or per selected project (projects), stored hashed ---
@@ -367,8 +441,7 @@ function listMcpTokens(userId) {
 }
 
 function revokeMcpToken(userId, id) {
-  data.mcpTokens = data.mcpTokens.filter((t) => !(t.userId === userId && t.id === id));
-  save(data);
+  commit((d) => { d.mcpTokens = d.mcpTokens.filter((t) => !(t.userId === userId && t.id === id)); });
 }
 
 // Removes the account and everything keyed to it (tokens, invites it used stay as history).
@@ -412,13 +485,16 @@ function listUsers() {
 }
 
 function deleteUser(id) {
-  data.users = data.users.filter((u) => u.id !== id);
-  for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) data[k] = data[k].filter((t) => t.userId !== id);
-  save(data);
+  commit((d) => {
+    d.users = d.users.filter((u) => u.id !== id);
+    for (const k of ['apiTokens', 'mcpTokens', 'resetTokens', 'verifyTokens']) d[k] = d[k].filter((t) => t.userId !== id);
+  });
 }
 
 module.exports = {
   getSettings,
+  claimInvite,
+  releaseInvite,
   setSettings,
   markVerified,
   moveMcpProject,
