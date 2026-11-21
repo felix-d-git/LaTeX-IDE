@@ -10,6 +10,8 @@ const path = require('path');
 const auth = require('./auth');
 const { audit } = require('./audit');
 const collab = require('./collab');
+// Display name always from the account; the free token name is only a suffix (#187).
+const mcpAuthor = (a) => ({ id: a.user.id, name: `${auth.toPublicUser(a.user).username} (KI: ${a.name})`, via: 'mcp' });
 const comments = require('./comments');
 const treeOps = require('./treeOps');
 const { buildTree, isTextFile, safeResolve, isIgnored, canonRel } = require('./fsTree');
@@ -258,7 +260,7 @@ function createMcp(ctx) {
           to = from + lines[ln - 1].length;
         }
         if (!String(args.text || '').trim()) throw new Error('text fehlt.');
-        comments.add(root, rel, { from, to, anchorText: text.slice(from, to), text: String(args.text).trim(), author: { id: a.user.id, name: a.name } });
+        comments.add(root, rel, { from, to, anchorText: text.slice(from, to), text: String(args.text).trim(), author: mcpAuthor(a) });
         ctx.broadcast(root, { type: 'commentsChanged', path: rel });
         return `Kommentar bei Zeile ${lineOf(text, from)} hinzugefügt.`;
       }
@@ -282,7 +284,7 @@ function createMcp(ctx) {
           anchorText: args.old_text,
           text: String(args.reason || '').trim() || 'Änderungsvorschlag',
           suggestion: { oldText: args.old_text, newText: args.new_text },
-          author: { id: a.user.id, name: a.name },
+          author: mcpAuthor(a),
         });
         ctx.broadcast(root, { type: 'commentsChanged', path: rel });
         return `Vorschlag bei Zeile ${lineOf(text, from)} gespeichert (wartet auf Annehmen/Ablehnen in der IDE).`;
