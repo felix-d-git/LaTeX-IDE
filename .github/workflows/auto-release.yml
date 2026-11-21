@@ -25,7 +25,7 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           last=$(gh release view --json tagName -q .tagName) || { echo "noch kein Release"; exit 0; }
-          # Autor ueber die GitHub-API (#192): %an ist frei setzbar. Nur Commits, deren GitHub-Account
+          # Autor ueber die GitHub-API (#192): der Git-Autorname ist frei setzbar. Nur Commits, deren GitHub-Account
           # dependabot[bot] ist UND deren Signatur GitHub verifiziert hat, zaehlen als Dependabot.
           cmp=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${last}...${GITHUB_SHA}" --paginate -q '[.total_commits, (.commits | length), ([.commits[] | select(.author.login == "dependabot[bot]" and .commit.verification.verified == true)] | length)] | @tsv' | awk '{t=$1; n+=$2; v+=$3} END {print t, n, v}')
           read -r total listed verified <<< "$cmp"
