@@ -219,7 +219,8 @@ export function setupCommentsPanel({ commentsManager, editorMgr, currentUser, ge
     const meta = document.createElement('div');
     meta.className = 'comment-meta';
     const who = document.createElement('span');
-    who.textContent = `${item.author ? item.author.name : 'Unbekannt'} · ${formatTime(item.createdAt)}${item.editedAt ? ' (bearbeitet)' : ''}`;
+    const via = item.author && item.author.via === 'mcp' ? ' [über KI-Werkzeug]' : '';
+    who.textContent = `${item.author ? item.author.name : 'Unbekannt'}${via} · ${formatTime(item.createdAt)}${item.editedAt ? ' (bearbeitet)' : ''}`;
     meta.appendChild(who);
     const body = document.createElement('div');
     body.className = 'comment-text';
