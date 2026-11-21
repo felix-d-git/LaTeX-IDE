@@ -158,9 +158,8 @@ begin
 
   AdminPage := CreateInputQueryPage(UrlPage.ID,
     'Administrator', 'Konto fuer die Verwaltung des Servers',
-    'Mit diesem Konto meldest du dich zuerst an und laedst weitere Nutzer ein.');
+    'Mit diesem Konto meldest du dich zuerst an und laedst weitere Nutzer ein. Das Einmal-Passwort erzeugt der Server beim ersten Start.');
   AdminPage.Add('E-Mail:', False);
-  AdminPage.Add('Passwort (mind. 8 Zeichen):', True);
 
   // Ordner fuer die lokale Kopie der eigenen Projekte (nur Desktop-App, offline nutzbar).
   LocalDirPage := CreateInputDirPage(AdminPage.ID,
@@ -182,7 +181,7 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  Url, Pw: String;
+  Url: String;
 begin
   Result := True;
   if CurPageID = UrlPage.ID then
@@ -196,10 +195,9 @@ begin
   end;
   if CurPageID = AdminPage.ID then
   begin
-    Pw := AdminPage.Values[1];
-    if (Pos('@', AdminPage.Values[0]) = 0) or (Pos('.', Copy(AdminPage.Values[0], Pos('@', AdminPage.Values[0]) + 1, MaxInt)) = 0) or (Length(Pw) < 8) or (Pos('''', Pw) > 0) then
+    if (Pos('@', AdminPage.Values[0]) = 0) or (Pos('.', Copy(AdminPage.Values[0], Pos('@', AdminPage.Values[0]) + 1, MaxInt)) = 0) then
     begin
-      MsgBox('Bitte eine E-Mail-Adresse und ein Passwort mit mindestens 8 Zeichen (ohne Apostroph) angeben.', mbError, MB_OK);
+      MsgBox('Bitte eine gueltige E-Mail-Adresse angeben.', mbError, MB_OK);
       Result := False;
     end;
   end;
@@ -214,6 +212,15 @@ begin
   SetPreviousData(PreviousDataKey, 'LocalDir', LocalDirPage.Values[0]);
 end;
 
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and IsServerMode then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+      'Einmal-Passwort fuer den ersten Login (Aenderung wird erzwungen): ' +
+      ExpandConstant('{localappdata}\LatexIDE\server-data\initial-admin-password.txt') +
+      ' (entsteht beim ersten Start des Servers).';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Url, EnvFile: String;
@@ -226,7 +233,6 @@ begin
     if not FileExists(EnvFile) then
       SaveStringsToUTF8File(EnvFile, [
         'ADMIN_EMAIL=' + Trim(AdminPage.Values[0]),
-        'ADMIN_PASSWORD=''' + AdminPage.Values[1] + '''',
         'DATA_DIR=' + ExpandConstant('{localappdata}\LatexIDE\server-data'),
         'UPDATE_MODE=notify',
         'INSTALL_KIND=windows'], False);
@@ -246,13 +252,13 @@ function MultiByteToWideChar(CodePage, Flags: Cardinal; Src: AnsiString; SrcLen:
 
 function Utf8ToStr(S: AnsiString): String;
 var
-  Len: Integer;
+  N: Integer;
 begin
-  Result := '';
-  if S = '' then Exit;
-  SetLength(Result, Length(S)); // UTF-16 braucht nie mehr Zeichen als UTF-8 Bytes
-  Len := MultiByteToWideChar(65001, 0, S, Length(S), Result, Length(S));
-  SetLength(Result, Len);
+  SetLength(Result, Length(S)); // Puffer: hoechstens so viele UTF-16-Einheiten wie Bytes
+  N := 0;
+  if Length(S) > 0 then
+    N := MultiByteToWideChar(65001, 0, S, Length(S), Result, Length(S));
+  SetLength(Result, N);
 end;
 
 // "localDir" aus einer JSON-Datei (install.json vom Setup, config.json der App), beide UTF-8.
