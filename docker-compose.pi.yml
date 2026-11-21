@@ -25,6 +25,7 @@ services:
     mem_limit: ${LATEX_MEM:-1g}
     memswap_limit: ${LATEX_MEM:-1g}
     cpus: ${LATEX_CPUS:-2}
+    pids_limit: ${LATEX_PIDS:-256}
     security_opt:
       - no-new-privileges:true
     cap_drop:
