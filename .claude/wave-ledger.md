@@ -131,3 +131,12 @@ Tests: 380 pass, 2 fail (bekannt: pandocCopyright, containerWorkflow)
 - Nachgezogen: #188-Test (Escape-Bug im TeX-String), test/_server.js stop() killt auf Windows den Prozessbaum (sonst überleben TeX-Enkel → EPERM)
 - Befund: `child.kill()` des Servers auf Windows lässt laufende latexmk/pdflatex weiterlaufen (Exit-Handler laufen nicht); Compile-Timeout selbst killt den Baum korrekt
 - Tests: 396, 392 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
+
+## Wave 9 (25.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #214, #213 | 1 | agent-1 | DONE (654d68a; #214 Ursache nicht reproduziert, nur Darstellung gelb gewellt → GUI-Prüfpunkt) |
+| #183 (Rest) | 1 | agent-2 | DONE (8243eb2; create/copy/rename/upload-zip + open liefern weiter `root`/`activeRoot`; Label-Zuordnungen geteilter Projekte ohne Migration verloren) |
+| #200 (Punkte 3/4) | 2 | agent-3 | DONE (14cd11b) |
+- Zurückgestellt: #212; #126, #123 blockiert; #198/#193 = Übersichts-Issues; #137/#209 nur noch schließen
+- Tests: 400, 396 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
