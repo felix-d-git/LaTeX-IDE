@@ -32,6 +32,10 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 7: #182 → Invite- + Share-Tokens nur gehasht (hashToken) + timingSafeEqual, bestehende Klartext-Tokens beim Laden einmalig hashen (alte Links gültig), Share-Links mit optionalem Ablaufdatum (Default ohne Ablauf); fester 30-Tage-Ablauf verworfen
 - 18.11.2026 Wave 7: #180 → Setzen (register/reset/change/initial) lehnt >72 Byte UTF-8 mit klarer Meldung ab; Login nur grobe Obergrenze 1024 Zeichen (bestehende Konten nicht aussperren); SHA-256-Prehash verworfen (Hash-Versionierung + Migration)
 - 18.11.2026 Wave 7: Zusammenstellung #178+#182, #179+#180, #184+#185, #209+#189; #183 nach #184 (Fehlermeldungs-Überschneidung)
+- 25.11.2026 Wave 9: #212 → zurückgestellt (6 offene Entscheidungen im Issue, Überschneidung desktop.js mit #183)
+- 25.11.2026 Wave 9: #213 → „Zum Wörterbuch“ = persönliche Wortliste in den Benutzer-Einstellungen, Treffer daraus nicht mehr markiert; Projekt-Wörterbuchdatei verworfen
+- 25.11.2026 Wave 9: #200 Punkt 4 → ScanCode nur als manueller Schritt in der Release-Checkliste; eigenes Docker-Skript verworfen
+- 25.11.2026 Wave 9: vor der Wave origin/master (#215, #216) in staging/second-branch gemergt
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
