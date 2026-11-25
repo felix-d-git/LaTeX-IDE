@@ -10,11 +10,13 @@ export function setupProjectDialog({ onOpened }) {
   const btnCancel = document.getElementById('btn-cancel-open');
   const btnConfirm = document.getElementById('btn-confirm-open');
 
+  let known = new Set(); // projectIds from the list; anything else typed is a folder path
   async function show() {
     dialog.classList.remove('hidden');
-    const { recentRoots, localProjects } = await api.listProjects();
+    const { recentProjects, localProjects } = await api.listProjects();
     recentEl.innerHTML = '';
-    const all = [...new Set([...recentRoots, ...localProjects.map((p) => p.root || p.name)])];
+    known = new Set([...recentProjects, ...localProjects.map((p) => p.id)]);
+    const all = [...new Set([...recentProjects, ...localProjects.map((p) => p.id)])];
     for (const root of all) {
       const el = document.createElement('div');
       el.className = 'recent-item';
@@ -35,7 +37,7 @@ export function setupProjectDialog({ onOpened }) {
     const root = pathInput.value.trim();
     if (!root) return;
     try {
-      const result = await api.openProject(root);
+      const result = await api.openProject(known.has(root) ? { projectId: root } : root);
       hide();
       onOpened(result);
     } catch (e) {

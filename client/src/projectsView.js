@@ -70,7 +70,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   let labelColor = null;
   let visibleKeys = [];
   const isShared = (p) => !!p.owner;
-  const keyOf = (p) => p.key || (isShared(p) ? p.root : p.name);
+  const keyOf = (p) => p.key || (isShared(p) ? p.id : p.name);
   let sortKey = 'lastModified';
   let sortDir = -1; // -1 desc, 1 asc
 
@@ -161,7 +161,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       tdTitle.className = 'project-title';
       tdTitle.addEventListener('click', () => {
         if (mode !== 'projects' && mode !== 'shared') return;
-        onOpenProject(p.root);
+        onOpenProject(p.id);
         hide();
       });
       tr.appendChild(tdTitle);
@@ -178,7 +178,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       tdActions.className = 'project-actions';
       if (mode === 'projects' && !p.shared) {
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
-          onOpenProject(p.root);
+          onOpenProject(p.id);
           hide();
         }));
         tdActions.appendChild(iconBtn('edit', 'Umbenennen', () => renameProject(p.name)));
@@ -190,7 +190,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       } else if (mode === 'shared' || p.shared) {
         // Owner's project: only open here; leaving is in the share dialog.
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
-          onOpenProject(p.root);
+          onOpenProject(p.id);
           hide();
         }));
       } else if (mode === 'archive') {
@@ -416,9 +416,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     setPct(0);
     wrap.classList.remove('hidden');
     try {
-      const { root } = await api.uploadZip(file, setPct);
+      const { projectId } = await api.uploadZip(file, setPct);
       await refresh();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Zip-Upload fehlgeschlagen: ' + e.message);
@@ -432,9 +432,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     const name = prompt('Name des neuen Projekts:');
     if (!name) return;
     try {
-      const { root } = await api.createProject(name);
+      const { projectId } = await api.createProject(name);
       await refresh();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Fehler beim Anlegen: ' + e.message);
@@ -474,9 +474,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     const newName = copyNameInput.value.trim();
     if (!newName || !pendingCopySource) return;
     try {
-      const { root } = await api.copyProject(pendingCopySource, newName);
+      const { projectId } = await api.copyProject(pendingCopySource, newName);
       hideCopyDialog();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Fehler beim Kopieren: ' + e.message);

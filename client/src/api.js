@@ -92,7 +92,7 @@ export const adminApi = {
 export const api = {
   aiPost: (url, body) => req('POST', url, body), // KI-Chat: /api/ai/tools|tool|snapshot
   listProjects: () => req('GET', '/api/projects/list'),
-  openProject: (root) => req('POST', '/api/projects/open', { root }),
+  openProject: (ref) => req('POST', '/api/projects/open', typeof ref === 'string' ? { root: ref } : ref), // { projectId } or typed folder path
   createProject: (name) => req('POST', '/api/projects/create', { name }),
   renameProject: (oldName, newName) => req('POST', '/api/projects/rename', { oldName, newName }),
   copyProject: (name, newName) => req('POST', '/api/projects/copy', { name, newName }),
