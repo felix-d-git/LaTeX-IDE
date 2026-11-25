@@ -9,7 +9,7 @@ import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, b
 import { defaultKeymap } from '@codemirror/commands';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { lintKeymap, linter, lintGutter, forceLinting } from '@codemirror/lint';
+import { lintKeymap, linter, lintGutter, forceLinting, forEachDiagnostic } from '@codemirror/lint';
 import { fixHint } from './fixHint.js';
 import { latexSyntaxDiagnostics } from './latexLint.js';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -337,6 +337,15 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     }
   }
 
+  // LanguageTool-Vorschläge (+ „Zum Wörterbuch“) der Treffer an Position pos, für das Kontextmenü (#213).
+  function ltActionsAt(pos) {
+    const out = [];
+    forEachDiagnostic(view.state, (d, from, to) => {
+      if (d.source === 'LanguageTool' && pos >= from && pos <= to) out.push(...(d.actions || []));
+    });
+    return out;
+  }
+
   function getSelection() {
     const sel = view.state.selection.main;
     return { from: sel.from, to: sel.to, text: view.state.sliceDoc(sel.from, sel.to) };
@@ -457,6 +466,7 @@ export function createEditorManager(container, { onCommentClick, getInitialComme
     isOpen,
     applyExternalChange,
     getSelection,
+    ltActionsAt,
     openSearch,
     jumpToRange,
     jumpToLine,

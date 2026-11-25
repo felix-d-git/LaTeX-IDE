@@ -33,3 +33,38 @@ export function trackResult(fails, ok) {
 }
 
 export const LT_TIMEOUT_MS = 60000;
+
+// LanguageTool-Treffer → Lint-Diagnosen: Rechtschreibung (rot, Wort), alles andere = Grammatik/Stil
+// (gelb, ganzer Satz). Wörter der persönlichen Wortliste (#213) werden nicht markiert.
+export function buildDiagnostics(text, matches, dictionary = [], onAddWord) {
+  const dict = new Set(dictionary);
+  const out = [];
+  const sentences = new Map(); // "von-bis" → gelber Satz mit allen Treffern
+  for (const m of matches || []) {
+    const word = text.slice(m.offset, m.offset + m.length);
+    const spelling = m.rule && m.rule.issueType === 'misspelling';
+    if (spelling && dict.has(word)) continue;
+    const label = (r) => (spelling ? r.value || '∅' : `${word} → ${r.value || '∅'}`);
+    const actions = (m.replacements || []).slice(0, 3).map((r) => ({
+      name: label(r),
+      apply: (view) => view.dispatch({ changes: { from: m.offset, to: m.offset + m.length, insert: r.value } }),
+    }));
+    if (spelling && onAddWord) actions.push({ name: 'Zum Wörterbuch', apply: () => onAddWord(word) });
+    if (spelling) {
+      out.push({ from: m.offset, to: m.offset + m.length, severity: 'error', markClass: 'cm-lt-spell', message: m.message, source: 'LanguageTool', actions });
+      continue;
+    }
+    const range = sentenceRange(text, m.offset) || [m.offset, m.offset + Math.max(m.length, 1)];
+    const k = range.join('-');
+    const s = sentences.get(k);
+    if (s) {
+      s.message += '\n' + m.message;
+      s.actions.push(...actions);
+    } else {
+      const d = { from: range[0], to: range[1], severity: 'warning', markClass: 'cm-lt-sentence', message: m.message, source: 'LanguageTool', actions };
+      sentences.set(k, d);
+      out.push(d);
+    }
+  }
+  return out;
+}

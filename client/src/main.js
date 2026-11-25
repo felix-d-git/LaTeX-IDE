@@ -916,7 +916,10 @@ editorMgr.view.dom.addEventListener('contextmenu', (e) => {
   const { from, to, text } = editorMgr.getSelection();
   const ro = v.state.readOnly;
   const replaceSel = (insert) => v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
+  const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+  const lt = pos == null ? [] : editorMgr.ltActionsAt(pos).map((a) => ({ label: a.name, onClick: () => { a.apply(v); v.focus(); } }));
   openDropdownAt(e.clientX, e.clientY, [
+    ...(lt.length ? [...lt, { type: 'divider' }] : []),
     { label: 'Cut', shortcut: 'Ctrl X', disabled: !text || ro, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
     { label: 'Copy', shortcut: 'Ctrl C', disabled: !text, onClick: () => navigator.clipboard.writeText(text) },
     { label: 'Paste', shortcut: 'Ctrl V', disabled: ro, onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
