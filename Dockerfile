@@ -59,7 +59,8 @@ ARG PANDOC=1
 RUN printf 'path-include /usr/share/doc/*/NOTICE*\n' > /etc/dpkg/dpkg.cfg.d/zz-keep-notices \
     && apt-get update \
     && apt-get install -y --no-install-recommends perl ca-certificates \
-    && if [ "$PANDOC" != "0" ]; then apt-get install -y --no-install-recommends pandoc; fi \
+    && if [ "$PANDOC" != "0" ]; then apt-get install -y --no-install-recommends pandoc \
+      && echo "WARNING: PANDOC=1: copyright notices of the libraries statically linked into pandoc (/usr/share/doc/pandoc/static-libs) are only added by container-image.yml; add them with scripts/pandoc-copyright.py before redistributing this image (docs/INSTALL-DOCKER.md)." >&2; fi \
     && if [ "$TEXLIVE" = "apt" ]; then apt-get install -y --no-install-recommends texlive-full latexmk; fi \
     && rm -rf /var/lib/apt/lists/*
 
