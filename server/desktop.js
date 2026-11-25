@@ -274,7 +274,7 @@ app.post('/api/desktop/local-dir', express.json(), ah(async (req, res) => {
     if (warning) console.warn(warning);
     res.json({ ok: true, localDir: target, moved, warning });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    internalError(req, res, e);
   } finally {
     moving = false;
   }
@@ -660,7 +660,7 @@ app.post('/api/compile', express.json({ limit: '50mb' }), (req, res) => {
   compileChain = run.catch(() => {});
   run.then(
     ({ status, body }) => res.status(status).json(body),
-    (e) => res.status(e.status || 500).json({ error: e.message, offline: e.offline })
+    (e) => (e.offline || (e.status && e.status < 500) ? res.status(e.status || 500).json({ error: e.message, offline: e.offline }) : internalError(req, res, e))
   );
 });
 
@@ -743,8 +743,8 @@ async function reopenOnServer() {
   const name = offlineOpened;
   offlineOpened = null;
   const cached = name && readJson(cacheFile('/api/projects/list'), null);
-  const root = cached && (JSON.parse(cached.body).localProjects || []).find((p) => p.name === name)?.root;
-  if (root) await remote('/api/projects/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root }) }).catch(() => {});
+  const projectId = cached && (JSON.parse(cached.body).localProjects || []).find((p) => p.name === name)?.id;
+  if (projectId) await remote('/api/projects/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId }) }).catch(() => {});
 }
 
 // Offline dashboard: all owned projects from the local copy (shared ones stay as cached, but can't be opened).
@@ -758,17 +758,17 @@ function serveOfflineProjects(req, res) {
     const base = cached ? JSON.parse(cached.body) : { labels: { labels: [], assign: {} }, labelColors: [] };
     res.json({
       ...base,
-      activeRoot: current && current.owned ? current.dir : null,
-      localProjects: have.map((p) => ({ name: p.name, root: localDirOf(p), lastModified: fs.statSync(localDirOf(p)).mtimeMs })),
+      activeProjectId: current && current.owned ? current.projectId : null,
+      localProjects: have.map((p) => ({ name: p.name, id: p.projectId, lastModified: fs.statSync(localDirOf(p)).mtimeMs })),
     });
     return true;
   }
   if (req.method !== 'POST' || route !== '/api/projects/open') return false;
-  let root = '';
+  let id = '';
   try {
-    root = path.resolve(JSON.parse(req.body.toString('utf8')).root);
+    id = String(JSON.parse(req.body.toString('utf8')).projectId || '');
   } catch {}
-  const p = have.find((x) => path.resolve(localDirOf(x)) === root);
+  const p = have.find((x) => x.projectId === id);
   if (!p) {
     res.status(503).json({ error: 'Offline: Geteilte Projekte lassen sich nur mit Verbindung zum Server öffnen.', offline: true });
     return true;
@@ -894,7 +894,7 @@ app.use('/api', express.raw({ type: () => true, limit: '200mb' }), ah(async (req
     }
     res.status(r.status).end(buf);
   } catch (e) {
-    if (!(e instanceof Offline)) return res.status(500).json({ error: e.message });
+    if (!(e instanceof Offline)) return internalError(req, res, e);
     if (serveLocal(req, res)) return;
     const cached = req.method === 'GET' && readJson(cacheFile(url, wantedProject(req)), null);
     if (!cached) return res.status(503).json({ error: 'Server nicht erreichbar (offline).', offline: true });
@@ -916,10 +916,16 @@ app.get('/licenses', (req, res) => {
 });
 app.get('/source', (req, res) => res.redirect(legal.SOURCE_LINK));
 
+// Node errors carry absolute paths: 5xx answers get only a reference, the details go to the log.
+function internalError(req, res, err) {
+  const ref = crypto.randomBytes(4).toString('hex');
+  console.error('[route]', ref, req.method, req.path, err);
+  res.status(500).json({ error: `Interner Fehler (Referenz ${ref}).` });
+}
 app.use((err, req, res, next) => {
-  console.error('[route]', req.method, req.path, err);
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: err.message || String(err) });
+  if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
+  internalError(req, res, err);
 });
 
 // --- websockets (/ws, /yjs) ---

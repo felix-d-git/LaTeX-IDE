@@ -45,7 +45,7 @@ async function startRemote(state) {
       let b = '';
       req.on('data', (d) => (b += d));
       return req.on('end', () => {
-        state.active = JSON.parse(b).root === '/shared' ? 'users/u2/Shared' : 'Thesis';
+        state.active = JSON.parse(b).projectId === 'users/u2/Shared' ? 'users/u2/Shared' : 'Thesis';
         send(200, { projectId: state.active, mainFile: 'main.tex', role: 'owner' });
       });
     }
@@ -153,10 +153,10 @@ test('#49: offline nach Wechsel in ein geteiltes Projekt - Baum, Cache und Kompi
   const d = await startDesktop(remote.url);
   try {
     // Own project Thesis first, then the shared project S (never compiled there).
-    await d.call('POST', '/api/projects/open', { body: { root: '/thesis' } });
+    await d.call('POST', '/api/projects/open', { body: { projectId: 'Thesis' } });
     assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'Thesis');
     assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'Thesis' })).json.project, 'Thesis');
-    await d.call('POST', '/api/projects/open', { pid: 'Thesis', body: { root: '/shared' } });
+    await d.call('POST', '/api/projects/open', { pid: 'Thesis', body: { projectId: 'users/u2/Shared' } });
     assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'users/u2/Shared');
     assert.strictEqual((await d.call('GET', '/api/comments', { pid: 'users/u2/Shared' })).json.project, 'users/u2/Shared');
 
@@ -196,7 +196,7 @@ test('#113: Rohdateien der Desktop-App (Proxy und Offline-Kopie) nur in der Sand
     assert.strictEqual(r.headers.get('x-content-type-options'), 'nosniff', `${what}: nosniff fehlt`);
   };
   try {
-    await d.call('POST', '/api/projects/open', { body: { root: '/thesis' } });
+    await d.call('POST', '/api/projects/open', { body: { projectId: 'Thesis' } });
     assert.strictEqual((await d.call('GET', '/api/tree')).json.projectId, 'Thesis');
 
     // Online: streamed through from the server, sandboxed by the desktop app itself.
@@ -223,6 +223,28 @@ test('#113: Rohdateien der Desktop-App (Proxy und Offline-Kopie) nur in der Sand
     assert.strictEqual(html.status, 200);
     assert.strictEqual(html.headers.get('content-type'), 'application/octet-stream', 'kein text/html aus der lokalen Kopie');
     sandboxed(html, 'offline seite.html');
+  } finally {
+    await d.stop();
+    await remote.close();
+  }
+});
+
+test('#183: 500-Antworten der Desktop-App enthalten keinen Pfad, nur eine Referenz im Log', async () => {
+  const state = { active: 'Thesis', down: false };
+  const remote = await startRemote(state);
+  const d = await startDesktop(remote.url);
+  try {
+    await d.call('POST', '/api/projects/open', { body: { projectId: 'Thesis' } });
+    await d.call('GET', '/api/tree');
+    state.down = true;
+    assert.strictEqual((await d.call('GET', '/api/file?path=main.tex', { pid: 'Thesis' })).json.content, 'THESIS'); // offline copy known
+    // main.tex is a file: a directory below it makes mkdir fail with ENOTDIR (message carries the full path).
+    const r = await d.call('POST', '/api/compile', { pid: 'Thesis', body: { overrides: { 'main.tex/x.tex': 'a' } } });
+    assert.strictEqual(r.status, 500, r.text);
+    const ref = /Referenz ([0-9a-f]{8})/.exec(r.json.error);
+    assert.ok(ref, r.text);
+    assert.ok(!r.text.includes(d.local) && !/[A-Za-z]:[\/]|ENOTDIR/.test(r.text), r.text);
+    assert.ok(d.log().includes(ref[1]), 'Referenz steht im Log');
   } finally {
     await d.stop();
     await remote.close();
