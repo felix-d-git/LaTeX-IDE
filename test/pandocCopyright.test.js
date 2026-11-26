@@ -73,7 +73,9 @@ function fixture(name) {
   assert.strictEqual(r.status, 0, r.stderr);
   return dir;
 }
-const run = (src, out) => spawnSync('python3', ['-I', SCRIPT, src, out], { encoding: 'utf8' });
+// Windows: Python schreibt CRLF -> auf LF normalisieren, damit die Regexe plattformunabhängig greifen
+const lf = (r) => Object.assign(r, { stdout: (r.stdout || '').replace(/\r\n/g, '\n'), stderr: (r.stderr || '').replace(/\r\n/g, '\n') });
+const run = (src, out) => lf(spawnSync('python3', ['-I', SCRIPT, src, out], { encoding: 'utf8' }));
 
 test('pandoc-Copyright: debian/copyright aus allen Quellformaten (3.0 quilt/native, 1.0 mit diff.gz)', { skip }, () => {
   const src = fixture('ok');
@@ -137,7 +139,9 @@ test('Container-Workflow: Copyright-Schicht nach den pandoc-Quellen, vor Upload 
 });
 
 test('Container-Workflow: Trockenlauf der Copyright-Schicht mit docker-Stub', { skip: (skip || (!fs.existsSync(BASH) && 'bash fehlt')) }, () => {
-  const runner = path.join(tmp, 'runner');
+  // Pfade gehen an bash: Backslashes (Windows) wären dort Escape-Zeichen -> Vorwärtsschrägstriche
+  const posix = (p) => p.replace(/\\/g, '/');
+  const runner = posix(path.join(tmp, 'runner'));
   fs.mkdirSync(runner);
   fs.renameSync(fixture('dry'), path.join(runner, 'src'));
   const stubs = path.join(tmp, 'stubs');
@@ -150,7 +154,7 @@ test('Container-Workflow: Trockenlauf der Copyright-Schicht mit docker-Stub', { 
     'if [ "$1" = run ]; then script="${@: -1}"; exec sh -c "${script//\\/usr\\/share\\/doc\\/pandoc\\/static-libs/$LOG.image}"; fi',
     'exit 1',
   ].join('\n') + '\n', { mode: 0o755 });
-  const log = path.join(tmp, 'log');
+  const log = posix(path.join(tmp, 'log'));
   const pandocCall = runOf('pandoc-Quellen sammeln').split('\n').find((l) => l.startsWith('python3 scripts/pandoc-copyright.py'));
   const script = `${pandocCall}\n${runOf('Copyright-Vermerke der pandoc-Bibliotheken ins Image')}`;
   const env = { ...process.env, PATH: `${stubs}${path.delimiter}${process.env.PATH}`, LOG: log, RUNNER_TEMP: runner };
