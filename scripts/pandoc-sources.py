@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 """Lists the Debian source packages statically linked into pandoc, as "<source> <version>" lines.
 
-bookworm's pandoc has no (Static-)Built-Using field, so the Haskell libraries come from the
+trixie's pandoc has no (Static-)Built-Using field, so the Haskell libraries come from the
 official buildinfo (Installed-Build-Depends: ghc + libghc-*-dev). The buildinfo is only used
 if its pandoc .deb hash matches the archive. Usage: pandoc-sources.py DEBIAN-PACKAGES.txt
 """
@@ -11,9 +11,9 @@ import json, lzma, re, sys, urllib.request
 
 ARCH = "amd64"
 INDEXES = [
-    "https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.xz",
-    "https://deb.debian.org/debian/dists/bookworm-updates/main/binary-amd64/Packages.xz",
-    "https://security.debian.org/debian-security/dists/bookworm-security/main/binary-amd64/Packages.xz",
+    "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
+    "https://deb.debian.org/debian/dists/trixie-updates/main/binary-amd64/Packages.xz",
+    "https://security.debian.org/debian-security/dists/trixie-security/main/binary-amd64/Packages.xz",
 ]
 
 
@@ -48,7 +48,7 @@ for url in INDEXES:
 
 deb_sha = binaries.get(("pandoc", pandoc_ver), (None, None, None))[2]
 if not deb_sha:
-    sys.exit(f"pandoc {pandoc_ver} not in the bookworm indexes")
+    sys.exit(f"pandoc {pandoc_ver} not in the trixie indexes")
 
 pool = "https://buildinfos.debian.net/buildinfo-pool/p/pandoc"
 buildinfo = get(f"{pool}/pandoc_{pandoc_ver.split(':')[-1]}_{ARCH}.buildinfo").decode("utf-8")
@@ -72,7 +72,7 @@ for name, ver in wanted:
         sys.exit(f"no source for {name} {ver}")
     out.add(src[0])
 
-# bookworm: ~150; far fewer means the buildinfo format changed
+# trixie: ~170; far fewer means the buildinfo format changed
 if len(out) < 50:
     sys.exit(f"only {len(out)} source packages found")
 for src, ver in sorted(out):

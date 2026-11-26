@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 """Copies debian/copyright of every source package in SOURCES.txt to OUT_DIR/<source>/copyright.
 
-bookworm's pandoc links ~150 Haskell libraries (BSD-3-Clause, MIT, ...) and the GHC runtime
+trixie's pandoc links ~150 Haskell libraries (BSD-3-Clause, MIT, ...) and the GHC runtime
 statically, but /usr/share/doc/pandoc/copyright only covers pandoc itself. Their copyright notices
 go into the image instead (container-image.yml: /usr/share/doc/pandoc/static-libs). Input is the
 folder "pandoc-Quellen sammeln" fills: SOURCES.txt from pandoc-sources.py ("<source> <version>")
