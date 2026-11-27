@@ -13,7 +13,7 @@ SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
-path = ["client/*.png", "package.json", "tailscale-serve.json", "server/lib/latexmkrc", "Dockerfile", ".dockerignore", ".gitignore", ".gitattributes", ".env.example", "REUSE.toml"]
+path = ["client/*.png", "package.json", "desktop/package.json", "tailscale-serve.json", "server/lib/latexmkrc", "Dockerfile", ".dockerignore", ".gitignore", ".gitattributes", ".env.example", "REUSE.toml"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 felix-d-git and LaTeX-IDE contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
