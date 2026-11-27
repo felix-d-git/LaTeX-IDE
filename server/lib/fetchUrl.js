@@ -108,4 +108,4 @@ function fetchUrl(url, headers = {}) {
   return get(String(url || ''), 0, headers);
 }
 
-module.exports = { fetchUrl, isBlocked };
+module.exports = { fetchUrl, isBlocked, safeLookup };

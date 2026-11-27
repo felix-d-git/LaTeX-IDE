@@ -454,6 +454,14 @@ function setZotero(userId, zotero) {
   save(data);
 }
 
+// Externe MCP-Server der KI (#126) je Nutzer, inkl. Tokens; nie ueber toPublicUser ausgeliefert.
+function setMcpServers(userId, list) {
+  const user = findUserById(userId);
+  if (!user) return;
+  user.mcpServers = list;
+  save(data);
+}
+
 function setDictionary(userId, words) {
   const user = findUserById(userId);
   if (!user) return;
@@ -502,6 +510,7 @@ module.exports = {
   deleteUser,
   listUsers,
   setZotero,
+  setMcpServers,
   setDictionary,
   findUserByEmail,
   findUserByUsername,
