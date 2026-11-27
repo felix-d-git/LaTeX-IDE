@@ -147,3 +147,11 @@ Tests: 380 pass, 2 fail (bekannt: pandocCopyright, containerWorkflow)
 | #200 (Punkte 3/4) | 2 | agent-3 | DONE (14cd11b) |
 - Zurückgestellt: #212; #126, #123 blockiert; #198/#193 = Übersichts-Issues; #137/#209 nur noch schließen
 - Tests: 400, 396 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
+
+## Wave 10 (27.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #212 | 1 | agent-1 | MERGED (af3edc1; Electron-Shell, Sync vor Beenden, Offline-Hinweis, GitHub-Update ohne Server, .tex-Zuordnung) |
+| #126 (Phase 1+2) | 1 | agent-2 | MERGED (a1b00ee + Review-Fixes 4e40e10: Gesamt-Deadline, gerahmte Fremd-Werkzeugbeschreibungen) |
+- Zurückgestellt: `?open=<Pfad>` (#212), #126 Phase 3+, #123; #198/#193 = Übersichts-Issues
+- Tests: 425, 422 pass, 2 skipped, 1 fail (bash -n: umgebungsbedingt, WSL-Stub im PATH; mit Git-Bash 5/5 grün)
