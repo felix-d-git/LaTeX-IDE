@@ -839,7 +839,8 @@ function render(packages) {
   lines.push('Not covered here:');
   lines.push('- Desktop installer packages (Node.js, TeX distributions): see LICENSES-INSTALLER.txt');
   lines.push('  (in the repository: installer/LICENSES-INSTALLER.txt). The Windows package ships');
-  lines.push('  Node.js with its license in `node\\LICENSE`.');
+  lines.push('  Node.js with its license in `node\\LICENSE` and the Electron runtime (MIT; Chromium and');
+  lines.push('  other components under their own licenses in `electron-runtime\\LICENSES.chromium.html`).');
   lines.push('- Docker image: Debian packages, listed with exact versions in /app/DEBIAN-PACKAGES.txt');
   lines.push('  inside the image (see docs/INSTALL-DOCKER.md), and Node.js with npm from the official');
   lines.push('  node image, license in /usr/local/LICENSE.');

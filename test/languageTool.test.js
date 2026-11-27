@@ -57,3 +57,24 @@ test('Timeout 60 s an allen Stellen', async () => {
     assert.match(code.slice(i, i + 400), /AbortSignal\.timeout\(60000\)/);
   }
 });
+
+test('buildDiagnostics: Grammatik = gelber Satz (#214), Wörterbuchwort wird nicht markiert (#213)', async () => {
+  const { buildDiagnostics } = await load();
+  const text = 'Ich gehen nach Hause. Das ist ein Tset.';
+  const matches = [
+    { offset: 4, length: 5, message: 'Grammatik', rule: { issueType: 'grammar' }, replacements: [{ value: 'gehe' }] },
+    { offset: 34, length: 4, message: 'Tippfehler', rule: { issueType: 'misspelling' }, replacements: [{ value: 'Test' }] },
+  ];
+  const added = [];
+  const d = buildDiagnostics(text, matches, [], (w) => added.push(w));
+  assert.strictEqual(d.length, 2);
+  assert.deepStrictEqual([d[0].from, d[0].to, d[0].markClass, d[0].severity], [0, 21, 'cm-lt-sentence', 'warning']);
+  assert.deepStrictEqual(d[0].actions.map((a) => a.name), ['gehen → gehe']);
+  assert.deepStrictEqual([d[1].markClass, d[1].actions.map((a) => a.name)], ['cm-lt-spell', ['Test', 'Zum Wörterbuch']]);
+  d[1].actions[1].apply();
+  assert.deepStrictEqual(added, ['Tset']);
+  const filtered = buildDiagnostics(text, matches, ['Tset']);
+  assert.deepStrictEqual(filtered.map((x) => x.markClass), ['cm-lt-sentence']);
+  const css = fs.readFileSync(path.join(__dirname, '../client/style.css'), 'utf8');
+  assert.match(css, /\.cm-lt-sentence \{[^}]*underline wavy #e5b800/);
+});

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 felix-d-git and LaTeX-IDE contributors
 import { clearPdfThumbs } from './visualEditor.js';
-import { api, authApi, adminApi, shareApi, setProjectId, withPid } from './api.js';
+import { api, authApi, adminApi, shareApi, setProjectId, getProjectId, withPid } from './api.js';
 import { setupAuthView } from './authView.js';
 import { connectWs, wsSubscribe } from './wsClient.js';
 import { renderTree, resetTreeSelection } from './fileTree.js';
@@ -636,7 +636,7 @@ async function loadProject(root, projectId) {
   resetTreeSelection();
   const name = root.split(/[\\/]/).pop() || root;
   els.activeProjectLabel.textContent = name;
-  els.projectButton.title = root;
+  els.projectButton.title = name;
   await Promise.all([loadTree(), commentsManager.loadAll(), applyRole()]);
 }
 
@@ -671,9 +671,9 @@ async function applyRole() {
   els.activeProjectLabel.title = reviewer ? 'Nur kommentieren' : '';
 }
 
-async function openProjectByRoot(root) {
+async function openProjectById(projectId) {
   try {
-    const result = await api.openProject(root);
+    const result = await api.openProject({ projectId });
     mainFile = result.mainFile;
     await loadProject(result.activeRoot, result.projectId);
     if (result.startFile) await openFile(result.startFile);
@@ -773,7 +773,7 @@ setupProjectDialog({
 });
 
 const projectsView = setupProjectsView({
-  onOpenProject: openProjectByRoot,
+  onOpenProject: openProjectById,
   currentUser,
 });
 
@@ -897,7 +897,7 @@ const menuCtx = {
   // Kopieren geht serverseitig per Namen im eigenen Projektordner: nur für eigene Projekte.
   onMakeCopy: async () => {
     try {
-      const own = (await api.listProjects()).localProjects.find((p) => p.root === activeProjectRoot);
+      const own = (await api.listProjects()).localProjects.find((p) => p.id === getProjectId());
       if (own) projectsView.showCopyDialogFor(own.name);
       else alert('Nur eigene Projekte können kopiert werden.');
     } catch (e) {
@@ -916,7 +916,10 @@ editorMgr.view.dom.addEventListener('contextmenu', (e) => {
   const { from, to, text } = editorMgr.getSelection();
   const ro = v.state.readOnly;
   const replaceSel = (insert) => v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
+  const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+  const lt = pos == null ? [] : editorMgr.ltActionsAt(pos).map((a) => ({ label: a.name, onClick: () => { a.apply(v); v.focus(); } }));
   openDropdownAt(e.clientX, e.clientY, [
+    ...(lt.length ? [...lt, { type: 'divider' }] : []),
     { label: 'Cut', shortcut: 'Ctrl X', disabled: !text || ro, onClick: async () => { await navigator.clipboard.writeText(text); replaceSel(''); v.focus(); } },
     { label: 'Copy', shortcut: 'Ctrl C', disabled: !text, onClick: () => navigator.clipboard.writeText(text) },
     { label: 'Paste', shortcut: 'Ctrl V', disabled: ro, onClick: async () => { replaceSel(await navigator.clipboard.readText()); v.focus(); } },
@@ -1267,8 +1270,8 @@ connectWs(forThisProject({
   } catch {}
   if (join) {
     try {
-      const { root } = await shareApi.join(join);
-      return openProjectByRoot(root);
+      const { projectId } = await shareApi.join(join);
+      return openProjectById(projectId);
     } catch (e) {
       alert(e.message);
     }

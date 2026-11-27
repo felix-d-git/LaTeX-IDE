@@ -9,7 +9,7 @@
 #
 # Two stages: npm ci with dev and optional packages (esbuild, @napi-rs/canvas) only
 # happens in the build stage, which is not part of the final image.
-FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS build
+FROM node:26-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5 AS build
 WORKDIR /app
 COPY package*.json ./
 # With optional deps: esbuild needs its platform package (@esbuild/*).
@@ -36,7 +36,7 @@ RUN node build.js \
     && cd /app/node_modules/pdfjs-dist \
     && rm -rf cmaps standard_fonts legacy image_decoders web types wasm iccs build/pdf.sandbox*
 
-FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
+FROM node:26-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5
 
 # Repo-Zuordnung kommt vom Build (container-image.yml: github.repository), kein fester Name im Image.
 ARG IMAGE_SOURCE=""
@@ -59,7 +59,8 @@ ARG PANDOC=1
 RUN printf 'path-include /usr/share/doc/*/NOTICE*\n' > /etc/dpkg/dpkg.cfg.d/zz-keep-notices \
     && apt-get update \
     && apt-get install -y --no-install-recommends perl ca-certificates \
-    && if [ "$PANDOC" != "0" ]; then apt-get install -y --no-install-recommends pandoc; fi \
+    && if [ "$PANDOC" != "0" ]; then apt-get install -y --no-install-recommends pandoc \
+      && echo "WARNING: PANDOC=1: copyright notices of the libraries statically linked into pandoc (/usr/share/doc/pandoc/static-libs) are only added by container-image.yml; add them with scripts/pandoc-copyright.py before redistributing this image (docs/INSTALL-DOCKER.md)." >&2; fi \
     && if [ "$TEXLIVE" = "apt" ]; then apt-get install -y --no-install-recommends texlive-full latexmk; fi \
     && rm -rf /var/lib/apt/lists/*
 

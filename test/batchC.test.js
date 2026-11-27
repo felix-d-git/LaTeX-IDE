@@ -47,7 +47,7 @@ test('images pinned by digest', () => {
     }
   }
   const ci = read('.github', 'workflows', 'container-image.yml');
-  for (const m of ci.matchAll(/debian:bookworm\S*/g)) assert.match(m[0], /@sha256:[0-9a-f]{64}$/);
+  for (const m of ci.matchAll(/debian:[a-z]+\S*/g)) assert.match(m[0], /@sha256:[0-9a-f]{64}$/);
 });
 
 test('release: SPDX SBOM generated and uploaded', () => {

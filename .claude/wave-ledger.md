@@ -32,6 +32,17 @@ Base: master (tabu) · Second: staging/second-branch
 - 18.11.2026 Wave 7: #182 → Invite- + Share-Tokens nur gehasht (hashToken) + timingSafeEqual, bestehende Klartext-Tokens beim Laden einmalig hashen (alte Links gültig), Share-Links mit optionalem Ablaufdatum (Default ohne Ablauf); fester 30-Tage-Ablauf verworfen
 - 18.11.2026 Wave 7: #180 → Setzen (register/reset/change/initial) lehnt >72 Byte UTF-8 mit klarer Meldung ab; Login nur grobe Obergrenze 1024 Zeichen (bestehende Konten nicht aussperren); SHA-256-Prehash verworfen (Hash-Versionierung + Migration)
 - 18.11.2026 Wave 7: Zusammenstellung #178+#182, #179+#180, #184+#185, #209+#189; #183 nach #184 (Fehlermeldungs-Überschneidung)
+- 25.11.2026 Wave 9: #212 → zurückgestellt (6 offene Entscheidungen im Issue, Überschneidung desktop.js mit #183)
+- 25.11.2026 Wave 9: #213 → „Zum Wörterbuch“ = persönliche Wortliste in den Benutzer-Einstellungen, Treffer daraus nicht mehr markiert; Projekt-Wörterbuchdatei verworfen
+- 25.11.2026 Wave 9: #200 Punkt 4 → ScanCode nur als manueller Schritt in der Release-Checkliste; eigenes Docker-Skript verworfen
+- 25.11.2026 Wave 9: vor der Wave origin/master (#215, #216) in staging/second-branch gemergt
+- 27.11.2026 Wave 10: #212 Shell → Electron (Tauri/Browser-Starter verworfen)
+- 27.11.2026 Wave 10: #212 Cloud → nur eigener LaTeX-IDE-Server, keine Fremd-Clouds
+- 27.11.2026 Wave 10: #212 Sync → global an, pro Projekt Opt-out „nur lokal“
+- 27.11.2026 Wave 10: #212 Fenster schließen → erst alle lokalen Änderungen fertig zum Server syncen, dann Programm vollständig beenden (kein Tray); fremde Änderungen erst beim nächsten Start mit Verbindung; ohne Verbindung beim Start Hinweis „möglicherweise nicht auf dem neusten Stand – keine Verbindung zum Server {URL}“
+- 27.11.2026 Wave 10: #212 Update-Quelle ohne Server → GitHub-Releases; mit Server weiter `/api/desktop/release`
+- 27.11.2026 Wave 10: #212 .tex-Dateizuordnung / „Öffnen mit LaTeX-IDE“ einbauen
+- 27.11.2026 Wave 10: #126 entsperrt (#125, #111–#116 zu) → nur Phasen 1+2 (Remote-HTTP-MCP-Client, Default „Immer fragen“, Rechte pro Tool, Import Claude-Desktop-Config); stdio + Server-Proxy später
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
@@ -127,3 +138,20 @@ Tests: 380 pass, 2 fail (bekannt: pandocCopyright, containerWorkflow)
 - Nachgezogen: #188-Test (Escape-Bug im TeX-String), test/_server.js stop() killt auf Windows den Prozessbaum (sonst überleben TeX-Enkel → EPERM)
 - Befund: `child.kill()` des Servers auf Windows lässt laufende latexmk/pdflatex weiterlaufen (Exit-Handler laufen nicht); Compile-Timeout selbst killt den Baum korrekt
 - Tests: 396, 392 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
+
+## Wave 9 (25.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #214, #213 | 1 | agent-1 | DONE (654d68a; #214 Ursache nicht reproduziert, nur Darstellung gelb gewellt → GUI-Prüfpunkt) |
+| #183 (Rest) | 1 | agent-2 | DONE (8243eb2; create/copy/rename/upload-zip + open liefern weiter `root`/`activeRoot`; Label-Zuordnungen geteilter Projekte ohne Migration verloren) |
+| #200 (Punkte 3/4) | 2 | agent-3 | DONE (14cd11b) |
+- Zurückgestellt: #212; #126, #123 blockiert; #198/#193 = Übersichts-Issues; #137/#209 nur noch schließen
+- Tests: 400, 396 pass, 2 skipped, 2 fail (bekannt: pandocCopyright, containerWorkflow)
+
+## Wave 10 (27.11.2026)
+| Issue | Prio | Agent | Status |
+|---|---|---|---|
+| #212 | 1 | agent-1 | MERGED (af3edc1; Electron-Shell, Sync vor Beenden, Offline-Hinweis, GitHub-Update ohne Server, .tex-Zuordnung) |
+| #126 (Phase 1+2) | 1 | agent-2 | MERGED (a1b00ee + Review-Fixes 4e40e10: Gesamt-Deadline, gerahmte Fremd-Werkzeugbeschreibungen) |
+- Zurückgestellt: `?open=<Pfad>` (#212), #126 Phase 3+, #123; #198/#193 = Übersichts-Issues
+- Tests: 425, 422 pass, 2 skipped, 1 fail (bash -n: umgebungsbedingt, WSL-Stub im PATH; mit Git-Bash 5/5 grün)

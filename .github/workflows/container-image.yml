@@ -159,7 +159,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/src"
           cp pandoc-sources.txt "$RUNNER_TEMP/src/SOURCES.txt"
           # Erst das Archiv der Distribution, sonst snapshot.debian.org (debsnap)
-          docker run --rm -v "$RUNNER_TEMP/src:/out" debian:bookworm@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8 bash -euo pipefail -c '
+          docker run --rm -v "$RUNNER_TEMP/src:/out" debian:trixie@sha256:3cda3ca472ce45507a5109c6a3907093e24d9ae67d55954c9a07a45665dafba2 bash -euo pipefail -c '
             sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null
@@ -213,7 +213,7 @@ jobs:
           cp debian-sources.txt "$DIR/SOURCES.txt"
           echo "::notice::Platz vorher: $(df -h --output=avail /mnt | tail -1) frei auf /mnt"
           # Fehlende Quellen alle melden (Annotationen), nicht nur die erste.
-          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:bookworm@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8 bash -uo pipefail -c '
+          docker run --rm -v "$DIR:/out" -e OWNER="$(id -u):$(id -g)" debian:trixie@sha256:3cda3ca472ce45507a5109c6a3907093e24d9ae67d55954c9a07a45665dafba2 bash -uo pipefail -c '
             sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
             apt-get update -qq || exit 1
             apt-get install -y -qq --no-install-recommends devscripts libwww-perl liblwp-protocol-https-perl libjson-perl ca-certificates >/dev/null || exit 1

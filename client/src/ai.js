@@ -11,7 +11,7 @@ export const MODES = { ask: 'Fragen', suggest: 'Vorschlagen', agent: 'Agent' };
 export const CONFIRM_PERMS = new Set(['create', 'delete', 'move', 'compile']);
 const WRITE_PERMS = new Set(['edit', 'create', 'delete', 'move']);
 // compile_status fragt nur den Fortschritt ab, das braucht keine Rückfrage.
-export const needsConfirm = (t) => CONFIRM_PERMS.has(t.perm) && t.name !== 'compile_status';
+export const needsConfirm = (t) => (t.external ? t.ask !== false : CONFIRM_PERMS.has(t.perm) && t.name !== 'compile_status');
 
 export function loadAi() {
   try {
@@ -188,6 +188,7 @@ export async function runAgent({ settings, messages, tools = [], callTool, confi
   const byName = new Map(tools.map((t) => [t.name, t]));
   const added = [];
   let writes = 0;
+  let tainted = false; // #126: nach einem Fremd-Werkzeug-Ergebnis keine schreibende IDE-Aktion ohne Rueckfrage
   for (let step = 0; step < maxSteps; step++) {
     const res = await chat(settings, messages.concat(added), { tools: spec, signal, timeoutMs, onDelta: (d, all) => onEvent({ type: 'delta', delta: d, text: all }) });
     const msg = { role: 'assistant', content: res.content || '', ...(res.tool_calls.length ? { tool_calls: res.tool_calls } : {}) };
@@ -208,13 +209,14 @@ export async function runAgent({ settings, messages, tools = [], callTool, confi
       if (!result && !t) result = { isError: true, text: `Werkzeug ${name} ist in diesem Modus nicht verfügbar.` };
       if (!result && WRITE_PERMS.has(t.perm) && ++writes > maxWrites) result = { isError: true, text: `Schreibgrenze dieses Laufs (${maxWrites} Änderungen) erreicht – Nutzer fragen, ob weitergemacht werden soll.` };
       let confirmed = false;
-      if (!result && needsConfirm(t)) {
+      if (!result && (needsConfirm(t) || (tainted && WRITE_PERMS.has(t.perm)))) {
         confirmed = !!(await confirm(name, args));
         if (!confirmed) result = { isError: true, text: 'Vom Nutzer abgelehnt.' };
       }
       if (!result) {
         try {
-          result = await callTool(name, args, confirmed);
+          result = await callTool(name, args, confirmed, t);
+          if (t.external) tainted = true;
         } catch (e) {
           result = { isError: true, text: e.message };
         }

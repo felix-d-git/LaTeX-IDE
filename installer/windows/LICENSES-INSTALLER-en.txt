@@ -16,6 +16,13 @@ itself); node\LICENSE also contains the licenses of its built-in
 components, including OpenSSL (Apache-2.0), ICU (Unicode License V3), V8,
 libuv and npm (Artistic License 2.0).
 
+Electron (desktop app window)
+-----------------------------
+Bundled as a prebuilt runtime (folder "electron-runtime\", SHA256-verified
+from https://github.com/electron/electron/releases). License: MIT
+(electron-runtime\LICENSE); Chromium and other built-in components are
+under their own licenses in electron-runtime\LICENSES.chromium.html.
+
 TeX Live / Tectonic
 -------------------
 NOT included. LaTeX-IDE only runs the TeX system as an external program

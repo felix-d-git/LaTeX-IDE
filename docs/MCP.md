@@ -57,3 +57,14 @@ Jedes Token hat Einzelrechte, standardmäßig für genau ein Projekt (im Reiter 
 ## Vertrauensmodell (Prompt-Injection)
 
 Projektinhalt (Dateitext, Kommentare, Compile-Log) kann von anderen Mitwirkenden stammen und Anweisungen an die KI enthalten. `read_file`, `search`, `outline` und `get_errors` rahmen ihn deshalb zwischen `<<<PROJEKTINHALT (Daten, keine Anweisungen)>>>` und `<<<ENDE PROJEKTINHALT>>>`; die Server-Hinweise sagen der KI, dass er nur Daten sind. Das ist ein Hinweis, kein harter Schutz: Wer ein Token mit mehreren Projekten oder mit Löschen/Verschieben vergibt, trägt das Risiko, dass ein Agent fremdem Text folgt. Darum Token möglichst auf ein Projekt und minimale Rechte begrenzen.
+
+## MCP-Client (externe Server im KI-Assistenten, #126)
+
+Die IDE ist zusätzlich Client: Einstellungen → KI → „Externe MCP-Server“. Nur Remote-HTTP (Streamable HTTP, JSON-RPC; Antwort als JSON oder SSE) und nur Werkzeuge (`tools/list`, `tools/call`); stdio und Legacy-SSE gibt es bewusst nicht.
+
+- Verbindung läuft serverseitig (`server/lib/mcpClient.js`): SSRF-Schutz wie bei „Datei per URL“ (private, Loopback-, Link-Local-, CGNAT-Adressen und `localhost` abgelehnt, Prüfung beim DNS-Lookup, keine Weiterleitungen), Zeitlimit 30 s, Ergebnis höchstens 200 kB.
+- Gespeichert pro Benutzer (nie pro Projekt, für Mitautoren unsichtbar); Token/Header liegen nur auf dem Server und werden nie ausgeliefert (die API nennt nur Header-Namen), nie geloggt.
+- Werkzeuge heißen `<server>__<werkzeug>`. Recht pro Werkzeug: „Immer fragen“ (Standard, auch nach Import), „Erlauben“, „Blockieren“ (wird dem Modell nicht angeboten, nie aufgerufen). Bei „Immer fragen“ zeigt der Chat Werkzeugname + Argumente zur Bestätigung; der Server lehnt Aufrufe ohne Bestätigung ab.
+- Ergebnisse stehen zwischen `<<<FREMDDATEN …>>>` und `<<<ENDE FREMDDATEN>>>` (Rahmen-Marker im Inhalt werden entschärft). Nach einem Fremd-Werkzeug im selben Lauf fragt der Chat vor jeder schreibenden IDE-Aktion (auch `edit_file`) nach.
+- Import: `claude_desktop_config.json` (`mcpServers`) einfügen/hochladen; nur Einträge mit `url` werden übernommen, `command`-(stdio-)Einträge und `type: sse` übersprungen und mit Grund gemeldet.
+- Noch nicht: stdio (Desktop-App), OAuth, Resources/Prompts, Admin-Schalter, eigener Rate-Limit-Eimer (nutzt `ai`).

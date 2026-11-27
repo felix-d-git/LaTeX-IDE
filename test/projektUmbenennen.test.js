@@ -87,7 +87,7 @@ test('Umbenennen während ein Mitglied tippt: kein Geisterordner, Änderung im n
 
   // Bob's active project followed the rename, so he can keep working there.
   const list = (await user.call('GET', '/api/projects/list')).body;
-  assert.deepStrictEqual(list.sharedProjects.map((p) => path.resolve(p.root)), [path.resolve(newRoot)]);
+  assert.deepStrictEqual(list.sharedProjects.map((p) => p.id.split('/').pop()), [path.basename(newRoot)]);
   assert.strictEqual((await user.call('GET', '/api/tree')).status, 200);
 });
 

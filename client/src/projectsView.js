@@ -29,6 +29,13 @@ function iconMarkup(name) {
   return `<svg class="ui-icon"><use href="#i-${name}"></use></svg>`;
 }
 
+// Only the desktop app (connected to a server) answers this; in the web UI it stays null.
+let desktopInfo = null;
+fetch('/api/desktop/info')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => (desktopInfo = j && j.desktop && j.connected ? { ...j, localOnly: j.localOnly || [] } : null))
+  .catch(() => {});
+
 export function setupProjectsView({ onOpenProject, currentUser }) {
   const view = document.getElementById('projects-view');
   const searchInput = document.getElementById('projects-search');
@@ -70,7 +77,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
   let labelColor = null;
   let visibleKeys = [];
   const isShared = (p) => !!p.owner;
-  const keyOf = (p) => p.key || (isShared(p) ? p.root : p.name);
+  const keyOf = (p) => p.key || (isShared(p) ? p.id : p.name);
   let sortKey = 'lastModified';
   let sortDir = -1; // -1 desc, 1 asc
 
@@ -161,7 +168,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       tdTitle.className = 'project-title';
       tdTitle.addEventListener('click', () => {
         if (mode !== 'projects' && mode !== 'shared') return;
-        onOpenProject(p.root);
+        onOpenProject(p.id);
         hide();
       });
       tr.appendChild(tdTitle);
@@ -178,9 +185,10 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       tdActions.className = 'project-actions';
       if (mode === 'projects' && !p.shared) {
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
-          onOpenProject(p.root);
+          onOpenProject(p.id);
           hide();
         }));
+        if (desktopInfo) tdActions.appendChild(localOnlyBtn(p));
         tdActions.appendChild(iconBtn('edit', 'Umbenennen', () => renameProject(p.name)));
         tdActions.appendChild(iconBtn('copy', 'Kopieren', () => showCopyDialogFor(p.name)));
         tdActions.appendChild(iconBtn('download', 'Download .zip', () => triggerDownload(api.projectZipUrl(p.name))));
@@ -190,7 +198,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       } else if (mode === 'shared' || p.shared) {
         // Owner's project: only open here; leaving is in the share dialog.
         tdActions.appendChild(actionBtn('Öffnen', 'primary', () => {
-          onOpenProject(p.root);
+          onOpenProject(p.id);
           hide();
         }));
       } else if (mode === 'archive') {
@@ -383,6 +391,28 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     }
   });
 
+  // Desktop app (#212): per-project opt-out of the sync with the server ("nur lokal").
+  function localOnlyBtn(p) {
+    const only = desktopInfo.localOnly.includes(p.id);
+    const btn = actionBtn(only ? 'Nur lokal' : 'Sync an', '', async () => {
+      const csrf = (document.cookie.match(/(?:^|; )csrfToken=([^;]*)/) || [])[1] || '';
+      try {
+        const r = await fetch('/api/desktop/project-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': decodeURIComponent(csrf) },
+          body: JSON.stringify({ projectId: p.id, enabled: only }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+        desktopInfo.localOnly = (await r.json()).localOnly;
+        render();
+      } catch (err) {
+        alert('Fehler: ' + err.message);
+      }
+    });
+    btn.title = only ? 'Dieses Projekt wird nicht mit dem Server synchronisiert - klicken, um die Synchronisierung einzuschalten' : 'Wird mit dem Server synchronisiert - klicken für "nur lokal"';
+    return btn;
+  }
+
   function actionBtn(label, cls, onClick) {
     const btn = document.createElement('button');
     btn.textContent = label;
@@ -416,9 +446,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     setPct(0);
     wrap.classList.remove('hidden');
     try {
-      const { root } = await api.uploadZip(file, setPct);
+      const { projectId } = await api.uploadZip(file, setPct);
       await refresh();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Zip-Upload fehlgeschlagen: ' + e.message);
@@ -432,9 +462,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     const name = prompt('Name des neuen Projekts:');
     if (!name) return;
     try {
-      const { root } = await api.createProject(name);
+      const { projectId } = await api.createProject(name);
       await refresh();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Fehler beim Anlegen: ' + e.message);
@@ -474,9 +504,9 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
     const newName = copyNameInput.value.trim();
     if (!newName || !pendingCopySource) return;
     try {
-      const { root } = await api.copyProject(pendingCopySource, newName);
+      const { projectId } = await api.copyProject(pendingCopySource, newName);
       hideCopyDialog();
-      onOpenProject(root);
+      onOpenProject(projectId);
       hide();
     } catch (e) {
       alert('Fehler beim Kopieren: ' + e.message);

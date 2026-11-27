@@ -886,6 +886,8 @@ app.post('/api/ai/snapshot', limitAi, (req, res) => {
   res.json({ ok: !!entry, id: entry && entry.id });
 });
 
+require('./lib/mcpClientRoutes').register(app, { auth, limitAi, ah }); // #126 MCP-Client
+
 // --- Desktop installers with this server's address built in (also the desktop apps' update source) ---
 const desktopAssets = createDesktopAssets({
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..'),
@@ -1185,7 +1187,7 @@ app.post('/api/share/join', limitToken, (req, res) => {
       audit('share_joined', req, { pid: projectIdOf(link.root), role: link.role });
     }
   }
-  res.json({ root: link.root });
+  res.json({ projectId: projectIdOf(link.root) });
 });
 
 // Owner removes a member, or a member leaves (userId = self).
@@ -1515,20 +1517,24 @@ app.post('/api/languagetool', bigJson, ah(async (req, res) => {
 
 // --- Projects ---
 
+// Lists never carry absolute server paths: clients address projects by projectId.
+const idOrNull = (root) => (root ? projectIdOf(root) : null);
+const publicEntry = ({ root, ...p }) => ({ ...p, id: projectIdOf(root) });
+
 app.get('/api/projects/list', (req, res) => {
   const projectsDir = userProjectsDir(req.user);
   res.json({
-    activeRoot: state.getActiveRoot(req.user.id),
-    recentRoots: state.getRecentRoots(req.user.id),
-    localProjects: projects.listProjects(projectsDir, req.user.isAdmin ? ['users'] : []),
+    activeProjectId: idOrNull(state.getActiveRoot(req.user.id)),
+    recentProjects: state.getRecentRoots(req.user.id).filter((r) => fs.existsSync(r)).map(projectIdOf),
+    localProjects: projects.listProjects(projectsDir, req.user.isAdmin ? ['users'] : []).map(publicEntry),
     sharedProjects: sharedRootsOf(req.user.id)
       .filter((root) => fs.existsSync(root))
       .map((root) => {
         const owner = auth.findUserById(ownerIdOf(root));
-        return { name: path.basename(root), root, owner: owner ? auth.toPublicUser(owner).username : '?', lastModified: projects.getLastModified(root) };
+        return { name: path.basename(root), id: projectIdOf(root), owner: owner ? auth.toPublicUser(owner).username : '?', lastModified: projects.getLastModified(root) };
       }),
-    trashedProjects: projects.listTrash(projectsDir),
-    archivedProjects: projects.listArchived(projectsDir),
+    trashedProjects: projects.listTrash(projectsDir).map(publicEntry),
+    archivedProjects: projects.listArchived(projectsDir).map(publicEntry),
     labels: state.getLabels(req.user.id),
     labelColors: state.LABEL_COLORS,
   });
@@ -1546,7 +1552,7 @@ function resolveProjectRoot(projectsDir, name) {
 }
 
 app.post('/api/projects/open', (req, res) => {
-  const root = req.body.root ? path.resolve(String(req.body.root)) : '';
+  const root = req.body.projectId ? importSourceRoot(req, req.body.projectId) || '' : req.body.root ? path.resolve(String(req.body.root)) : '';
   if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     return res.status(400).json({ error: 'Ordner nicht gefunden.' });
   }
@@ -1573,7 +1579,7 @@ app.post('/api/projects/create', (req, res) => {
     checkSpace(req, 1024); // main.tex template
     const root = projects.createProject(projectsDir, req.body.name || '');
     projectFresh(req, projectsDir, root);
-    res.json({ root });
+    res.json({ root, projectId: projectIdOf(root) });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
@@ -1606,7 +1612,7 @@ app.post('/api/projects/copy', (req, res) => {
     const root = projects.copyProject(projectsDir, req.body.name, req.body.newName);
     projectFresh(req, projectsDir, root);
     state.copyRoot(path.join(projectsDir, req.body.name), root);
-    res.json({ root });
+    res.json({ root, projectId: projectIdOf(root) });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
@@ -1649,7 +1655,7 @@ app.post('/api/projects/upload-zip', zipBody, (req, res) => {
     const projectsDir = userProjectsDir(req.user);
     const root = projects.importZip(projectsDir, String(req.query.name || ''), req.body, (total) => checkSpace(req, total));
     projectFresh(req, projectsDir, root);
-    res.json({ root });
+    res.json({ root, projectId: projectIdOf(root) });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
@@ -1670,7 +1676,8 @@ app.get('/api/projects/download/zip', (req, res) => {
   const list = [];
   try {
     for (const it of items) {
-      const root = path.isAbsolute(it) ? path.resolve(it) : resolveProjectRoot(dir, it);
+      const sharedRoot = path.resolve(PROJECTS_DIR, it); // projectId (or legacy absolute root) of a shared project
+      const root = shared.includes(sharedRoot) ? sharedRoot : path.isAbsolute(it) ? path.resolve(it) : resolveProjectRoot(dir, it);
       if (path.isAbsolute(it) ? !shared.includes(root) : root === path.resolve(dir)) throw new Error('Ungültiger Projektname.');
       if (!fs.existsSync(root)) throw new Error('Projekt nicht gefunden.');
       list.push(root);

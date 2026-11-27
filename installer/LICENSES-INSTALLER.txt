@@ -19,6 +19,16 @@ macOS: wird NICHT mitgeliefert. install.command laedt das offizielle
 Node.js-Paket von https://nodejs.org/ (SHA256-geprueft); dessen Lizenz
 liegt danach unter ~/Applications/LatexIDE/node/LICENSE.
 
+Electron (Fenster der Desktop-App)
+----------------------------------
+Windows: vorkompilierte Laufzeit im Ordner "electron-runtime\" (SHA256-
+geprueft von https://github.com/electron/electron/releases). Lizenz: MIT
+(electron-runtime\LICENSE); Chromium und weitere eingebaute Komponenten
+stehen unter eigenen Lizenzen in electron-runtime\LICENSES.chromium.html.
+macOS: install.command laedt die offizielle Electron-Laufzeit (SHA256-
+geprueft) nach ~/Applications/LatexIDE/LatexIDE.app; die Lizenztexte
+liegen dort im Paket.
+
 TeX Live / MacTeX / Tectonic
 ----------------------------
 Wird NICHT mitgeliefert. LaTeX-IDE ruft das TeX-System nur als externes
