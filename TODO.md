@@ -1,5 +1,13 @@
 # TODO
 
+## Wave 10 – #126 MCP-Client
+- ⬜ #126 Server hinzufügen: Einstellungen → KI → „Externe MCP-Server“ → Name + öffentliche https-URL eines Remote-MCP-Servers (+ optional Bearer-Token) → „Server hinzufügen“ → Status „verbunden“, Karte aufklappen zeigt Werkzeuge `<name>__<tool>` mit Auswahl „Immer fragen“ (Standard)/„Erlauben“/„Blockieren“; Token erscheint nirgends wieder (nur „gesetzt: Authorization“)
+- ⬜ #126 Interne Adresse: URL `http://localhost:3000/mcp` oder `http://192.168.1.5/mcp` eintragen → Fehlermeldung „nicht erlaubt (internes Netz)“, Eintrag wird nicht angelegt
+- ⬜ #126 Chat + Rückfrage: im KI-Chat eine Frage stellen, die ein externes Werkzeug braucht → Karte „Die KI möchte `<ns>__<tool>` ausführen“ mit Argumenten; „Ablehnen“ → kein Aufruf; „Ausführen“ → Werkzeugkarte mit Ergebnis (zwischen „FREMDDATEN“-Markierungen)
+- ⬜ #126 Rechte: Werkzeug auf „Erlauben“ → Aufruf ohne Rückfrage; auf „Blockieren“ → Werkzeug dem Modell nicht mehr angeboten; Server auf „Aktiv“ aus → keine Werkzeuge im Chat
+- ⬜ #126 Schreibsperre nach Fremddaten: Agent-Modus, Fremd-Werkzeug (auf „Erlauben“) aufrufen lassen und danach eine Datei ändern lassen → für `edit_file` kommt trotzdem die Rückfrage-Karte
+- ⬜ #126 Config-Import: `claude_desktop_config.json` mit einem `url`-Eintrag und einem `command`-Eintrag einfügen (oder Datei wählen) → „Config importieren“ → 1 übernommen (alle Werkzeuge „Immer fragen“), stdio-Eintrag als übersprungen mit Grund genannt
+
 ## GUI-Prüfpunkte
 - ⬜ #214 Grammatik gelb: Einstellungen → Grammatik & Rechtschreibung (LanguageTool) an; in eine .tex-Datei `Ich gehen nach Hause.` und `Das ist ein Haus, das ich gekauft habe habe.` tippen → jeweils der ganze Satz gelb gewellt unterstrichen (hell/dunkel); Rechtschreibfehler im Satz bleibt dick rot gerade; Hover zeigt Meldung
 - ⬜ #213 Rechtsklick-Menü: Rechtschreibfehler (z. B. `Tset`) rechtsklicken → Menü oben mit Vorschlägen + „Zum Wörterbuch“, darunter Cut/Copy/Paste; Vorschlag klicken ersetzt das Wort; „Zum Wörterbuch“ → Wort nicht mehr markiert und in Einstellungen → Rechtschreibung → Wörterbuch eingetragen; Rechtsklick auf Grammatik-Satz zeigt dessen Vorschläge; Rechtsklick auf unmarkierten Text → normales Menü ohne Vorschläge

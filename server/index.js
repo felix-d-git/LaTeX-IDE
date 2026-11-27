@@ -886,6 +886,8 @@ app.post('/api/ai/snapshot', limitAi, (req, res) => {
   res.json({ ok: !!entry, id: entry && entry.id });
 });
 
+require('./lib/mcpClientRoutes').register(app, { auth, limitAi, ah }); // #126 MCP-Client
+
 // --- Desktop installers with this server's address built in (also the desktop apps' update source) ---
 const desktopAssets = createDesktopAssets({
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..'),
