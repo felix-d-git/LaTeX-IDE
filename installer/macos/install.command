@@ -132,6 +132,62 @@ else
     sudo installer -pkg "$TMP_DIR/$MACTEX_PKG" -target /
 fi
 
+# --- Electron-Laufzeit (#212) ------------------------------------------------
+# Fenster der Desktop-App + ".tex"-Zuordnung ("Oeffnen mit LaTeX-IDE"). Scheitert der Teil,
+# bleibt der bisherige Start ueber Node + Browser (Starter unten faellt darauf zurueck).
+# Version muss zu devDependencies.electron in package.json passen (test/desktopElectron.test.js).
+ELECTRON_VERSION="45.5.0"
+APP_BUNDLE="$APP_ROOT/LatexIDE.app"
+
+install_electron() {
+    local earch
+    case "$ARCH" in arm64) earch="darwin-arm64" ;; *) earch="darwin-x64" ;; esac
+    local zip="electron-v${ELECTRON_VERSION}-${earch}.zip"
+    local base="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}"
+    if [ -d "$APP_BUNDLE" ] && [ "$(cat "$APP_BUNDLE/.electron-version" 2>/dev/null)" = "$ELECTRON_VERSION" ]; then
+        return 0
+    fi
+    echo "Lade Electron ${ELECTRON_VERSION} (${earch})..."
+    curl -fsSL -o "$TMP_DIR/$zip" "$base/$zip" || return 1
+    curl -fsSL -o "$TMP_DIR/SHASUMS256.electron" "$base/SHASUMS256.txt" || return 1
+    local want have
+    want="$(grep " \*\?${zip}\$" "$TMP_DIR/SHASUMS256.electron" | awk '{print $1}')"
+    have="$(shasum -a 256 "$TMP_DIR/$zip" | awk '{print $1}')"
+    if [ -z "$want" ] || [ "$want" != "$have" ]; then
+        echo "SHA256 fuer $zip stimmt nicht - Electron wird nicht installiert." >&2
+        return 1
+    fi
+    rm -rf "$APP_BUNDLE" "$TMP_DIR/electron-x"
+    mkdir -p "$TMP_DIR/electron-x"
+    ditto -x -k "$TMP_DIR/$zip" "$TMP_DIR/electron-x" || return 1
+    mv "$TMP_DIR/electron-x/Electron.app" "$APP_BUNDLE" || return 1
+    # Lizenzen (MIT + Chromium) liegen im ZIP neben der App und muessen mitgeliefert werden.
+    cp "$TMP_DIR/electron-x/LICENSE" "$TMP_DIR/electron-x/LICENSES.chromium.html" "$APP_ROOT/" 2>/dev/null || true
+    # Die App-Dateien liegen unter app/: Einstieg ist ein Stub, der desktop/main.js laedt.
+    mkdir -p "$APP_BUNDLE/Contents/Resources/app"
+    printf '{"name":"latexide","main":"main.js"}\n' > "$APP_BUNDLE/Contents/Resources/app/package.json"
+    # LatexIDE.app/Contents/Resources/app -> vier Ebenen hoch = $APP_ROOT
+    printf '%s\n' "require(require('path').join(__dirname, '..', '..', '..', '..', 'app', 'desktop', 'main.js'));" > "$APP_BUNDLE/Contents/Resources/app/main.js"
+    local plist="$APP_BUNDLE/Contents/Info.plist" pb=/usr/libexec/PlistBuddy
+    $pb -c "Set :CFBundleName LaTeX-IDE" -c "Set :CFBundleDisplayName LaTeX-IDE" -c "Set :CFBundleIdentifier org.latexide.desktop" "$plist" || return 1
+    $pb -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
+    $pb -c "Add :CFBundleDocumentTypes array" \
+        -c "Add :CFBundleDocumentTypes:0 dict" \
+        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string LaTeX-Dokument" \
+        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Editor" \
+        -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate" \
+        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array" \
+        -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string tex" "$plist" || return 1
+    # Info.plist geaendert -> Signatur ungueltig; ad-hoc neu signieren, sonst startet die App nicht.
+    codesign --force --deep -s - "$APP_BUNDLE" || return 1
+    echo "$ELECTRON_VERSION" > "$APP_BUNDLE/.electron-version"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null || true
+}
+if ! install_electron; then
+    echo "Hinweis: Electron konnte nicht installiert werden - die App startet im Browser." >&2
+    rm -rf "$APP_BUNDLE"
+fi
+
 # --- Startskript anlegen -----------------------------------------------------
 
 STARTER="$APP_ROOT/LatexIDE.command"
@@ -145,7 +201,11 @@ export PATH="$APP_ROOT/node/bin:/Library/TeX/texbin:$PATH"
 : "${LATEX_IDE_DATA:=$HOME/Library/Application Support/LatexIDE}"
 export PORT LATEX_IDE_DATA
 cd "$APP_ROOT/app"
-# desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
+# Mit Electron-Laufzeit: eigenes Fenster (Datei-Argumente werden durchgereicht).
+if [ -d "$APP_ROOT/LatexIDE.app" ]; then
+    exec "$APP_ROOT/LatexIDE.app/Contents/MacOS/Electron" "$@"
+fi
+# Sonst: desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
 exec "$APP_ROOT/node/bin/node" server/desktop.js
 EOF
 chmod +x "$STARTER"

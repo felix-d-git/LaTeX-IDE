@@ -20,9 +20,9 @@ const { compile, findMainCandidate, OUT_DIR, pdfNameFor } = require('./lib/compi
 const synctex = require('./lib/synctex');
 const wordcount = require('./lib/wordcount');
 const { buildTree, pickStartFile, isTextFile } = require('./lib/fsTree');
-const { syncFolder, moveDir, conflictName, sha1 } = require('./lib/localSync');
+const { syncFolder, moveDir, conflictName, sha1, syncTargets, flushAll, staleNotice } = require('./lib/localSync');
 const legal = require('./lib/legal');
-const { checkUrl, verifyDownload } = require('./lib/desktopAssets');
+const { checkUrl, verifyDownload, updateSource } = require('./lib/desktopAssets');
 const { rawMime, setUserContentHeaders } = require('./lib/userContent');
 const { securityHeaders, cspReportHandler, REPORT_PATH: CSP_REPORT_PATH } = require('./lib/securityHeaders');
 const os = require('os');
@@ -170,7 +170,11 @@ async function pingRemote() {
   }
 }
 setInterval(pingRemote, 2000).unref();
-const firstPing = pingRemote(); // don't assume online until the server answered once (max. 2 s)
+// Start without a connection: the local copy may be behind the server (#212). Cleared by the next clean syncAll.
+let startNotice = '';
+const firstPing = pingRemote().then(() => {
+  if (!online) startNotice = staleNotice(REMOTE);
+}); // don't assume online until the server answered once (max. 2 s)
 
 async function remoteJson(pathAndQuery) {
   const res = await remote(pathAndQuery);
@@ -229,12 +233,37 @@ app.get('/desktop-callback', (req, res) => {
   }
   setToken(String(token));
   setImmediate(syncAll);
+  process.emit('lide-login'); // Electron shell reloads its window
   // Kein 302: nach einer Cross-Site-Navigation würde der Browser das Strict-Cookie auch beim Redirect weglassen.
   res.type('html').send('<!doctype html><meta http-equiv="refresh" content="0;url=/"><a href="/">Weiter</a>');
 });
 
 app.get('/api/desktop/info', (req, res) => {
-  res.json({ desktop: true, connected: !!config.token, remote: REMOTE, online, localDir: LOCAL_DIR, version: APP_VERSION, warnings: [...syncWarnings.values()] });
+  res.json({
+    desktop: true,
+    connected: !!config.token,
+    remote: REMOTE,
+    online,
+    localDir: LOCAL_DIR,
+    version: APP_VERSION,
+    warnings: [...syncWarnings.values()],
+    staleNotice: startNotice,
+    localOnly: config.localOnly || [],
+    updateSource: updateSource({ remote: REMOTE }).kind,
+  });
+});
+
+// Per-project opt-out "nur lokal" (#212): the project is no longer synced with the server copy.
+app.post('/api/desktop/project-sync', express.json(), (req, res) => {
+  const { projectId, enabled } = req.body || {};
+  if (typeof projectId !== 'string' || !projectId || typeof enabled !== 'boolean') return res.status(400).json({ error: 'projectId und enabled erforderlich.' });
+  const set = new Set(config.localOnly || []);
+  if (enabled) set.delete(projectId);
+  else set.add(projectId);
+  config = { ...config, localOnly: [...set] };
+  writeJson(CONFIG_PATH, config);
+  if (enabled) syncWarnings.delete(projectId);
+  res.json({ ok: true, localOnly: config.localOnly });
 });
 
 // --- local copy folder (settings) ---
@@ -481,7 +510,13 @@ function writeMarker(p, dir) {
 
 // One sync at a time: the periodic run and a compile must not touch a folder together.
 let syncLock = Promise.resolve();
+const isLocalOnly = (p) => (config.localOnly || []).includes(p.projectId);
 function syncOwned(p) {
+  if (isLocalOnly(p)) {
+    // "nur lokal" (#212): never touch the server copy, just hand out the local folder (compile still works)
+    const meta = readJson(path.join(SYNC_DIR, syncKey(p.projectId) + '.meta.json'), {});
+    return Promise.resolve({ dir: localDirOf(p), mainFile: meta.mainFile, settings: meta.settings, conflicts: [], errors: [], skipped: [] });
+  }
   const run = syncLock.then(() => syncOwnedNow(p));
   syncLock = run.catch(() => {});
   return run;
@@ -535,6 +570,7 @@ function syncAll() {
           console.error(`Sync ${p.name}: ${e.message}`);
         }
       }
+      startNotice = ''; // reached the server and synced: the copy is current again
     } catch (e) {
       if (!(e instanceof Offline)) console.error('Sync:', e.message);
     } finally {
@@ -951,6 +987,16 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 process.on('unhandledRejection', (e) => console.error('[desktop] unbehandelte Promise-Ablehnung:', e));
+
+// Window close in the Electron shell (#212): push all local changes to the server before quitting.
+// Offline or failing projects stay local (the two-way sync picks them up at the next start), nothing is lost.
+async function flushForQuit(onProgress) {
+  await new Promise((r) => setTimeout(r, 1500)); // let the last editor changes reach the local copy
+  await Promise.race([syncing, new Promise((r) => setTimeout(r, 20000))]).catch(() => {});
+  if (!config.token) return { ok: true, offline: false, synced: [], pending: [] };
+  return flushAll(syncTargets(owned, config.localOnly), syncOwned, { online: () => online, onProgress });
+}
+module.exports = { flushForQuit, PORT, DATA, REMOTE, LAUNCH_KEY: () => LAUNCH_KEY };
 
 // Zweiter Start bei belegtem Port: nur den Browser mit dem Schlüssel des laufenden Prozesses öffnen.
 server.on('error', (e) => {

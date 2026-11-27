@@ -100,6 +100,7 @@ function Write-LicenseNotice($relSource, $relDest) {
 
 Copy-ToStaging 'client' 'client' -excludeDirs @('dist')
 Copy-ToStaging 'server' 'server'
+Copy-ToStaging 'desktop' 'desktop'
 Copy-ToStaging 'package.json' 'package.json'
 Copy-ToStaging 'package-lock.json' 'package-lock.json'
 Copy-ToStaging 'build.js' 'build.js'
@@ -213,6 +214,32 @@ if (-not (Test-Path (Join-Path $NodeDestDir 'node.exe'))) {
 }
 Write-Host "Node.js nach $NodeDestDir kopiert."
 
+# --- 3b. Electron win32-x64 laden und pruefen (#212) ------------------------
+# npm prune entfernt die devDependency, deshalb kommt die Laufzeit als eigener Ordner electron-runtime.
+
+$ElectronVersion = ((Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json).devDependencies.electron) -replace '^[^0-9]*', ''
+if (-not $ElectronVersion) { throw "electron fehlt in den devDependencies von package.json." }
+Write-Step "Electron $ElectronVersion (win32-x64) laden"
+$ElBase = "https://github.com/electron/electron/releases/download/v$ElectronVersion"
+$ElZipName = "electron-v$ElectronVersion-win32-x64.zip"
+$ElZipPath = Join-Path $TmpDir $ElZipName
+$ElSumsPath = Join-Path $TmpDir 'electron-SHASUMS256.txt'
+Invoke-WebRequest -Uri "$ElBase/$ElZipName" -OutFile $ElZipPath -UseBasicParsing
+Invoke-WebRequest -Uri "$ElBase/SHASUMS256.txt" -OutFile $ElSumsPath -UseBasicParsing
+$ElLine = Select-String -Path $ElSumsPath -Pattern ([regex]::Escape($ElZipName)) | Select-Object -First 1
+if (-not $ElLine) { throw "Konnte $ElZipName nicht in SHASUMS256.txt finden." }
+if ((($ElLine.Line -split '\s+')[0].ToLower()) -ne (Get-FileHash -Path $ElZipPath -Algorithm SHA256).Hash.ToLower()) {
+    throw "SHA256-Mismatch fuer $ElZipName"
+}
+Write-Host "SHA256 OK: $ElZipName"
+$ElDest = Join-Path $StagingDir 'electron-runtime'
+if (Test-Path $ElDest) { Remove-Item -Path $ElDest -Recurse -Force }
+Expand-Archive -Path $ElZipPath -DestinationPath $ElDest -Force
+foreach ($f in @('electron.exe', 'LICENSE', 'LICENSES.chromium.html')) {
+    if (-not (Test-Path (Join-Path $ElDest $f))) { throw "$f fehlt im Electron-ZIP - ohne Lizenztexte darf Electron nicht mitgeliefert werden." }
+}
+Write-Host "Electron nach $ElDest kopiert."
+
 # --- 4. Inno Setup Compiler aufrufen (falls vorhanden) ---------------------
 
 Write-Step "Windows-Installer bauen (Inno Setup)"
@@ -248,7 +275,7 @@ if (Test-Path $MacStagingDir) { Remove-Item -Path $MacStagingDir -Recurse -Force
 New-Item -ItemType Directory -Force -Path $MacStagingDir | Out-Null
 
 Get-ChildItem -Path $StagingDir -Force | ForEach-Object {
-    if ($_.Name -in @('node', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd', 'LatexIDE-Lokal.vbs', 'LICENSES-INSTALLER-en.txt')) { return }
+    if ($_.Name -in @('node', 'electron-runtime', 'install-texlive.ps1', 'LatexIDE.cmd', 'LatexIDE-Server.cmd', 'LatexIDE-Lokal.vbs', 'LICENSES-INSTALLER-en.txt')) { return }
     $dst = Join-Path $MacStagingDir $_.Name
     if ($_.PSIsContainer) {
         Copy-Item -Path $_.FullName -Destination $dst -Recurse -Force

@@ -29,6 +29,13 @@ function iconMarkup(name) {
   return `<svg class="ui-icon"><use href="#i-${name}"></use></svg>`;
 }
 
+// Only the desktop app (connected to a server) answers this; in the web UI it stays null.
+let desktopInfo = null;
+fetch('/api/desktop/info')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => (desktopInfo = j && j.desktop && j.connected ? { ...j, localOnly: j.localOnly || [] } : null))
+  .catch(() => {});
+
 export function setupProjectsView({ onOpenProject, currentUser }) {
   const view = document.getElementById('projects-view');
   const searchInput = document.getElementById('projects-search');
@@ -181,6 +188,7 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
           onOpenProject(p.id);
           hide();
         }));
+        if (desktopInfo) tdActions.appendChild(localOnlyBtn(p));
         tdActions.appendChild(iconBtn('edit', 'Umbenennen', () => renameProject(p.name)));
         tdActions.appendChild(iconBtn('copy', 'Kopieren', () => showCopyDialogFor(p.name)));
         tdActions.appendChild(iconBtn('download', 'Download .zip', () => triggerDownload(api.projectZipUrl(p.name))));
@@ -382,6 +390,28 @@ export function setupProjectsView({ onOpenProject, currentUser }) {
       alert('Fehler: ' + err.message);
     }
   });
+
+  // Desktop app (#212): per-project opt-out of the sync with the server ("nur lokal").
+  function localOnlyBtn(p) {
+    const only = desktopInfo.localOnly.includes(p.id);
+    const btn = actionBtn(only ? 'Nur lokal' : 'Sync an', '', async () => {
+      const csrf = (document.cookie.match(/(?:^|; )csrfToken=([^;]*)/) || [])[1] || '';
+      try {
+        const r = await fetch('/api/desktop/project-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': decodeURIComponent(csrf) },
+          body: JSON.stringify({ projectId: p.id, enabled: only }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+        desktopInfo.localOnly = (await r.json()).localOnly;
+        render();
+      } catch (err) {
+        alert('Fehler: ' + err.message);
+      }
+    });
+    btn.title = only ? 'Dieses Projekt wird nicht mit dem Server synchronisiert - klicken, um die Synchronisierung einzuschalten' : 'Wird mit dem Server synchronisiert - klicken für "nur lokal"';
+    return btn;
+  }
 
   function actionBtn(label, cls, onClick) {
     const btn = document.createElement('button');

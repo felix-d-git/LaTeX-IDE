@@ -38,6 +38,8 @@ WizardStyle=modern
 ; Nur Hinweisseite, keine Zustimmung: die AGPL muss nicht angenommen werden (Abschnitt 9).
 ; build-release.ps1 erzeugt die Dateien im Staging (Quell-Link dieser Version).
 InfoBeforeFile={#StagingDir}\LICENSES-INSTALLER.txt
+; .tex-Zuordnung "Oeffnen mit LaTeX-IDE" (#212, nur Desktop-App, siehe [Registry])
+ChangesAssociations=yes
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
@@ -54,6 +56,9 @@ Type: filesandordirs; Name: "{app}\node_modules"
 ; .env und server.json liegen direkt in {app} und bleiben unberuehrt. node/ bleibt (laufender Server sperrt node.exe).
 Type: filesandordirs; Name: "{app}\server"
 Type: filesandordirs; Name: "{app}\client"
+; Electron-Shell (#212): wird bei jedem Setup frisch kopiert
+Type: filesandordirs; Name: "{app}\desktop"
+Type: filesandordirs; Name: "{app}\electron-runtime"
 ; Verknuepfungen vom alten Namen (bis 0.5.2 "LatexIDE")
 Type: files; Name: "{group}\LatexIDE.lnk"
 Type: files; Name: "{group}\Uninstall LatexIDE.lnk"
@@ -61,6 +66,12 @@ Type: files; Name: "{userdesktop}\LatexIDE.lnk"
 
 [Files]
 Source: "{#StagingDir}\*"; DestDir: "{app}"; Excludes: "\node_modules\.cache\*"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+[Registry]
+; "Oeffnen mit" fuer .tex (nur pro Benutzer, ohne Standardprogramm zu erzwingen). Nur in der Desktop-App.
+Root: HKCU; Subkey: "Software\Classes\.tex\OpenWithProgids"; ValueType: string; ValueName: "LatexIDE.tex"; ValueData: ""; Flags: uninsdeletevalue; Check: IsDesktopMode
+Root: HKCU; Subkey: "Software\Classes\LatexIDE.tex"; ValueType: string; ValueName: ""; ValueData: "LaTeX-Dokument (LaTeX-IDE)"; Flags: uninsdeletekey; Check: IsDesktopMode
+Root: HKCU; Subkey: "Software\Classes\LatexIDE.tex\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Check: IsDesktopMode
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{code:StarterExe}"
@@ -113,6 +124,11 @@ end;
 function IsLocalMode: Boolean;
 begin
   Result := (TrailerUrl = '') and (ModePage.SelectedValueIndex = 2);
+end;
+
+function IsDesktopMode: Boolean;
+begin
+  Result := not IsServerMode and not IsLocalMode;
 end;
 
 function StarterExe(Param: String): String;
@@ -307,7 +323,7 @@ begin
   // Pfad fuer PowerShell: Apostrophe verdoppeln, StartsWith statt -like (dort sind [ ] Platzhalter).
   AppDir := ExpandConstant('{app}');
   StringChangeEx(AppDir, '''', '''''', True);
-  Exec('powershell.exe', '-NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+  Exec('powershell.exe', '-NoProfile -Command "Get-Process node,electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
     AppDir + '\'', ''OrdinalIgnoreCase'') } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, Code);
 
   // TeX Live und Caches sind keine Nutzerdaten.

@@ -18,6 +18,7 @@
     "build:client": "node build.js",
     "start": "npm run build:client && node server/index.js",
     "dev": "node build.js --watch --serve",
+    "desktop": "electron desktop",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
@@ -56,6 +57,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "electron": "^45.5.0",
     "esbuild": "^0.28.2"
   },
   "overrides": {
