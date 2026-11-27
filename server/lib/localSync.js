@@ -246,7 +246,41 @@ function moveDir(src, dst, names, commit) {
   return { moved: todo.length, failed };
 }
 
-module.exports = { syncFolder, walkLocal, decide, conflictName, moveDir, sha1 };
+// --- #212: opt-out "nur lokal", Sync vor dem Beenden, Start-Hinweis ---
+
+// Projects that take part in the sync: everything except the ones marked "nur lokal".
+const syncTargets = (owned, localOnly = []) => owned.filter((p) => !localOnly.includes(p.projectId));
+
+// Window close: sync every target once, one after the other. Never throws and never deletes
+// anything itself: a project that fails (offline, server error) is reported as pending, its
+// local files stay as they are and the next start syncs it again (the sync index is only
+// written after a successful run). online() false -> nothing is tried.
+// onProgress({ done, total, name }) drives the "Synchronisiere ..." hint.
+async function flushAll(targets, syncOne, { online = () => true, onProgress = () => {} } = {}) {
+  const synced = [];
+  const pending = [];
+  if (!online()) return { ok: targets.length === 0, offline: true, synced, pending: targets.map((p) => p.name) };
+  for (const [i, p] of targets.entries()) {
+    onProgress({ done: i, total: targets.length, name: p.name });
+    try {
+      await syncOne(p);
+      synced.push(p.name);
+    } catch (e) {
+      pending.push(p.name);
+      if (e && e.fatal) {
+        pending.push(...targets.slice(i + 1).map((q) => q.name)); // server gone: don't wait for a timeout per project
+        break;
+      }
+    }
+  }
+  onProgress({ done: targets.length, total: targets.length, name: '' });
+  return { ok: pending.length === 0, offline: false, synced, pending };
+}
+
+// Hint for a start without connection (shown until the first complete sync).
+const staleNotice = (url) => `Möglicherweise nicht auf dem neusten Stand – keine Verbindung zum Server ${url}`;
+
+module.exports = { syncFolder, walkLocal, decide, conflictName, moveDir, sha1, syncTargets, flushAll, staleNotice };
 
 if (require.main === module) {
   const assert = require('assert');

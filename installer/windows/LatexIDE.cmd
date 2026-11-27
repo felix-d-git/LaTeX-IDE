@@ -11,7 +11,13 @@ set "PATH=%APPDIR%\node;%LOCALAPPDATA%\LatexIDE\texlive\2025\bin\windows;%PATH%"
 if "%PORT%"=="" set "PORT=3178"
 if "%LATEX_IDE_DATA%"=="" set "LATEX_IDE_DATA=%LOCALAPPDATA%\LatexIDE\data"
 
-rem desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
-start "LatexIDE Server" /min "%APPDIR%\node\node.exe" "%APPDIR%\server\desktop.js"
+rem Mit Electron-Laufzeit (#212): eigenes Fenster, Datei-Argument ("Oeffnen mit") wird durchgereicht.
+rem Electron startet den Server selbst im Prozess (desktop/main.js), oeffnet keinen Browser.
+rem Fallback ohne Electron: desktop.js oeffnet den Browser selbst mit dem Start-Schluessel (?k=, #163)
+if exist "%APPDIR%\electron-runtime\electron.exe" (
+  start "" "%APPDIR%\electron-runtime\electron.exe" "%APPDIR%\desktop" %*
+) else (
+  start "LatexIDE Server" /min "%APPDIR%\node\node.exe" "%APPDIR%\server\desktop.js"
+)
 
 endlocal

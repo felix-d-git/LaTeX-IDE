@@ -32,7 +32,8 @@ backups/
 
 # Laufzeitdaten bei DATA_DIR = Repo-Wurzel (Labels liegen in workspace.json)
 workspace.json.tmp
-/desktop/
+# Heruntergeladene Desktop-Pakete (DATA_DIR/desktop/<version>/); desktop/ selbst ist die Electron-Shell (#212)
+/desktop/[0-9]*/
 .update-request
 .update-status
 .update.lock

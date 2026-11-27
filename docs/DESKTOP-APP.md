@@ -97,3 +97,13 @@ LaTeX-IDE steht unter AGPL-3.0-only. Im Installationsordner liegen `LICENSE`,
 (Node.js, TeX Live, Inno Setup, Link zum Quellcode genau dieser Version); in der
 laufenden App unter Help ▸ Licenses (`/licenses`). TeX Live ist nicht Teil des
 Pakets, sondern wird bei Bedarf direkt von einem CTAN-Spiegel installiert.
+
+## Eigenes Fenster (Electron)
+
+- Ab dieser Version läuft die Desktop-App in einem eigenen Electron-Fenster (Windows: `electron-runtime\` im App-Ordner, macOS: `LatexIDE.app`); ohne Electron-Laufzeit startet wie bisher der Browser.
+- Sicherheit: `contextIsolation` an, `nodeIntegration` aus, `sandbox` an; Navigation nur zur eigenen lokalen Adresse, externe Links öffnen im Standardbrowser.
+- Beenden: Beim Schließen des Fensters werden zuerst alle lokalen Änderungen mit dem Server abgeglichen (Fortschrittshinweis), dann beendet sich die App vollständig (kein Tray, kein Hintergrundprozess). Ist der Server nicht erreichbar, bleiben die Änderungen lokal und werden beim nächsten Start mit Verbindung abgeglichen.
+- Start ohne Verbindung: Hinweis „Möglicherweise nicht auf dem neusten Stand – keine Verbindung zum Server <Adresse>“.
+- „Nur lokal“: in der Projektliste pro eigenem Projekt abschaltbar; solche Projekte werden nicht synchronisiert.
+- Updates: mit Server über den Server (`/api/desktop/release`), ohne Server über GitHub-Releases (Prüfsumme aus `SHA256SUMS`).
+- `.tex`: Windows-Setup (Desktop-Modus) trägt „Öffnen mit LaTeX-IDE“ ein, macOS-Installer die Dokumenttypen; ein zweiter Start reicht die Datei an die laufende Instanz weiter.

@@ -214,4 +214,53 @@ function zipAppendParts(file, name, content) {
   }
 }
 
-module.exports = { createDesktopAssets, checkUrl, verifyDownload, exeTrailer, zipAppendParts };
+// --- Update source of the desktop app (#212) ---
+// With a configured server: its /api/desktop/release (app version follows the server).
+// Without: the public GitHub releases of the project. Integrity: SHA256SUMS asset of the release.
+const DEFAULT_REPO = 'felix-d-git/LaTeX-IDE';
+
+function updateSource({ remote, repo = DEFAULT_REPO }) {
+  return remote ? { kind: 'server', remote } : { kind: 'github', repo };
+}
+
+// Line "<sha256>  <name>" (sha256sum format) of the asset; null = not listed.
+function sumFor(sumsText, name) {
+  const m = String(sumsText).split(/\r?\n/).map((l) => /^([0-9a-f]{64}) [ *](.+)$/i.exec(l)).find((x) => x && x[2] === name);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Latest published GitHub release -> { version, windows, macos } (asset url/name) + sums url.
+async function githubLatest(repo = DEFAULT_REPO, fetchFn = fetch) {
+  const r = await fetchFn(`https://api.github.com/repos/${repo}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'LatexIDE-Desktop' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
+  const rel = await r.json();
+  const out = { version: String(rel.tag_name || '').replace(/^v/, ''), sums: null };
+  for (const [os, re] of Object.entries(ASSETS)) {
+    const a = (rel.assets || []).find((x) => re.test(x.name));
+    if (a) out[os] = { url: a.browser_download_url, name: a.name };
+  }
+  const sums = (rel.assets || []).find((x) => x.name === 'SHA256SUMS');
+  if (sums) out.sums = sums.browser_download_url;
+  return out;
+}
+
+// Downloads the asset and checks it against the release's SHA256SUMS; no SHA256SUMS = refused.
+async function githubDownload(rel, os, fetchFn = fetch) {
+  const asset = rel[os];
+  if (!asset || !rel.sums) throw new Error('Release ohne Paket oder ohne SHA256SUMS.');
+  for (const u of [asset.url, rel.sums]) if (!/^https:\/\/(github\.com|objects\.githubusercontent\.com|release-assets\.githubusercontent\.com)\//.test(u)) throw new Error('Unerwartete Download-Adresse.');
+  const sums = await fetchFn(rel.sums, { signal: AbortSignal.timeout(30000) });
+  if (!sums.ok) throw new Error(`GitHub HTTP ${sums.status} (SHA256SUMS)`);
+  const want = sumFor(await sums.text(), asset.name);
+  if (!want) throw new Error('Paket steht nicht in SHA256SUMS.');
+  const r = await fetchFn(asset.url, { signal: AbortSignal.timeout(900000) });
+  if (!r.ok) throw new Error(`GitHub HTTP ${r.status} (Download)`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  verifyDownload(buf, want);
+  return buf;
+}
+
+module.exports = { updateSource, sumFor, githubLatest, githubDownload, createDesktopAssets, checkUrl, verifyDownload, exeTrailer, zipAppendParts };
