@@ -36,6 +36,13 @@ Base: master (tabu) · Second: staging/second-branch
 - 25.11.2026 Wave 9: #213 → „Zum Wörterbuch“ = persönliche Wortliste in den Benutzer-Einstellungen, Treffer daraus nicht mehr markiert; Projekt-Wörterbuchdatei verworfen
 - 25.11.2026 Wave 9: #200 Punkt 4 → ScanCode nur als manueller Schritt in der Release-Checkliste; eigenes Docker-Skript verworfen
 - 25.11.2026 Wave 9: vor der Wave origin/master (#215, #216) in staging/second-branch gemergt
+- 27.11.2026 Wave 10: #212 Shell → Electron (Tauri/Browser-Starter verworfen)
+- 27.11.2026 Wave 10: #212 Cloud → nur eigener LaTeX-IDE-Server, keine Fremd-Clouds
+- 27.11.2026 Wave 10: #212 Sync → global an, pro Projekt Opt-out „nur lokal“
+- 27.11.2026 Wave 10: #212 Fenster schließen → erst alle lokalen Änderungen fertig zum Server syncen, dann Programm vollständig beenden (kein Tray); fremde Änderungen erst beim nächsten Start mit Verbindung; ohne Verbindung beim Start Hinweis „möglicherweise nicht auf dem neusten Stand – keine Verbindung zum Server {URL}“
+- 27.11.2026 Wave 10: #212 Update-Quelle ohne Server → GitHub-Releases; mit Server weiter `/api/desktop/release`
+- 27.11.2026 Wave 10: #212 .tex-Dateizuordnung / „Öffnen mit LaTeX-IDE“ einbauen
+- 27.11.2026 Wave 10: #126 entsperrt (#125, #111–#116 zu) → nur Phasen 1+2 (Remote-HTTP-MCP-Client, Default „Immer fragen“, Rechte pro Tool, Import Claude-Desktop-Config); stdio + Server-Proxy später
 
 ## Wave 1 (18.11.2026)
 | Issue | Prio | Agent | Status |
